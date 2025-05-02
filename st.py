@@ -37,13 +37,13 @@ def prettydate(d):
     else:
         return '{} hours ago'.format(int(s/3600))
 
+from dateutil import parser
+from dateutil.tz import gettz
 
-def displayStreamlitDateTime(datetime, draw=None):
+def displayStreamlitDateTime(datetime, container=None):
     """ accepts a string or datetime object, tries its best at recognizing/parsing it, and displays it in Streamlit format."""
-
+    draw = container
     if isinstance(datetime,str):
-        from dateutil import parser
-        from dateutil.tz import gettz
         tzinfos = {"PDT": gettz("America/Vancouver")    ,
                    "PST": gettz("America/Vancouver"),
         }
@@ -52,10 +52,10 @@ def displayStreamlitDateTime(datetime, draw=None):
         datetime_van = datetime_van
 
     else:
-        datetime_van = datetime.replace(tzinfo=pytz.timezone('America/Vancouver'))
+        datetime_van = datetime.replace(tzinfo=gettz('America/Vancouver'))
 
     draw.title(prettydate(datetime_van))
-    draw.header(datetime_van)
+    draw.text(datetime_van)
 
 # Selector
 
@@ -119,7 +119,9 @@ def displayPointAtkinsonTides(container=None):
         # Convert time to Vancouver timezone
         vancouver_tz = pytz.timezone('America/Vancouver')
         current_time = datetime.now(vancouver_tz)  # This will work with the new import
-        draw.write(f"Current time: {current_time.strftime('%Y-%m-%d %H:%M %Z')}")
+
+        displayStreamlitDateTime(current_time, container=draw)
+        #draw.write(f"Current time: {current_time.strftime('%Y-%m-%d %H:%M %Z')}")
 
         # Display the tide table
         draw.dataframe(tide_data)
@@ -146,6 +148,9 @@ def displayPointAtkinsonTides(container=None):
 
 
 def parseJerichoWindHistory(container = None):
+
+    container.subheader("Jericho Beach Wind History")
+
     if container:
         draw = container
     else:
@@ -218,7 +223,7 @@ def parseJerichoWindHistory(container = None):
     wind_speed = df.iloc[-1, 1]  # -1 for last row, 1 for second column (0-based index)
     temp_out = df.iloc[-1, 1]  # -1 for last row, 1 for second column (0-based index)
 
-    col1, col2, col3, col4, col5 = st.columns(5)
+    col1, col2, col3, col4, col5 = draw.columns(5)
     displayWindWarningIfNeeded(df.iloc[-1, 9])
     col1.metric(label="Wind Speed",     value=df.iloc[-1, 6])
     col2.metric(label="Wind High",      value=df.iloc[-1, 9])
@@ -307,7 +312,7 @@ def refreshBuoy(buoy = '46146', title = 'Halibut Bank - 46146', container = None
         #data_waveperiod = row.parent.find_all('td')[2]  # last cell in the row
         #data_watertemp = row.parent.find_all('td')[5]  # last cell in the row
 
-    draw.header('Weather Data for '+ title + ' - ' + buoy)
+    draw.subheader('Weather Data for '+ title + ' - ' + buoy)
 
     displayStreamlitDateTime(time, draw)
 
@@ -317,7 +322,7 @@ def refreshBuoy(buoy = '46146', title = 'Halibut Bank - 46146', container = None
     if winds:
         highest_wind = int(winds[0])
 
-    displayWindWarningIfNeeded(highest_wind)
+    displayWindWarningIfNeeded(highest_wind, container=draw)
 
     waves = re.findall(r'\d+', data_wave_height)
     highest_wave = 0
