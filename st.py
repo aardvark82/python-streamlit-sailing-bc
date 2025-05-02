@@ -1,6 +1,8 @@
 #  > pip install -r requirements.txt
 #  > python -m streamlit run st.py
-#  http://localhost:8501/
+# http://localhost:8501/
+# http://python-app-sailing-bc-nckqtfynerhhf26ujtt5u6
+
 
 import streamlit as st
 import pandas as pd
@@ -11,9 +13,8 @@ import pytz
 from datetime import datetime
 
 def prettydate(d):
-    d = d.replace(tzinfo=pytz.timezone('America/Vancouver'))
 
-    now_vancouver = datetime.datetime.now(pytz.timezone('America/Vancouver'))  # UTC+7
+    now_vancouver = datetime.now(pytz.timezone('America/Vancouver'))  # UTC+7
     diff = now_vancouver - d
 
     s = diff.seconds
@@ -37,41 +38,60 @@ def prettydate(d):
         return '{} hours ago'.format(int(s/3600))
 
 
-def displayStreamlitDateTime(datetime):
+def displayStreamlitDateTime(datetime, draw=None):
     """ accepts a string or datetime object, tries its best at recognizing/parsing it, and displays it in Streamlit format."""
 
     if isinstance(datetime,str):
-        datetime = datetime.replace('T', ' ')
-        datetime = datetime.replace('Z', '')
         from dateutil import parser
         from dateutil.tz import gettz
-        tzinfos = {"PDT": gettz("America/Los_Angeles")}
-        datetime = parser.parse(datetime, tzinfos=tzinfos)
+        tzinfos = {"PDT": gettz("America/Vancouver")    ,
+                   "PST": gettz("America/Vancouver"),
+        }
+        print("Parsing time ", datetime)
+        datetime_van = parser.parse(datetime, tzinfos=tzinfos)
+        datetime_van = datetime_van
 
-    datetime_van = datetime.replace(tzinfo=pytz.timezone('America/Vancouver'))
+    else:
+        datetime_van = datetime.replace(tzinfo=pytz.timezone('America/Vancouver'))
 
-    st.title(prettydate(datetime_van))
-    st.header(datetime_van)
+    draw.title(prettydate(datetime_van))
+    draw.header(datetime_van)
 
 # Selector
 
 def headerbox():
-    col1, col2, col3, col4, col5 = st.columns(5)
-    col1.button('Halibut Bank', on_click=refresh_all, args=('46146','Halibut Bank'))
-    col2.button('Point Atkinson', on_click=refresh_all, args=('WSB','Point Atkinson'))
-    col3.button('Pam Rocks', on_click=refresh_all, args=('WAS','Pam Rocks'))
-    col4.button('Jericho Beach', on_click=parseJerichoWindHistory,)
-    displayPointAtkinsonTides()
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Tides", "Jericho Beach", "Halibut Bank", "Point Atkinson", "Pam Rocks"])
+    displayPointAtkinsonTides(container=tab1)
+    parseJerichoWindHistory(container=tab2)
+    refreshBuoy('46146','Halibut Bank', container=tab3)
+    refreshBuoy('WSB', 'Point Atkinson', container=tab4)
+    refreshBuoy('WAS', 'Pam Rocks', container=tab5)
+#    col1, col2, col3, col4, col5 = st.columns(5)
+    #col1.button('Halibut Bank',     on_click=refresh_buoys, args=('46146','Halibut Bank'))
+    #col2.button('Point Atkinson',   on_click=refresh_buoys, args=('WSB','Point Atkinson'))
+    #col3.button('Pam Rocks',        on_click=refresh_buoys, args=('WAS','Pam Rocks'))
+    #col4.button('Jericho Beach',    on_click=parseJerichoWindHistory,)
+    #col4.button('Tides',            on_click=displayPointAtkinsonTides, )
+    #displayPointAtkinsonTides()
 
-def displayWindWarningIfNeeded(wind_speed):
+def displayWindWarningIfNeeded(wind_speed, container=None):
+    """ above 9 knots """
+    if container:
+        draw = container
+    else:
+        draw = st
     warning_wind = (wind_speed>9)
-    if (warning_wind):
-        st.badge("Wind warning", color="orange")
+    if warning_wind:
+        draw.badge("Wind warning", color="orange")
 
 
-def fetch_point_atkinson_tides():
+def fetchTidesPointAtkinson(container=None):
     # Point Atkinson station ID is 7795
     url = "https://www.tide-forecast.com/locations/Point-Atkinson-British-Columbia/tides/latest"
+    if container:
+        draw = container
+    else:
+        draw = st
 
     try:
         # Using pandas to read the HTML table from the website
@@ -80,48 +100,56 @@ def fetch_point_atkinson_tides():
         tide_df = tables[0]
         return tide_df
     except Exception as e:
-        st.error(f"Error fetching tide data: {str(e)}")
+        draw.error(f"Error fetching tide data: {str(e)}")
         return None
 
-def displayPointAtkinsonTides():
+def displayPointAtkinsonTides(container=None):
+    if container:
+        draw = container
+    else:
+        draw = st
+
     # Set up the Streamlit page
-    st.subheader("Tide Information, Vancouver, BC, Point Atkinson")
+    draw.subheader("Tide Information, Vancouver, BC, Point Atkinson")
 
     # Fetch the tide data
-    tide_data = fetch_point_atkinson_tides()
+    tide_data = fetchTidesPointAtkinson()
 
     if tide_data is not None:
         # Convert time to Vancouver timezone
         vancouver_tz = pytz.timezone('America/Vancouver')
         current_time = datetime.now(vancouver_tz)  # This will work with the new import
-        st.write(f"Current time: {current_time.strftime('%Y-%m-%d %H:%M %Z')}")
+        draw.write(f"Current time: {current_time.strftime('%Y-%m-%d %H:%M %Z')}")
 
         # Display the tide table
-        st.dataframe(tide_data)
+        draw.dataframe(tide_data)
 
         # Get the next tide event
         try:
             next_tide = tide_data.iloc[0]
-            st.metric(
+            draw.metric(
                 label="Next Tide",
                 value=f"{next_tide['Height']}",
                 delta=f"{next_tide['Type']} at {next_tide['Time']}"
             )
         except:
-            st.warning("Could not determine next tide event")
+            draw.warning("Could not determine next tide event")
 
         # Create a line chart of tide heights
         try:
-            st.line_chart(tide_data['Height'])
+            draw.line_chart(tide_data['Height'])
         except:
-            st.warning("Could not create tide height chart")
+            draw.warning("Could not create tide height chart")
 
     else:
-        st.error("Unable to fetch tide data. Please try again later.")
+        draw.error("Unable to fetch tide data. Please try again later.")
 
 
-def parseJerichoWindHistory():
-    headerbox()
+def parseJerichoWindHistory(container = None):
+    if container:
+        draw = container
+    else:
+        draw = st
     # https://jsca.bc.ca/main/downld02.txt
     url = "https://jsca.bc.ca/main/downld02.txt"
     res = requests.get(url)
@@ -183,7 +211,7 @@ def parseJerichoWindHistory():
 
 #display time
     datetime_last_measurement = df.iloc[-1, 0]  # -1 for last row, 1 for second column (0-based index)
-    displayStreamlitDateTime(datetime_last_measurement)
+    displayStreamlitDateTime(datetime_last_measurement, draw)
 
     # display last values
     temp_out = df.iloc[-1, 1]  # -1 for last row, 1 for second column (0-based index)
@@ -201,17 +229,17 @@ def parseJerichoWindHistory():
     #display graph of last 6 hours (12 entries)
     #display graph of last 6 hours (12 entries)
 
-    st.line_chart(
+    draw.line_chart(
     data=df.tail(12).set_index(df.columns[0])[
         [df.columns[6], df.columns[9], ]
     ]
     )
 
-    st.dataframe(df.tail(12))
+    draw.dataframe(df.tail(12))
 
 
 
-def headerbox_menu_deprecated():
+def headerboxMenuDeprecated():
     with st.popover("Select a Buoy"):
         c = st.container(border = True)
 
@@ -228,10 +256,13 @@ def headerbox_menu_deprecated():
         if buoy == 'WAS':
             title = 'Pam Rocks'
 
-    refresh_all(buoy = buoy, title = title)
+    refreshBuoy(buoy = buoy, title = title)
 
-def refresh_all(buoy = '46146', title = 'Halibut Bank - 46146'):
-    headerbox()
+def refreshBuoy(buoy = '46146', title = 'Halibut Bank - 46146', container = None):
+    if container:
+        draw = container
+    else:
+        draw = st
     url = f'https://www.weather.gc.ca/marine/weatherConditions-currentConditions_e.html?mapID=02&siteID=14305&stationID={buoy}'
     res = requests.get(url)
 
@@ -276,9 +307,9 @@ def refresh_all(buoy = '46146', title = 'Halibut Bank - 46146'):
         #data_waveperiod = row.parent.find_all('td')[2]  # last cell in the row
         #data_watertemp = row.parent.find_all('td')[5]  # last cell in the row
 
-    st.header('Weather Data for '+ title + ' - ' + buoy)
+    draw.header('Weather Data for '+ title + ' - ' + buoy)
 
-    displayStreamlitDateTime(time)
+    displayStreamlitDateTime(time, draw)
 
     import re
     winds = re.findall(r'\d+', data_wind)
@@ -295,10 +326,10 @@ def refresh_all(buoy = '46146', title = 'Halibut Bank - 46146'):
     warning_wave = (highest_wave>=1)
 
     if (warning_wave):
-        st.badge("Wave warning", color="orange")
+        draw.badge("Wave warning", color="orange")
 
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3 = draw.columns(3)
     col1.metric("Wind", data_wind )
     col2.metric("Wave Height", data_wave_height)
     col3.metric("Air Temp", data_airtemp)
@@ -306,7 +337,7 @@ def refresh_all(buoy = '46146', title = 'Halibut Bank - 46146'):
     col2.metric("Wave Period", data_waveperiod)
     col3.metric("Pressure", data_pressure)
 
-    st.write(url)
+    draw.write(url)
     # st.code(soup) # debug HTML
 
 
@@ -327,6 +358,6 @@ def refresh_all(buoy = '46146', title = 'Halibut Bank - 46146'):
             'longitude': [-123.3]
         })
     ## Create a map with the data
-    st.map(data, zoom=10)
+    draw.map(data, zoom=10)
 
 headerbox()
