@@ -317,7 +317,6 @@ def create_natural_tide_chart(tide_df, container=None):
     )
 
 
-
     # Show the plot in Streamlit
     draw.plotly_chart(fig, use_container_width=True)
 
@@ -372,6 +371,7 @@ def create_natural_tide_chart(tide_df, container=None):
             "No data available"
         )
 
+    displayTideTable(tide_df=tide_df, container=draw)
 
 # Modify your displayPointAtkinsonTides function to use the new visualization
 def displayPointAtkinsonTides(container=None):
