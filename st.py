@@ -5,16 +5,18 @@
 
 
 import streamlit as st
-import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 import pytz
+import numpy as np
+import pandas as pd
 
 from datetime import datetime
+import pytz
 
 def prettydate(d):
 
-    now_vancouver = datetime.now(pytz.timezone('America/Vancouver'))  # UTC+7
+    now_vancouver = datetime.now(pytz.timezone('America/Vancouver'))
     diff = now_vancouver - d
 
     s = diff.seconds
@@ -103,7 +105,281 @@ def fetchTidesPointAtkinson(container=None):
         draw.error(f"Error fetching tide data: {str(e)}")
         return None
 
+
+def create_natural_tide_chart(tide_df, container=None):
+    if container:
+        draw = container
+    else:
+        draw = st
+
+#### Time cleaning
+
+    #Ah, I see the issue. The date string format from tide-forecast.com is in a non-standard format. Let's fix the datetime parsing:
+    # Convert time strings to datetime objects with proper parsing
+    def parse_tide_datetime(time_str):
+        try:
+            if isinstance(time_str, str):  # Check if it's a string
+                # Example format: "4:20 AM(Fri 02 May)"
+                if '(' in time_str:
+                    time_part, date_part = time_str.split('(')
+                    date_part = date_part.rstrip(')')
+                    # Combine in the correct order for parsing
+                    datetime_str = f"{time_part.strip()} {date_part}"
+                    # Add current year since it's missing from the input
+                    current_year = datetime.now().year
+                    datetime_str = f"{datetime_str} {current_year}"
+
+                    # Parse with the exact format matching the input
+                    vancouver_tz = pytz.timezone('America/Vancouver')
+                    dt = pd.to_datetime(datetime_str, format="%I:%M %p %a %d %b %Y")
+                    if dt.tz is None:
+                        dt =  dt.tz_localize(vancouver_tz)
+                    return dt
+                else:
+                    # Handle other formats if needed
+                    vancouver_tz = pytz.timezone('America/Vancouver')
+                    dt = pd.to_datetime(time_str)
+                    if dt.tz is None:
+                        return dt.tz_localize(vancouver_tz)
+                    return dt
+        except (ValueError, AttributeError) as e:
+            print(f"Error parsing datetime for value: {time_str}")
+            return pd.NaT  # Return NaT (Not a Time) for any parsing errors
+        return pd.NaT  # Return NaT for non-string inputs
+
+
+    # Cleanup columns
+    print("----------------------------------------------------------------------------")
+    print("ALL TIDES")
+    print("----------------------------------------------------------------------------")
+    print(tide_df)
+
+    print("Columns in tide_df:", tide_df.columns)
+    # The datetime is already in the Time column, so we'll use that directly
+    # First convert to datetime
+    tide_df = tide_df.rename(columns={'Time (PDT)& Date': 'datetime'})
+
+    tide_df['datetime'] = tide_df['datetime'].apply(parse_tide_datetime)
+    print("----------------------------------------------------------------------------")
+    print("ALL TIDES CLEAN TIME")
+    print("----------------------------------------------------------------------------")
+    print(tide_df)
+
+#### Height cleaning
+    # Clean the height data - remove any 'm' or other units if present
+    # Debug: Print the data types and check for any non-numeric values
+    print("Height column data:", tide_df['Height'])
+
+    def extract_meters(height_str):
+        try:
+            # Extract the number before 'm'
+            meters = float(height_str.split('m')[0].strip())
+            return meters
+        except (ValueError, AttributeError) as e:
+            print(f"Error parsing height from value: {height_str}")
+            return None
+
+    tide_df['Height'] = tide_df['Height'].astype(str).apply(extract_meters)
+
+    if tide_df['Height'].isnull().any():
+        # Optionally, report or handle NAs here
+        # For now, let's forward-fill them (or use .dropna())
+        tide_df['Height'] = tide_df['Height'].fillna(method='ffill')
+    print("----------------------------------------------------------------------------")
+    print("ALL TIDES CLEAN HEIGHT")
+    print("----------------------------------------------------------------------------")
+    print(tide_df)
+
+### SMOOTH INTERPOLATION
+
+    # Create smooth interpolation for better visualization
+    # Resample to 15-minute intervals
+    min_time = tide_df['datetime'].min()
+    max_time = tide_df['datetime'].max()
+
+    if pd.isna(min_time) or pd.isna(max_time):
+        draw.error("Invalid time range in tide data")
+        return
+
+    # Create timezone-aware date range
+    full_index = pd.date_range(
+        start=min_time,
+        end=max_time,
+        freq='15min'
+    )
+
+    # Make the index timezone aware if it isn't already
+    vancouver_tz = pytz.timezone('America/Vancouver')
+    if full_index.tz is None:
+        full_index = full_index.tz_localize(vancouver_tz)
+
+    # Create interpolated series
+    tide_interpolated = pd.DataFrame(index=full_index)
+
+    # Convert to timestamps for interpolation
+    x_timestamps = tide_df['datetime'].astype(np.int64) // 10 ** 9
+    x_new_timestamps = full_index.astype(np.int64) // 10 ** 9
+
+    # Perform interpolation
+    tide_interpolated['Height'] = np.interp(
+        x=x_new_timestamps,
+        xp=x_timestamps,
+        fp=tide_df['Height'].values
+    )
+    print("----------------------------------------------------------------------------")
+    print("tide_interpolated")
+    print("----------------------------------------------------------------------------")
+    print(tide_interpolated)
+
+    # Create the visualization
+    draw.subheader("🌊 Point Atkinson Tide Chart")
+
+    # Use Plotly for better interactivity
+    import plotly.graph_objects as go
+
+    fig = go.Figure()
+
+    # Add the smooth tide line
+    fig.add_trace(go.Scatter(
+        x=tide_interpolated.index,
+        y=tide_interpolated['Height'],
+        name='Tide Level',
+        line=dict(color='#2E86C1', width=3),
+        fill='tozeroy',  # Fill to zero
+        fillcolor='rgba(46, 134, 193, 0.2)'  # Light blue fill
+    ))
+
+    # Add actual data points
+    fig.add_trace(go.Scatter(
+        x=tide_df['datetime'],
+        y=tide_df['Height'],
+        mode='markers',
+        name='Measured Points',
+        marker=dict(
+            size=8,
+            color='#1A5276',
+            symbol='circle'
+        )
+    ))
+
+    # Customize the layout
+    fig.update_layout(
+        title={
+            'text': 'Tide Levels at Point Atkinson',
+            'y': 0.95,
+            'x': 0.5,
+            'xanchor': 'center',
+            'yanchor': 'top'
+        },
+        xaxis_title="Time",
+        yaxis_title="Height (meters)",
+        hovermode='x unified',
+        plot_bgcolor='white',
+        paper_bgcolor='white',
+        xaxis=dict(
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='rgba(128,128,128,0.2)',
+            zeroline=False,
+        ),
+        yaxis=dict(
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='rgba(128,128,128,0.2)',
+            zeroline=True,
+            zerolinewidth=2,
+            zerolinecolor='rgba(128,128,128,0.5)'
+        )
+    )
+
+    # Add current time marker
+    vancouver_tz = pytz.timezone('America/Vancouver')
+    current_time = datetime.now(vancouver_tz)
+    current_time_ts = current_time.timestamp() * 1000  # multiply by 1000 for milliseconds
+
+    fig.add_vline(
+        x=current_time_ts,
+        line_width=2,
+        line_dash="dash",
+        line_color="red",
+        annotation_text="Current Time",
+        annotation_position="top right"
+    )
+
+
+
+    # Show the plot in Streamlit
+    draw.plotly_chart(fig, use_container_width=True)
+
+    # Add tide statistics
+    col1, col2, col3 = draw.columns(3)
+
+    current_height = np.interp(
+        current_time.timestamp(),
+        tide_interpolated.index.astype(np.int64) // 10 ** 9,
+        tide_interpolated['Height']
+    )
+
+    col1.metric(
+        "Current Tide Level",
+        f"{current_height:.2f}m",
+    )
+
+    # Check if we have the tide data columns before trying to display next tide info
+    if 'datetime' in tide_df.columns:
+        try:
+            next_tide = tide_df[tide_df['datetime'] > current_time].iloc[0]
+            time_diff = (next_tide['datetime'] - current_time)
+
+            # Use Height only since we don't have Type information
+            col2.metric(
+                "Next Tide",
+                f"{next_tide['Height']}m",
+                f"in {time_diff.total_seconds() // 3600:.0f}h {(time_diff.total_seconds() // 60 % 60):.0f}m"
+            )
+        except (IndexError, KeyError):
+            col2.metric(
+                "Next Tide",
+                "No data available",
+                ""
+            )
+    else:
+        col2.metric(
+            "Next Tide",
+            "No data available",
+            ""
+        )
+
+    if 'Height' in tide_df.columns:
+        daily_range = tide_df['Height'].max() - tide_df['Height'].min()
+        col3.metric(
+            "Daily Tide Range",
+            f"{daily_range:.2f}m"
+        )
+    else:
+        col3.metric(
+            "Daily Tide Range",
+            "No data available"
+        )
+
+
+# Modify your displayPointAtkinsonTides function to use the new visualization
 def displayPointAtkinsonTides(container=None):
+    if container:
+        draw = container
+    else:
+        draw = st
+
+    # Fetch the tide data
+    tide_data = fetchTidesPointAtkinson()
+
+    if tide_data is not None:
+        # Create the natural tide chart
+        create_natural_tide_chart(tide_data, container)
+    else:
+        draw.error("Unable to fetch tide data. Please try again later.")
+
+def displayPointAtkinsonTidesOldUgly(container=None):
     if container:
         draw = container
     else:
@@ -283,7 +559,7 @@ def refreshBuoy(buoy = '46146', title = 'Halibut Bank - 46146', container = None
     #(table.tbody.find_all('tr'))
     for row in table.tbody.find_all('tr'):
         columns = row.find_all('td')
-        print('COLUMNS LENGTH:', len(columns))
+        # print('COLUMNS LENGTH:', len(columns))
 
 
     # --- debug end ---
