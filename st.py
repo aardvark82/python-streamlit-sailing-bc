@@ -88,24 +88,30 @@ def displayWindWarningIfNeeded(wind_speed, container=None):
     if warning_wind:
         draw.badge("Wind warning", color="orange")
 
+from fetch_tides import fetchTidesPointAtkinson
 
-def fetchTidesPointAtkinson(container=None):
-    # Point Atkinson station ID is 7795
-    url = "https://www.tide-forecast.com/locations/Point-Atkinson-British-Columbia/tides/latest"
-    if container:
-        draw = container
-    else:
-        draw = st
+
+def parse_tide_datetime(time_str):
+    """Parse datetime string from tide data"""
+    import pandas as pd
+    from datetime import datetime
+    import pytz
 
     try:
-        # Using pandas to read the HTML table from the website
-        tables = pd.read_html(url)
-        # Usually the tide table is the first table on the page
-        tide_df = tables[0]
-        return tide_df
+        # Parse the datetime string
+        dt = pd.to_datetime(time_str)
+
+        # Make sure it's timezone aware and convert to Vancouver time
+        if dt.tzinfo is None:
+            dt = dt.tz_localize('UTC')
+
+        vancouver_tz = pytz.timezone('America/Vancouver')
+        dt = dt.tz_convert(vancouver_tz)
+
+        return dt
     except Exception as e:
-        draw.error(f"Error fetching tide data: {str(e)}")
-        return None
+        print(f"Error parsing datetime: {e}")
+        return pd.NaT
 
 
 def create_natural_tide_chart(tide_df, container=None):
@@ -115,40 +121,6 @@ def create_natural_tide_chart(tide_df, container=None):
         draw = st
 
 #### Time cleaning
-
-    #Ah, I see the issue. The date string format from tide-forecast.com is in a non-standard format. Let's fix the datetime parsing:
-    # Convert time strings to datetime objects with proper parsing
-    def parse_tide_datetime(time_str):
-        try:
-            if isinstance(time_str, str):  # Check if it's a string
-                # Example format: "4:20 AM(Fri 02 May)"
-                if '(' in time_str:
-                    time_part, date_part = time_str.split('(')
-                    date_part = date_part.rstrip(')')
-                    # Combine in the correct order for parsing
-                    datetime_str = f"{time_part.strip()} {date_part}"
-                    # Add current year since it's missing from the input
-                    current_year = datetime.now().year
-                    datetime_str = f"{datetime_str} {current_year}"
-
-                    # Parse with the exact format matching the input
-                    vancouver_tz = pytz.timezone('America/Vancouver')
-                    dt = pd.to_datetime(datetime_str, format="%I:%M %p %a %d %b %Y")
-                    if dt.tz is None:
-                        dt =  dt.tz_localize(vancouver_tz)
-                    return dt
-                else:
-                    # Handle other formats if needed
-                    vancouver_tz = pytz.timezone('America/Vancouver')
-                    dt = pd.to_datetime(time_str)
-                    if dt.tz is None:
-                        return dt.tz_localize(vancouver_tz)
-                    return dt
-        except (ValueError, AttributeError) as e:
-            print(f"Error parsing datetime for value: {time_str}")
-            return pd.NaT  # Return NaT (Not a Time) for any parsing errors
-        return pd.NaT  # Return NaT for non-string inputs
-
 
     # Cleanup columns
     print("----------------------------------------------------------------------------")
@@ -247,6 +219,30 @@ def create_natural_tide_chart(tide_df, container=None):
 
     # Create the visualization
     draw.subheader("🌊 Point Atkinson Tide Chart")
+
+    # Display tide table at the top
+    if not tide_df.empty:
+        # Format the dataframe for display
+        display_df = tide_df.copy()
+        display_df['Time'] = display_df['datetime'].dt.strftime('%I:%M %p')
+        display_df['Date'] = display_df['datetime'].dt.strftime('%A, %b %d')
+        display_df['Height (m)'] = display_df['Height'].round(2)
+
+        # Select and order columns for display
+        table_df = display_df[['Date', 'Time', 'Height (m)']].copy()
+
+        # Style the dataframe
+        styled_df = table_df.style.set_properties(**{
+            'background-color': 'white',
+            'color': 'black',
+            'border-color': '#e1e4e8'
+        }).hide(axis='index')
+
+        # Display the table
+        draw.dataframe(styled_df, use_container_width=True)
+
+        # Add some space after the table
+        draw.markdown("---")
 
     # Use Plotly for better interactivity
     import plotly.graph_objects as go
@@ -385,7 +381,7 @@ def displayPointAtkinsonTides(container=None):
         draw = st
 
     # Fetch the tide data
-    tide_data = fetchTidesPointAtkinson()
+    tide_data = fetchTidesPointAtkinson(draw)
 
     if tide_data is not None:
         # Create the natural tide chart
