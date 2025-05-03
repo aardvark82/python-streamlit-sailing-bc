@@ -22,7 +22,8 @@ def fetchTidesPointAtkinson(_container=None):
         if MAKE_LIVE_REQUESTS:
             # Stormglass API configuration
             base_url = "https://api.stormglass.io/v2/tide/extremes/point"
-            api_key = "4b108f2a-27f4-11f0-88e2-0242ac130003-4b109010-27f4-11f0-88e2-0242ac130003"
+            api_key = "ff4b3118-2856-11f0-8567-0242ac130003-ff4b31b8-2856-11f0-8567-0242ac130003" # ackermans+test1@gmail.com
+                      # "4b108f2a-27f4-11f0-88e2-0242ac130003-4b109010-27f4-11f0-88e2-0242ac130003" ackermans@gmail.com
             
             vancouver_tz = pytz.timezone('America/Vancouver')
             now = datetime.now(vancouver_tz)
@@ -34,8 +35,8 @@ def fetchTidesPointAtkinson(_container=None):
             params = {
                 'lat': lat,
                 'lng': lon,
-                'start': start_date.strftime('%Y-%m-%dT%H:%M:%S+00:00'),
-                'end': end_date.strftime('%Y-%m-%dT%H:%M:%S+00:00')
+                'start': start_date.strftime('%Y-%m-%d'),
+                'end': end_date.strftime('%Y-%m-%d')
             }
 
             headers = {
@@ -47,6 +48,18 @@ def fetchTidesPointAtkinson(_container=None):
             if response.status_code == 402:
                 error_msg = ("API quota exceeded. Please wait for quota reset or check your subscription. "
                              "Using cached data if available.")
+                if container:
+                    container.warning(error_msg)
+                return None
+
+            if response.status_code == 500:
+                error_msg = ("Internal Server Error – We had a problem with our server. Try again later..")
+                if container:
+                    container.warning(error_msg)
+                return None
+
+            if response.status_code == 503:
+                error_msg = ("Service Unavailable – We’re temporarily offline for maintenance. Please try again later.")
                 if container:
                     container.warning(error_msg)
                 return None
