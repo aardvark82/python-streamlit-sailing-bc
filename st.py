@@ -91,6 +91,40 @@ def displayWindWarningIfNeeded(wind_speed, container=None):
 from fetch_tides import fetchTidesPointAtkinson
 
 
+def displayTideTable(tide_df, container=None):
+
+    if container:
+        draw = container
+    else:
+        draw = st
+
+    draw.markdown("---")
+
+    # Display tide table at the top
+    if not tide_df.empty:
+        # Format the dataframe for display
+        display_df = tide_df.copy()
+        display_df['Time'] = display_df['datetime'].dt.strftime('%I:%M %p')
+        display_df['Date'] = display_df['datetime'].dt.strftime('%A, %b %d')
+        display_df['Height (m)'] = display_df['Height'].round(2)
+
+        # Select and order columns for display
+        table_df = display_df[['Date', 'Time', 'Height (m)']].copy()
+
+        # Style the dataframe
+        styled_df = table_df.style.set_properties(**{
+            'background-color': 'white',
+            'color': 'black',
+            'border-color': '#e1e4e8'
+        }).hide(axis='index')
+
+        # Display the table
+        draw.dataframe(styled_df, use_container_width=True)
+
+        # Add some space after the table
+        draw.markdown("---")
+
+
 def parse_tide_datetime(time_str):
     """Parse datetime string from tide data"""
     import pandas as pd
@@ -220,29 +254,6 @@ def create_natural_tide_chart(tide_df, container=None):
     # Create the visualization
     draw.subheader("🌊 Point Atkinson Tide Chart")
 
-    # Display tide table at the top
-    if not tide_df.empty:
-        # Format the dataframe for display
-        display_df = tide_df.copy()
-        display_df['Time'] = display_df['datetime'].dt.strftime('%I:%M %p')
-        display_df['Date'] = display_df['datetime'].dt.strftime('%A, %b %d')
-        display_df['Height (m)'] = display_df['Height'].round(2)
-
-        # Select and order columns for display
-        table_df = display_df[['Date', 'Time', 'Height (m)']].copy()
-
-        # Style the dataframe
-        styled_df = table_df.style.set_properties(**{
-            'background-color': 'white',
-            'color': 'black',
-            'border-color': '#e1e4e8'
-        }).hide(axis='index')
-
-        # Display the table
-        draw.dataframe(styled_df, use_container_width=True)
-
-        # Add some space after the table
-        draw.markdown("---")
 
     # Use Plotly for better interactivity
     import plotly.graph_objects as go
