@@ -62,7 +62,7 @@ def displayStreamlitDateTime(datetime, container=None):
 # Selector
 
 def headerbox():
-    st.badge("v3", color="blue")
+    st.badge("v4", color="blue")
 
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["Tides", "Jericho Beach", "Halibut Bank", "Point Atkinson", "Pam Rocks"])
     displayPointAtkinsonTides(container=tab1)
