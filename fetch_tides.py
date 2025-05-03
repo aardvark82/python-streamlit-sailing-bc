@@ -1,6 +1,6 @@
 API_KEY_STORMGLASS_IO = '4b108f2a-27f4-11f0-88e2-0242ac130003-4b109010-27f4-11f0-88e2-0242ac130003'
 
-MAKE_LIVE_REQUESTS = False
+MAKE_LIVE_REQUESTS = True
 
 def fetchTidesPointAtkinson(container=None):
     """Fetch tide data for Point Atkinson from Stormglass API"""
