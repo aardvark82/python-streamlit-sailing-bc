@@ -6,4 +6,6 @@ arrow
 lxml #parse tides
 plotly
 numpy
+scipy
+
 

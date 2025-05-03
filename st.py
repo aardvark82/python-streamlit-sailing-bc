@@ -210,9 +210,34 @@ def create_natural_tide_chart(tide_df, container=None):
     print("----------------------------------------------------------------------------")
     print(tide_df)
 
-### SMOOTH INTERPOLATION
+    # After creating tide_df, add interpolation:
+    from scipy.interpolate import CubicSpline
+    def create_smooth_tides(df):
+        # Convert timestamps to numbers (hours since start) for interpolation
+        times = df['datetime'].values
+        base_time = times[0]
+        # Convert numpy timedelta to hours
+        x = [(t - base_time).astype('timedelta64[s]').astype(float) / 3600 for t in times]
+        y = df['Height'].values
 
-    # Create smooth interpolation for better visualization
+        # Create more points for smooth curve
+        x_smooth = np.linspace(min(x), max(x), 200)  # 200 points for smooth curve
+        
+        # Cubic spline interpolation
+        cs = CubicSpline(x, y, bc_type='natural')  # periodic ensures smooth transition between cycles
+        y_smooth = cs(x_smooth)
+        
+        # Convert back to timestamps
+        times_smooth = [np.datetime64(base_time) + np.timedelta64(int(h * 3600), 's') for h in x_smooth]
+        
+        return pd.DataFrame({
+            'datetime': times_smooth,
+            'Height': y_smooth
+        })
+
+    # Create interpolated dataframe
+    smooth_tide_df = create_smooth_tides(tide_df)
+
     # Resample to 15-minute intervals
     min_time = tide_df['datetime'].min()
     max_time = tide_df['datetime'].max()
@@ -262,8 +287,8 @@ def create_natural_tide_chart(tide_df, container=None):
 
     # Add the smooth tide line
     fig.add_trace(go.Scatter(
-        x=tide_interpolated.index,
-        y=tide_interpolated['Height'],
+        x=smooth_tide_df['datetime'],
+        y=smooth_tide_df['Height'],
         name='Tide Level',
         line=dict(color='#2E86C1', width=3),
         fill='tozeroy',  # Fill to zero
