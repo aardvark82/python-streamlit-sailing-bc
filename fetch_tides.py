@@ -12,8 +12,8 @@ def fetchTidesPointAtkinson(container=None):
 
     try:
         # Point Atkinson coordinates
-        lat = 49.3370
-        lon = -123.2630
+        lat = 49.3304
+        lon = -123.2646
 
         if MAKE_LIVE_REQUESTS:
             # Stormglass API configuration
