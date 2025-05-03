@@ -2,13 +2,17 @@ API_KEY_STORMGLASS_IO = '4b108f2a-27f4-11f0-88e2-0242ac130003-4b109010-27f4-11f0
 
 MAKE_LIVE_REQUESTS = True
 
-def fetchTidesPointAtkinson(container=None):
+import streamlit as st
+
+@st.cache_data(ttl=14400)  # Cache for 4 hours
+def fetchTidesPointAtkinson(_container=None):
     """Fetch tide data for Point Atkinson from Stormglass API"""
     import requests
     import pandas as pd
     from datetime import datetime, timedelta
     import pytz
     import json
+    container = _container
 
     try:
         # Point Atkinson coordinates
@@ -39,7 +43,14 @@ def fetchTidesPointAtkinson(container=None):
             }
 
             response = requests.get(base_url, params=params, headers=headers, timeout=10)
-            
+
+            if response.status_code == 402:
+                error_msg = ("API quota exceeded. Please wait for quota reset or check your subscription. "
+                             "Using cached data if available.")
+                if container:
+                    container.warning(error_msg)
+                return None
+
             if response.status_code != 200:
                 error_msg = f"Failed to fetch tide data. Status code: {response.status_code}"
                 if container:
