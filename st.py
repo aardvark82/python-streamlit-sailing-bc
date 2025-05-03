@@ -344,7 +344,7 @@ def create_natural_tide_chart(tide_df, container=None):
             # Use Height only since we don't have Type information
             col2.metric(
                 "Next Tide",
-                f"{next_tide['Height']}m",
+                f"{next_tide['Height']:.2f}m",
                 f"in {time_diff.total_seconds() // 3600:.0f}h {(time_diff.total_seconds() // 60 % 60):.0f}m"
             )
         except (IndexError, KeyError):
@@ -510,7 +510,7 @@ def parseJerichoWindHistory(container = None):
     temp_out = df.iloc[-1, 1]  # -1 for last row, 1 for second column (0-based index)
 
     col1, col2, col3, col4, col5 = draw.columns(5)
-    displayWindWarningIfNeeded(df.iloc[-1, 9])
+    displayWindWarningIfNeeded(df.iloc[-1, 9], container=draw)
     col1.metric(label="Wind Speed",     value=df.iloc[-1, 6])
     col2.metric(label="Wind High",      value=df.iloc[-1, 9])
     col3.metric(label="Bar",            value=df.iloc[-1, 14])
