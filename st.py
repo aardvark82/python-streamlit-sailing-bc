@@ -183,6 +183,18 @@ def create_natural_tide_chart(tide_df, container=None):
 
     tide_df['Height'] = tide_df['Height'].astype(str).apply(extract_meters)
 
+    # After parsing heights, check if we have valid data
+    if tide_df['Height'].isnull().all():
+        draw.error("No valid height data available")
+        return
+
+    # Remove any remaining null values before interpolation
+    tide_df = tide_df.dropna(subset=['Height', 'datetime'])
+
+    if len(tide_df) < 2:
+        draw.error("Not enough valid tide data points for interpolation")
+        return
+
     if tide_df['Height'].isnull().any():
         # Optionally, report or handle NAs here
         # For now, let's forward-fill them (or use .dropna())
