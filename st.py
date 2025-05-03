@@ -213,23 +213,28 @@ def create_natural_tide_chart(tide_df, container=None):
     # After creating tide_df, add interpolation:
     from scipy.interpolate import CubicSpline
     def create_smooth_tides(df):
-        # Convert timestamps to numbers (hours since start) for interpolation
-        times = df['datetime'].values
-        base_time = times[0]
-        # Convert numpy timedelta to hours
-        x = [(t - base_time).astype('timedelta64[s]').astype(float) / 3600 for t in times]
+        # Use existing timezone-aware timestamps
+        times = df['datetime']
+        base_time = times.iloc[0]
+
+        # Convert to seconds since base_time using timestamp() method
+        x = [(t.timestamp() - base_time.timestamp()) / 3600 for t in times]
         y = df['Height'].values
 
         # Create more points for smooth curve
         x_smooth = np.linspace(min(x), max(x), 200)  # 200 points for smooth curve
-        
+
         # Cubic spline interpolation
-        cs = CubicSpline(x, y, bc_type='natural')  # periodic ensures smooth transition between cycles
+        cs = CubicSpline(x, y, bc_type='natural')
         y_smooth = cs(x_smooth)
-        
-        # Convert back to timestamps
-        times_smooth = [np.datetime64(base_time) + np.timedelta64(int(h * 3600), 's') for h in x_smooth]
-        
+
+        # Convert back to timestamps while preserving timezone
+        # Create timedelta objects and add them to the base_time
+        times_smooth = pd.Series([
+            base_time + pd.Timedelta(seconds=h * 3600)
+            for h in x_smooth
+        ])
+
         return pd.DataFrame({
             'datetime': times_smooth,
             'Height': y_smooth
@@ -272,9 +277,9 @@ def create_natural_tide_chart(tide_df, container=None):
         fp=tide_df['Height'].values
     )
     print("----------------------------------------------------------------------------")
-    print("tide_interpolated")
+    print("smooth tide_interpolated")
     print("----------------------------------------------------------------------------")
-    print(tide_interpolated)
+    print(smooth_tide_df)
 
     # Create the visualization
     draw.subheader("🌊 Point Atkinson Tide Chart")
@@ -283,7 +288,20 @@ def create_natural_tide_chart(tide_df, container=None):
     # Use Plotly for better interactivity
     import plotly.graph_objects as go
 
+    # Before creating the figure, ensure both dataframes have the same timezone
+    pacific_tz = pytz.timezone('America/Los_Angeles')
+
+
     fig = go.Figure()
+    print("----------------------------------------------------------------------------")
+    print(" tide_df BEFORE DRAW")
+    print("----------------------------------------------------------------------------")
+    print(tide_df)
+    print("----------------------------------------------------------------------------")
+    print(" smooth_tide_df BEFORE DRAW")
+    print("----------------------------------------------------------------------------")
+    print(smooth_tide_df)
+
 
     # Add the smooth tide line
     fig.add_trace(go.Scatter(
@@ -295,19 +313,28 @@ def create_natural_tide_chart(tide_df, container=None):
         fillcolor='rgba(46, 134, 193, 0.2)'  # Light blue fill
     ))
 
-    # Add actual data points
+    # Add actual data points with spaced, bold, red labels
     fig.add_trace(go.Scatter(
         x=tide_df['datetime'],
         y=tide_df['Height'],
-        mode='markers',
+        mode='markers+text',
         name='Measured Points',
+        text=[f"{t.strftime('%I:%M %p')}<br><b>{h:.2f}m</b>" for t, h in zip(tide_df['datetime'], tide_df['Height'])],
+        textposition=['top center' if i % 2 == 0 else 'bottom center'
+                      for i in range(len(tide_df))],
+        textfont=dict(
+            size=10,
+            color='#2E86C1',  # Medium-bright blue that's readable on both light and dark backgrounds
+            family='Arial Black'
+        ),
+        texttemplate='%{text}',
+        dy=20,  # 10 pixels up or down
         marker=dict(
             size=8,
             color='#1A5276',
             symbol='circle'
         )
     ))
-
     # Customize the layout
     fig.update_layout(
         title={

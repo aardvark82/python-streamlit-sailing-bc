@@ -25,7 +25,7 @@ def fetchTidesPointAtkinson(container=None):
             
             # Get 4 days before and 4 days after current time
             start_date = now - timedelta(days=1)
-            end_date = now + timedelta(days=1)
+            end_date = now + timedelta(days=2)
 
             params = {
                 'lat': lat,
@@ -75,18 +75,29 @@ def fetchTidesPointAtkinson(container=None):
                              {'height': -2.0247559154532104, 'time': '2025-05-03T23:44:00+00:00', 'type': 'low'}
                              ]
                     }
+
+
         # 'meta': {'cost': 1, 'dailyQuota': 10, 'datum': 'MSL', 'end': '2025-05-04 01:00', 'lat': 49.337, 'lng': -123.263, 'offset': 0, 'requestCount': 6, 'start': '2025-05-02 01:00', 'station': {'distance': 1, 'lat': 49.34, 'lng': -123.25, 'name': 'station', 'source': 'ticon3('}}'
 
-
+        data = {'data': [{'height': 0.5114702042385154, 'time': '2025-05-02T11:16:00+00:00', 'type': 'low'}, {'height': 0.8861352612764213, 'time': '2025-05-02T15:04:00+00:00', 'type': 'high'}, {'height': -2.339105387160864, 'time': '2025-05-02T22:49:00+00:00', 'type': 'low'}, {'height': 1.5511464556228052, 'time': '2025-05-03T06:52:00+00:00', 'type': 'high'}, {'height': 0.4471043324619499, 'time': '2025-05-03T12:40:00+00:00', 'type': 'low'}, {'height': 0.6249055747798654, 'time': '2025-05-03T15:55:00+00:00', 'type': 'high'}, {'height': -2.0247559153700725, 'time': '2025-05-03T23:44:00+00:00', 'type': 'low'}, {'height': 1.4711212002069232, 'time': '2025-05-04T07:51:00+00:00', 'type': 'high'}, {'height': 0.2401116280506163, 'time': '2025-05-04T14:23:00+00:00', 'type': 'low'}, {'height': 0.3448168313068383, 'time': '2025-05-04T17:10:00+00:00', 'type': 'high'}, {'height': -1.6944775406122297, 'time': '2025-05-05T00:43:00+00:00', 'type': 'low'}, {'height': 1.4152651862548065, 'time': '2025-05-05T08:44:00+00:00', 'type': 'high'}], 'meta': {'cost': 1, 'dailyQuota': 10, 'datum': 'MSL', 'end': '2025-05-05 09:00', 'lat': 49.337, 'lng': -123.263, 'offset': 0, 'requestCount': 10, 'start': '2025-05-02 09:00', 'station': {'distance': 1, 'lat': 49.34, 'lng': -123.25, 'name': 'station', 'source': 'ticon3'}}}
         # Convert predictions to pandas DataFrame
         predictions = []
-        for prediction in data['data'][:8]:  # Take only first 8 points
+
+        dt = None
+
+        for prediction in data['data']:  # Take only first 8 points
             dt = pd.to_datetime(prediction['time'])
             dt = dt.tz_convert('America/Vancouver')
             predictions.append({
                 'Time (PDT)& Date': dt,
                 'Height': float(prediction['height'])
             })
+
+    # correct to stormio data
+    # add +2.94m to all tides
+        for i in range(len(predictions)):
+           predictions[i]['Height'] = predictions[i]['Height'] + 2.94
+           predictions[i]['Time (PDT)& Date'] = predictions[i]['Time (PDT)& Date'] + pd.Timedelta(hours=0, minutes=18)
 
         # Create DataFrame and sort by time
         tide_df = pd.DataFrame(predictions)
