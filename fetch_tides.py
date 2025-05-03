@@ -1,6 +1,6 @@
 API_KEY_STORMGLASS_IO = '4b108f2a-27f4-11f0-88e2-0242ac130003-4b109010-27f4-11f0-88e2-0242ac130003'
 
-MAKE_LIVE_REQUESTS = True
+MAKE_LIVE_REQUESTS = False
 
 def fetchTidesPointAtkinson(container=None):
     """Fetch tide data for Point Atkinson from Stormglass API"""
@@ -47,9 +47,11 @@ def fetchTidesPointAtkinson(container=None):
                 return None
 
             data = response.json()
+            print (data)
+
         else:
             # Use the stub data when not making live requests
-            data = {
+            data1 = { # 2 days of data, 4 points per day
                 "data": [
                     {"height": 1.6281896122083954, "time": "2025-04-29T02:59:00+00:00", "type": "high"},
                     {"height": 0.09792586003904245, "time": "2025-04-29T08:16:00+00:00", "type": "low"},
@@ -61,6 +63,19 @@ def fetchTidesPointAtkinson(container=None):
                     {"height": -2.755521186344923, "time": "2025-04-30T21:11:00+00:00", "type": "low"}
                 ]
             }
+            # 2 days of data, 4 points per day
+            data = {'data': [{'height': 1.6432596903918761, 'time': '2025-05-02T05:51:00+00:00', 'type': 'high'},
+                             {'height': 0.5114702000679019, 'time': '2025-05-02T11:16:00+00:00', 'type': 'low'},
+                             {'height': 0.8861352640591091, 'time': '2025-05-02T15:04:00+00:00', 'type': 'high'},
+                             {'height': -2.339105387349193, 'time': '2025-05-02T22:49:00+00:00', 'type': 'low'},
+                             {'height': 1.551146455775455, 'time': '2025-05-03T06:52:00+00:00', 'type': 'high'},
+                             {'height': 0.4471043214497481, 'time': '2025-05-03T12:40:00+00:00', 'type': 'low'},
+                             {'height': 0.624905587275962, 'time': '2025-05-03T15:55:00+00:00', 'type': 'high'},
+                             {'height': -2.0247559154532104, 'time': '2025-05-03T23:44:00+00:00', 'type': 'low'}
+                             ]
+                    }
+        # 'meta': {'cost': 1, 'dailyQuota': 10, 'datum': 'MSL', 'end': '2025-05-04 01:00', 'lat': 49.337, 'lng': -123.263, 'offset': 0, 'requestCount': 6, 'start': '2025-05-02 01:00', 'station': {'distance': 1, 'lat': 49.34, 'lng': -123.25, 'name': 'station', 'source': 'ticon3('}}'
+
 
         # Convert predictions to pandas DataFrame
         predictions = []
