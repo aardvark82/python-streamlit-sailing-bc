@@ -2,7 +2,16 @@ API_KEY_STORMGLASS_IO = '4b108f2a-27f4-11f0-88e2-0242ac130003-4b109010-27f4-11f0
 
 MAKE_LIVE_REQUESTS = True
 
+
 import streamlit as st
+import requests
+from bs4 import BeautifulSoup
+import pytz
+import numpy as np
+import pandas as pd
+
+from datetime import datetime
+import pytz
 
 @st.cache_data(ttl=14400)  # Cache for 4 hours
 def fetchTidesPointAtkinson(_container=None):
@@ -135,3 +144,360 @@ def fetchTidesPointAtkinson(_container=None):
             container.error(error_msg)
         print(error_msg)
         return None
+
+def displayTideTable(tide_df, container=None):
+
+    if container:
+        draw = container
+    else:
+        draw = st
+
+    draw.markdown("---")
+
+    # Display tide table at the top
+    if not tide_df.empty:
+        # Format the dataframe for display
+        display_df = tide_df.copy()
+        display_df['Time'] = display_df['datetime'].dt.strftime('%I:%M %p')
+        display_df['Date'] = display_df['datetime'].dt.strftime('%A, %b %d')
+        display_df['Height (m)'] = display_df['Height'].round(2)
+
+        # Select and order columns for display
+        table_df = display_df[['Date', 'Time', 'Height (m)']].copy()
+
+        # Style the dataframe
+        styled_df = table_df.style.set_properties(**{
+            'background-color': 'white',
+            'color': 'black',
+            'border-color': '#e1e4e8'
+        }).hide(axis='index')
+
+        # Display the table
+        draw.dataframe(styled_df, use_container_width=True)
+
+        # Add some space after the table
+        draw.markdown("---")
+
+def parse_tide_datetime(time_str):
+    """Parse datetime string from tide data"""
+    import pandas as pd
+    from datetime import datetime
+    import pytz
+
+    try:
+        # Parse the datetime string
+        dt = pd.to_datetime(time_str)
+
+        # Make sure it's timezone aware and convert to Vancouver time
+        if dt.tzinfo is None:
+            dt = dt.tz_localize('UTC')
+
+        vancouver_tz = pytz.timezone('America/Vancouver')
+        dt = dt.tz_convert(vancouver_tz)
+
+        return dt
+    except Exception as e:
+        print(f"Error parsing datetime: {e}")
+        return pd.NaT
+
+def create_natural_tide_chart(tide_df, container=None):
+    if container:
+        draw = container
+    else:
+        draw = st
+
+    #### Time cleaning
+
+    # Cleanup columns
+    print("----------------------------------------------------------------------------")
+    print("ALL TIDES")
+    print("----------------------------------------------------------------------------")
+    print(tide_df)
+
+    print("Columns in tide_df:", tide_df.columns)
+    # The datetime is already in the Time column, so we'll use that directly
+    # First convert to datetime
+    tide_df = tide_df.rename(columns={'Time (PDT)& Date': 'datetime'})
+
+    tide_df['datetime'] = tide_df['datetime'].apply(parse_tide_datetime)
+    print("----------------------------------------------------------------------------")
+    print("ALL TIDES CLEAN TIME")
+    print("----------------------------------------------------------------------------")
+    print(tide_df)
+
+    #### Height cleaning
+    # Clean the height data - remove any 'm' or other units if present
+    # Debug: Print the data types and check for any non-numeric values
+    print("Height column data:", tide_df['Height'])
+
+    def extract_meters(height_str):
+        try:
+            # Extract the number before 'm'
+            meters = float(height_str.split('m')[0].strip())
+            return meters
+        except (ValueError, AttributeError) as e:
+            print(f"Error parsing height from value: {height_str}")
+            return None
+
+    tide_df['Height'] = tide_df['Height'].astype(str).apply(extract_meters)
+
+    # After parsing heights, check if we have valid data
+    if tide_df['Height'].isnull().all():
+        draw.error("No valid height data available")
+        return
+
+    # Remove any remaining null values before interpolation
+    tide_df = tide_df.dropna(subset=['Height', 'datetime'])
+
+    if len(tide_df) < 2:
+        draw.error("Not enough valid tide data points for interpolation")
+        return
+
+    if tide_df['Height'].isnull().any():
+        # Optionally, report or handle NAs here
+        # For now, let's forward-fill them (or use .dropna())
+        tide_df['Height'] = tide_df['Height'].fillna(method='ffill')
+    print("----------------------------------------------------------------------------")
+    print("ALL TIDES CLEAN HEIGHT")
+    print("----------------------------------------------------------------------------")
+    print(tide_df)
+
+    # After creating tide_df, add interpolation:
+    from scipy.interpolate import CubicSpline
+    def create_smooth_tides(df):
+        # Use existing timezone-aware timestamps
+        times = df['datetime']
+        base_time = times.iloc[0]
+
+        # Convert to seconds since base_time using timestamp() method
+        x = [(t.timestamp() - base_time.timestamp()) / 3600 for t in times]
+        y = df['Height'].values
+
+        # Create more points for smooth curve
+        x_smooth = np.linspace(min(x), max(x), 200)  # 200 points for smooth curve
+
+        # Cubic spline interpolation
+        cs = CubicSpline(x, y, bc_type='natural')
+        y_smooth = cs(x_smooth)
+
+        # Convert back to timestamps while preserving timezone
+        # Create timedelta objects and add them to the base_time
+        times_smooth = pd.Series([
+            base_time + pd.Timedelta(seconds=h * 3600)
+            for h in x_smooth
+        ])
+
+        return pd.DataFrame({
+            'datetime': times_smooth,
+            'Height': y_smooth
+        })
+
+    # Create interpolated dataframe
+    smooth_tide_df = create_smooth_tides(tide_df)
+
+    # Resample to 15-minute intervals
+    min_time = tide_df['datetime'].min()
+    max_time = tide_df['datetime'].max()
+
+    if pd.isna(min_time) or pd.isna(max_time):
+        draw.error("Invalid time range in tide data")
+        return
+
+    # Create timezone-aware date range
+    full_index = pd.date_range(
+        start=min_time,
+        end=max_time,
+        freq='15min'
+    )
+
+    # Make the index timezone aware if it isn't already
+    vancouver_tz = pytz.timezone('America/Vancouver')
+    if full_index.tz is None:
+        full_index = full_index.tz_localize(vancouver_tz)
+
+    # Create interpolated series
+    tide_interpolated = pd.DataFrame(index=full_index)
+
+    # Convert to timestamps for interpolation
+    x_timestamps = tide_df['datetime'].astype(np.int64) // 10 ** 9
+    x_new_timestamps = full_index.astype(np.int64) // 10 ** 9
+
+    # Perform interpolation
+    tide_interpolated['Height'] = np.interp(
+        x=x_new_timestamps,
+        xp=x_timestamps,
+        fp=tide_df['Height'].values
+    )
+    print("----------------------------------------------------------------------------")
+    print("smooth tide_interpolated")
+    print("----------------------------------------------------------------------------")
+    print(smooth_tide_df)
+
+    # Create the visualization
+    draw.subheader("🌊 Point Atkinson Tide Chart")
+
+    # Use Plotly for better interactivity
+    import plotly.graph_objects as go
+
+    # Before creating the figure, ensure both dataframes have the same timezone
+    pacific_tz = pytz.timezone('America/Los_Angeles')
+
+    fig = go.Figure()
+    print("----------------------------------------------------------------------------")
+    print(" tide_df BEFORE DRAW")
+    print("----------------------------------------------------------------------------")
+    print(tide_df)
+    print("----------------------------------------------------------------------------")
+    print(" smooth_tide_df BEFORE DRAW")
+    print("----------------------------------------------------------------------------")
+    print(smooth_tide_df)
+
+    # Add the smooth tide line
+    fig.add_trace(go.Scatter(
+        x=smooth_tide_df['datetime'],
+        y=smooth_tide_df['Height'],
+        name='Tide Level',
+        line=dict(color='#2E86C1', width=3),
+        fill='tozeroy',  # Fill to zero
+        fillcolor='rgba(46, 134, 193, 0.2)'  # Light blue fill
+    ))
+
+    # Add actual data points with spaced, bold, red labels
+    fig.add_trace(go.Scatter(
+        x=tide_df['datetime'],
+        y=tide_df['Height'],
+        mode='markers+text',
+        name='Measured Points',
+        text=[f"{t.strftime('%I:%M %p')}<br><b>{h:.2f}m</b>" for t, h in
+              zip(tide_df['datetime'], tide_df['Height'])],
+        textposition=['top center' if i % 2 == 0 else 'bottom center'
+                      for i in range(len(tide_df))],
+        textfont=dict(
+            size=10,
+            color='#2E86C1',  # Medium-bright blue that's readable on both light and dark backgrounds
+            family='Arial Black'
+        ),
+        texttemplate='%{text}',
+        dy=20,  # 10 pixels up or down
+        marker=dict(
+            size=8,
+            color='#1A5276',
+            symbol='circle'
+        )
+    ))
+    # Customize the layout
+    fig.update_layout(
+        title={
+            'text': 'Tide Levels at Point Atkinson',
+            'y': 0.95,
+            'x': 0.5,
+            'xanchor': 'center',
+            'yanchor': 'top'
+        },
+        xaxis_title="Time",
+        yaxis_title="Height (meters)",
+        hovermode='x unified',
+        plot_bgcolor='white',
+        paper_bgcolor='white',
+        xaxis=dict(
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='rgba(128,128,128,0.2)',
+            zeroline=False,
+        ),
+        yaxis=dict(
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='rgba(128,128,128,0.2)',
+            zeroline=True,
+            zerolinewidth=2,
+            zerolinecolor='rgba(128,128,128,0.5)'
+        )
+    )
+
+    # Add current time marker
+    vancouver_tz = pytz.timezone('America/Vancouver')
+    current_time = datetime.now(vancouver_tz)
+    current_time_ts = current_time.timestamp() * 1000  # multiply by 1000 for milliseconds
+
+    fig.add_vline(
+        x=current_time_ts,
+        line_width=2,
+        line_dash="dash",
+        line_color="red",
+        annotation_text="Current Time",
+        annotation_position="top right"
+    )
+
+    # Show the plot in Streamlit
+    draw.plotly_chart(fig, use_container_width=True)
+
+    # Add tide statistics
+    col1, col2, col3 = draw.columns(3)
+
+    current_height = np.interp(
+        current_time.timestamp(),
+        tide_interpolated.index.astype(np.int64) // 10 ** 9,
+        tide_interpolated['Height']
+    )
+
+    col1.metric(
+        "Current Tide Level",
+        f"{current_height:.2f}m",
+    )
+
+    # Check if we have the tide data columns before trying to display next tide info
+    if 'datetime' in tide_df.columns:
+        try:
+            next_tide = tide_df[tide_df['datetime'] > current_time].iloc[0]
+            time_diff = (next_tide['datetime'] - current_time)
+
+            # Use Height only since we don't have Type information
+            col2.metric(
+                "Next Tide",
+                f"{next_tide['Height']:.2f}m",
+                f"in {time_diff.total_seconds() // 3600:.0f}h {(time_diff.total_seconds() // 60 % 60):.0f}m"
+            )
+        except (IndexError, KeyError):
+            col2.metric(
+                "Next Tide",
+                "No data available",
+                ""
+            )
+    else:
+        col2.metric(
+            "Next Tide",
+            "No data available",
+            ""
+        )
+
+    if 'Height' in tide_df.columns:
+        daily_range = tide_df['Height'].max() - tide_df['Height'].min()
+        col3.metric(
+            "Daily Tide Range",
+            f"{daily_range:.2f}m"
+        )
+    else:
+        col3.metric(
+            "Daily Tide Range",
+            "No data available"
+        )
+
+    displayTideTable(tide_df=tide_df, container=draw)
+
+# Modify your displayPointAtkinsonTides function to use the new visualization
+def displayPointAtkinsonTides(container=None):
+    if container:
+        draw = container
+    else:
+        draw = st
+
+    # Fetch the tide data
+    tide_data = fetchTidesPointAtkinson(draw)
+
+    if tide_data is not None:
+        # Create the natural tide chart
+        create_natural_tide_chart(tide_data, container)
+    else:
+        draw.error("Unable to fetch tide data. Please try again later.")
+
