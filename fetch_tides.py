@@ -50,6 +50,7 @@ def fetchTidesPointAtkinson(container=None):
             print (data)
 
         else:
+            container.warning("Using stub data for tide data")
             # Use the stub data when not making live requests
             data1 = { # 2 days of data, 4 points per day
                 "data": [
