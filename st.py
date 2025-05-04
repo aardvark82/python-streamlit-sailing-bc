@@ -44,7 +44,7 @@ def displayStreamlitDateTime(datetime, container=None):
 from fetch_forecast import display_howe_sound_forecast
 
 def headerbox():
-    st.badge("v5", color="blue")
+    st.badge("v6", color="blue")
 
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "Tides",
