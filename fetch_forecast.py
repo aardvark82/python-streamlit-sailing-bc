@@ -1,17 +1,16 @@
-
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
 import pytz
 import re
+
+from streamlit import container
 from timeago import format as timeago_format
 
 import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 
-
-@st.cache_data(ttl=3600)  # Cache for 1 hour
 def fetch_howe_sound_forecast():
     url = "https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=06400"
 
@@ -21,57 +20,123 @@ def fetch_howe_sound_forecast():
 
         soup = BeautifulSoup(response.content, 'html.parser')
         if not soup:
-            return None, None, None, None
+            return {
+                'error': True,
+                'message': "Could not parse the weather page content",
+                'details': "The page content was empty or invalid",
+                'suggestion': "Please try refreshing the page"
+            }
+
+        # Find the main forecast content
+        forecast_content = soup.find('div', id='forecast-content')
+        if not forecast_content:
+            return {
+                'error': True,
+                'message': "Could not find forecast information",
+                'details': "The forecast section was not found on the page",
+                'suggestion': "The website structure might have changed or the service might be temporarily down"
+            }
 
         # Find the issue date
+        issue_dt = forecast_content.find('span', class_='text-info')
         issue_date = None
-        issue_dt = soup.find('dl', class_='dl-horizontal')
         if issue_dt:
-            issue_date_elem = issue_dt.find('dt', string=re.compile('Issued'))
-            if issue_date_elem and issue_date_elem.find_next_sibling('dd'):
-                issue_date_str = issue_date_elem.find_next_sibling('dd').text.strip()
+            issue_date_str = issue_dt.text.strip()
+            match = re.match(r'Issued\s+(\d{1,2}:\d{2}\s+(?:AM|PM)\s+\w+\s+\d{2}\s+\w+\s+\d{4})', issue_date_str)
+            if match:
                 try:
-                    issue_date = datetime.strptime(issue_date_str, '%Y-%m-%d %H:%M %Z')
-                    issue_date = pytz.timezone('America/Vancouver').localize(issue_date)
-                except ValueError:
-                    pass
+                    date_str = match.group(1)
+                    # Clean up the string - remove "Issued", &nbsp; and extra spaces
+                    date_str = date_str.replace('Issued', '').replace('&nbsp;', ' ').strip()
+                    
+                    # Split and parse
+                    parts = date_str.split()
+                    if len(parts) == 6:  # Should be: ["10:30", "AM", "PDT", "03", "May", "2025"]
+                        time_part, ampm, tz, day, month, year = parts
+                        # Combine them in a format that strptime can handle
+                        formatted_date_str = f"{time_part} {ampm} {day} {month} {year}"
+                        issue_date = datetime.strptime(formatted_date_str, '%I:%M %p %d %B %Y')
+                        
+                        vancouver_tz = pytz.timezone('America/Vancouver')
+                        if issue_date.tzinfo is None:
+                            issue_date = vancouver_tz.localize(issue_date)
+                        else:
+                            issue_date = issue_date.astimezone(vancouver_tz)
 
-        # Find the forecast content
-        content_div = soup.find('div', {'class': 'row'})
-        if not content_div:
-            return None, None, None, None
+                except ValueError as e:
+                    # Instead of printing, return the error
+                    container.error = {
+                        'error': True,
+                        'message': f"Could not parse date: {date_str}",
+                        'details': str(e),
+                        'suggestion': "The date format might have changed"
+                    }
+                    return None, None, None, None
 
-        # Extract paragraphs
-        paragraphs = content_div.find_all('p')
-        if len(paragraphs) < 3:
-            return None, None, None, None
+        # Find the period of coverage (subtitle)
+        period_elem = forecast_content.find('span', class_='periodOfCoverage')
+        period_coverage = period_elem.text.strip() if period_elem else ""
 
-        # Get title, subtitle, and forecast
-        title = paragraphs[0].text.strip() if paragraphs[0] else "Howe Sound"
-        subtitle = paragraphs[1].text.strip() if paragraphs[1] else ""
+        # Find any warnings
+        warning_elem = forecast_content.find('span', class_='text-danger')
+        warning = warning_elem.text.strip() if warning_elem else ""
 
-        # Get the main forecast text
-        forecast_text = None
-        for p in paragraphs[2:]:
-            text = p.text.strip()
-            if text and not text.startswith('Issued'):
-                forecast_text = text
-                break
+        # Find the forecast text
+        forecast_elem = forecast_content.find('span', class_='textSummary')
+        forecast_text = forecast_elem.text.strip() if forecast_elem else ""
 
-        return issue_date, title, subtitle, forecast_text
+        if not forecast_text:
+            return {
+                'error': True,
+                'message': "No forecast text found",
+                'details': "The forecast text section was empty",
+                'suggestion': "Please check back later for updated forecast"
+            }
 
+        title = "Howe Sound"  # This appears to be static based on the page URL
+
+        return {
+            'error': False,
+            'issue_date': issue_date,
+            'title': title,
+            'subtitle': period_coverage,
+            'warning': warning,
+            'forecast': forecast_text
+        }
+
+    except requests.Timeout:
+        return {
+            'error': True,
+            'message': "Connection timeout",
+            'details': "The weather service is taking too long to respond",
+            'suggestion': "Please try again in a few minutes"
+        }
     except requests.RequestException as e:
-        st.error(f"Network error: {str(e)}")
-        return None, None, None, None
+        return {
+            'error': True,
+            'message': "Network error",
+            'details': str(e),
+            'suggestion': "Check your internet connection and try again"
+        }
     except Exception as e:
-        st.error(f"Error fetching Howe Sound forecast: {str(e)}")
-        return None, None, None, None
+        return {
+            'error': True,
+            'message': "Unexpected error",
+            'details': str(e),
+            'suggestion': "Please try again later or report this issue"
+        }
+
+
 
 def display_howe_sound_forecast(container=None):
     if container is None:
         container = st
 
-    issue_date, title, subtitle, forecast = fetch_howe_sound_forecast()
+    result = fetch_howe_sound_forecast()
+    issue_date = result['issue_date']
+    title = result['title']
+    subtitle = result['subtitle']
+    forecast = result['forecast']
 
     if issue_date:
         # Display relative and absolute dates
