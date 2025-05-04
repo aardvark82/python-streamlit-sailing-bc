@@ -14,14 +14,13 @@ from datetime import datetime
 import pytz
 
 @st.cache_data(ttl=14400)  # Cache for 4 hours
-def fetchTidesPointAtkinson(_container=None):
+def fetchTidesPointAtkinson():
     """Fetch tide data for Point Atkinson from Stormglass API"""
     import requests
     import pandas as pd
     from datetime import datetime, timedelta
     import pytz
     import json
-    container = _container
 
     try:
         # Point Atkinson coordinates
@@ -52,39 +51,12 @@ def fetchTidesPointAtkinson(_container=None):
             }
 
             response = requests.get(base_url, params=params, headers=headers, timeout=10)
-
-            if response.status_code == 402:
-                error_msg = ("API quota exceeded. Please wait for quota reset or check your subscription. "
-                             "Using cached data if available.")
-                if container:
-                    container.warning(error_msg)
-                return None
-
-            if response.status_code == 500:
-                error_msg = ("Internal Server Error – We had a problem with our server. Try again later..")
-                if container:
-                    container.warning(error_msg)
-                return None
-
-            if response.status_code == 503:
-                error_msg = ("Service Unavailable – We’re temporarily offline for maintenance. Please try again later.")
-                if container:
-                    container.warning(error_msg)
-                return None
-
-            if response.status_code != 200:
-                error_msg = f"Failed to fetch tide data. Status code: {response.status_code}"
-                if container:
-                    container.error(error_msg)
-                return None
-
-            data = response.json()
-            print (data)
+            return response
 
         else:
-            container.warning("Using stub data for tide data")
+            #container.warning("Using stub data for tide data")
             # Use the stub data when not making live requests
-            data1 = { # 2 days of data, 4 points per day
+            response = {  # 2 days of data, 4 points per day
                 "data": [
                     {"height": 1.6281896122083954, "time": "2025-04-29T02:59:00+00:00", "type": "high"},
                     {"height": 0.09792586003904245, "time": "2025-04-29T08:16:00+00:00", "type": "low"},
@@ -97,7 +69,7 @@ def fetchTidesPointAtkinson(_container=None):
                 ]
             }
             # 2 days of data, 4 points per day
-            data = {'data': [{'height': 1.6432596903918761, 'time': '2025-05-02T05:51:00+00:00', 'type': 'high'},
+            response = {'data': [{'height': 1.6432596903918761, 'time': '2025-05-02T05:51:00+00:00', 'type': 'high'},
                              {'height': 0.5114702000679019, 'time': '2025-05-02T11:16:00+00:00', 'type': 'low'},
                              {'height': 0.8861352640591091, 'time': '2025-05-02T15:04:00+00:00', 'type': 'high'},
                              {'height': -2.339105387349193, 'time': '2025-05-02T22:49:00+00:00', 'type': 'low'},
@@ -107,6 +79,45 @@ def fetchTidesPointAtkinson(_container=None):
                              {'height': -2.0247559154532104, 'time': '2025-05-03T23:44:00+00:00', 'type': 'low'}
                              ]
                     }
+    except Exception as e:
+        print(f"Error fetching tide data: {e}")
+        return None
+
+
+def process_tide_data(response, container=None):
+        if not response:
+            error_msg = ("No response.")
+            container.warning(error_msg)
+            return None
+
+        if response.status_code == 402:
+            error_msg = ("API quota exceeded. Please wait for quota reset or check your subscription. "
+                         "Using cached data if available.")
+            if container:
+                container.warning(error_msg)
+            return None
+
+        if response.status_code == 500:
+            error_msg = ("Internal Server Error – We had a problem with our server. Try again later..")
+            if container:
+                container.warning(error_msg)
+            return None
+
+        if response.status_code == 503:
+            error_msg = ("Service Unavailable – We’re temporarily offline for maintenance. Please try again later.")
+            if container:
+                container.warning(error_msg)
+            return None
+
+        if response.status_code != 200:
+            error_msg = f"Failed to fetch tide data. Status code: {response.status_code}"
+            if container:
+                container.error(error_msg)
+            return None
+
+        data = response.json()
+        print (data)
+
 
 
         # 'meta': {'cost': 1, 'dailyQuota': 10, 'datum': 'MSL', 'end': '2025-05-04 01:00', 'lat': 49.337, 'lng': -123.263, 'offset': 0, 'requestCount': 6, 'start': '2025-05-02 01:00', 'station': {'distance': 1, 'lat': 49.34, 'lng': -123.25, 'name': 'station', 'source': 'ticon3('}}'
@@ -137,12 +148,7 @@ def fetchTidesPointAtkinson(_container=None):
         print(tide_df)  # Add this line at the end of fetchTidesPointAtkinson() to see the output
         return tide_df
 
-    except Exception as e:
-        error_msg = f"Error fetching tide data: {str(e)}"
-        if container:
-            container.error(error_msg)
-        print(error_msg)
-        return None
+
 
 def displayTideTable(tide_df, container=None):
 
@@ -492,7 +498,8 @@ def displayPointAtkinsonTides(container=None):
         draw = st
 
     # Fetch the tide data
-    tide_data = fetchTidesPointAtkinson(draw)
+    response = fetchTidesPointAtkinson()
+    tide_data = process_tide_data(response, container)
 
     if tide_data is not None:
         # Create the natural tide chart
