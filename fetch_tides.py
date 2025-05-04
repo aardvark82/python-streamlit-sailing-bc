@@ -13,7 +13,7 @@ import pandas as pd
 from datetime import datetime
 import pytz
 
-@st.cache_data(ttl=14400)  # Cache for 4 hours
+#@st.cache_data(ttl=14400)  # Cache for 4 hours
 def fetchTidesPointAtkinson():
     """Fetch tide data for Point Atkinson from Stormglass API"""
     import requests
@@ -79,6 +79,7 @@ def fetchTidesPointAtkinson():
                              {'height': -2.0247559154532104, 'time': '2025-05-03T23:44:00+00:00', 'type': 'low'}
                              ]
                     }
+            return response
     except Exception as e:
         print(f"Error fetching tide data: {e}")
         return None

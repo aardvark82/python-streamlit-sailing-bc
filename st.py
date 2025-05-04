@@ -16,6 +16,9 @@ import pytz
 
 from timeago import format as timeago_format
 
+st.badge("v7", color="blue")
+
+
 def prettydate(d):
     now_vancouver = datetime.now(pytz.timezone('America/Vancouver'))
     return timeago_format(d, now_vancouver)
@@ -44,7 +47,6 @@ def displayStreamlitDateTime(datetime, container=None):
 from fetch_forecast import display_howe_sound_forecast
 
 def headerbox():
-    st.badge("v6", color="blue")
 
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "Tides",
