@@ -13,7 +13,7 @@ import pandas as pd
 from datetime import datetime
 import pytz
 
-#@st.cache_data(ttl=14400)  # Cache for 4 hours
+@st.cache_data(ttl=14400)  # Cache for 4 hours
 def fetchTidesPointAtkinson():
     """Fetch tide data for Point Atkinson from Stormglass API"""
     import requests
