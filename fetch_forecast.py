@@ -24,7 +24,6 @@ def openAIParseForecastForURL(container, url):
     if openai_api_key is None:
         raise ValueError("OpenAI API key is not set in environment variables.")
 
-
     response = requests.get(url, timeout=10)
     response.raise_for_status()
 
@@ -86,6 +85,18 @@ def fetch_marine_forecast_for_url(url):
                 'details': "The page content was empty or invalid",
                 'suggestion': "Please try refreshing the page"
             }
+
+        # display Wind Warning
+        # Check for wind warnings at the top of the page
+        wind_warning_in_effect = False
+        strong_wind_warning_in_effect = False
+
+        # Look for warning text in the header section
+        warning_banner = soup.find('div', id='warningBanner')
+        if warning_banner:
+            warning_text = warning_banner.text.lower().strip()
+            strong_wind_warning_in_effect = "strong wind warning" in warning_text #extra NTSB character
+            wind_warning_in_effect = "wind warning" in warning_text and not strong_wind_warning_in_effect
 
         # Find the main forecast content
         forecast_content = soup.find('div', id='forecast-content')
@@ -161,7 +172,9 @@ def fetch_marine_forecast_for_url(url):
             'title': title,
             'subtitle': period_coverage,
             'warning': warning,
-            'forecast': forecast_text
+            'forecast': forecast_text,
+            'wind_warning': wind_warning_in_effect,
+            'strong_wind_warning': strong_wind_warning_in_effect,
         }
 
     except requests.Timeout:
@@ -250,6 +263,13 @@ def display_marine_forecast_for_url(container=None, url=''):
     title = result['title']
     subtitle = result['subtitle']
     forecast = result['forecast']
+    wind_warning = result['wind_warning']
+    strong_wind_warning = result['strong_wind_warning']
+
+    if wind_warning:
+        container.badge("wind warning in effect", color="orange")
+    if strong_wind_warning:
+        container.badge("wind warning in effect", color="red")
 
     # Display the structured wind table
     chatgpt_forecast = openAIParseForecastForURL(container=container, url=url)
@@ -260,6 +280,8 @@ def display_marine_forecast_for_url(container=None, url=''):
 
     if issue_date:
         # Display relative and absolute dates
+
+
         relative_date = timeago_format(issue_date, datetime.now(pytz.timezone('America/Vancouver')))
         container.header(f"Issued {relative_date}")
         container.caption(f"({issue_date.strftime('%Y-%m-%d %I:%M %p %Z')})")
