@@ -14,7 +14,8 @@ import pandas as pd
 
 URL_forecast_howesound = 'https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=06400'
 
-def openAIParseForecastForURL(container, url):
+@st.cache_data(ttl=1800)  # Cache for 1/2 hours
+def openAIFetchForecastForURL(url):
     res = ''
 
     import json
@@ -24,7 +25,7 @@ def openAIParseForecastForURL(container, url):
     if openai_api_key is None:
         raise ValueError("OpenAI API key is not set in environment variables.")
 
-    response = requests.get(url, timeout=10)
+    response = requests.get(url, timeout=25)
     response.raise_for_status()
 
     chat_gpt_msg = "Make it short and just the table. Parse this forecast and extract a table with the following columns: time, wind speed, max wind speed, wind direction. "
@@ -272,7 +273,7 @@ def display_marine_forecast_for_url(container=None, url=''):
         container.badge("wind warning in effect", color="red")
 
     # Display the structured wind table
-    chatgpt_forecast = openAIParseForecastForURL(container=container, url=url)
+    chatgpt_forecast = openAIFetchForecastForURL(url=url)
     container.badge("chatGPT forecast")
     container.markdown(chatgpt_forecast)
 

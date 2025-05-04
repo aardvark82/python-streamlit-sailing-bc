@@ -1,6 +1,4 @@
-API_KEY_STORMGLASS_IO = '4b108f2a-27f4-11f0-88e2-0242ac130003-4b109010-27f4-11f0-88e2-0242ac130003'
 
-MAKE_LIVE_REQUESTS = True
 
 
 import streamlit as st
@@ -13,8 +11,198 @@ import pandas as pd
 from datetime import datetime
 import pytz
 
+USE_BEAUTIFULSOUP = False #otherwise use stormglass.io API
+USE_CHAT_GPT = False #otherwise use stormglass.io API
+USE_STORMGLASS = True #otherwise use stormglass.io API
+
+MAKE_LIVE_REQUESTS_STORMGLASS = True
+API_KEY_STORMGLASS_IO = '4b108f2a-27f4-11f0-88e2-0242ac130003-4b109010-27f4-11f0-88e2-0242ac130003'
+
+
+
+import re
+from datetime import datetime, timedelta
+
+#@st.cache_data(ttl=1800)  # Cache for 1/2 hours
+def beautifulSoupFetchTidesForURL(url):
+    # Download the page (you may need headers if blocked)
+    # url = "https://www.tides.gc.ca/en/stations/07795"
+    # Add headers to mimic a browser request
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+
+    response = requests.get(url, headers=headers, timeout=10)
+    response.raise_for_status()  # Raise an exception for bad status codes
+
+    soup = BeautifulSoup(response.content, "html.parser")
+
+    # Prepare regex and helpers
+    def classify_tide(height):
+        return "high" if float(height) > 2.0 else "low"
+
+    def parse_time(date_str, time_str):
+        dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
+        # Convert PDT (UTC-7) to UTC
+        dt_utc = dt + timedelta(hours=7)
+        return dt_utc.isoformat() + "+00:00"
+
+    print("URL accessed:", url)
+    print("Response status:", response.status_code)
+
+    data = {"data": []}
+
+    # Find the 7-day tide table block
+    tide_sections = soup.select("div.tide-table")  # Usually there are multiple day tables
+
+    for section in tide_sections:
+        date_header = section.find_previous("h3")
+        if not date_header:
+            continue
+
+        # Extract date (e.g., '2025-05-04 (Sun)' -> '2025-05-04')
+        date_match = re.search(r"\d{4}-\d{2}-\d{2}", date_header.text)
+        if not date_match:
+            continue
+        date = date_match.group(0)
+
+        # Extract rows of time + height in meters
+        rows = section.select("table tbody tr")
+        for row in rows:
+            cols = row.find_all("td")
+            if len(cols) < 2:
+                continue
+            time_pdt = cols[0].text.strip()
+            height_m = cols[1].text.strip()
+            try:
+                height_val = float(height_m)
+            except ValueError:
+                continue
+            tide_type = classify_tide(height_val)
+            timestamp = parse_time(date, time_pdt)
+            data["data"].append({
+                "height": height_val,
+                "time": timestamp,
+                "type": tide_type
+            })
+
+    print(data)
+    return data
+
+
+#@st.cache_data(ttl=1800)  # Cache for 1/2 hours
+def openAIFetchTidesForURL(url):
+    res = ''
+
+    import json
+    import os
+    print("Calling OpenAI...")
+    openai_api_key = st.secrets["OpenAI_key"] # put yout api key here
+    if openai_api_key is None:
+        raise ValueError("OpenAI API key is not set in environment variables.")
+
+
+    chat_gpt_msg = '''
+    Return just the JSON
+    
+    https://www.tides.gc.ca/en/stations/07795. The content of the URL HTML is pasted below.
+    Return it in a JSON format that copies the following structure but use the new values from the URL):
+    data = {'data': [{'height': 0.5114702042385154, 'time': '2025-05-02T11:16:00+00:00', 'type': 'low'},
+                     {'height': 0.8861352612764213, 'time': '2025-05-02T15:04:00+00:00', 'type': 'high'},
+                     {'height': -2.339105387160864, 'time': '2025-05-02T22:49:00+00:00', 'type': 'low'},
+                     {'height': 1.5511464556228052, 'time': '2025-05-03T06:52:00+00:00', 'type': 'high'},
+                     {'height': 0.4471043324619499, 'time': '2025-05-03T12:40:00+00:00', 'type': 'low'},
+                     {'height': 0.6249055747798654, 'time': '2025-05-03T15:55:00+00:00', 'type': 'high'},
+                     {'height': -2.0247559153700725, 'time': '2025-05-03T23:44:00+00:00', 'type': 'low'},
+                     {'height': 1.4711212002069232, 'time': '2025-05-04T07:51:00+00:00', 'type': 'high'},
+                     {'height': 0.2401116280506163, 'time': '2025-05-04T14:23:00+00:00', 'type': 'low'},
+                     {'height': 0.3448168313068383, 'time': '2025-05-04T17:10:00+00:00', 'type': 'high'},
+                     {'height': -1.6944775406122297, 'time': '2025-05-05T00:43:00+00:00', 'type': 'low'},
+                     {'height': 1.4152651862548065, 'time': '2025-05-05T08:44:00+00:00', 'type': 'high'}]}
+
+                     '''
+    # option 1 fetch the entire page - Too many tokens
+    # response = requests.get(url, timeout=25)
+    # response.raise_for_status()
+    # html = response.text
+
+    #option 2 fetch only the HTML section we need using Beauitful Soup and pass it to ChatGPT for processing
+    def beautifulSoupFetchTidesSectionForChatGPTForURL(url):
+        try:
+            # Add headers to mimic a browser request
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+
+            response = requests.get(url, headers=headers, timeout=25)
+            response.raise_for_status()
+
+            soup = BeautifulSoup(response.content, 'html.parser')
+
+            # Find the forecast section - typically in a div with specific class or id
+            # Find the hourly predictions table
+            hourly_table = soup.find('table', class_='hourlytable')
+
+            if hourly_table:
+                return str(hourly_table)
+            else:
+                return "Predictions section not found"
+
+
+        except requests.RequestException as e:
+            return f"Error fetching data: {str(e)}"
+
+    html = beautifulSoupFetchTidesSectionForChatGPTForURL(url)
+
+    # EXTRACT THE SECTION 7 DAYS AND HOURLY TO REDUCE TOKENS
+
+    chat_gpt_msg = chat_gpt_msg + "This is the HTML " + html
+    url_api = "https://api.openai.com/v1/chat/completions"
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {openai_api_key}"
+    }
+
+    data = {
+        "model": "gpt-4o",
+        "messages": [
+            {
+                "role": "system",
+                "content": "You are an expert meteorologist ."
+            },
+            {
+                "role": "user",
+                "content": chat_gpt_msg
+            }
+        ]
+    }
+
+    response = requests.post(url_api, headers=headers, json=data)
+
+    # Check if the request was successful
+    if response.status_code == 200:
+        print("Response from OpenAI:", response.json())
+        print('\n')
+        print(response.json()['choices'][0]['message']['content'])
+        res = response.json()['choices'][0]['message']['content']
+    elif response.status_code == 429:
+        print("Response from OpenAI:", response.json())
+        print('\n')
+        print(response.json()['choices'][0]['message']['content'])
+        res = response.json()['choices'][0]['message']['content']
+    else:
+        print("Error:", response.status_code, response.text)
+        res=("Error:", response.status_code, response.text)
+
+    return response
+
+
+
+
 @st.cache_data(ttl=14400)  # Cache for 4 hours
-def fetchTidesPointAtkinson():
+def stormglassFetchTidesPointAtkinson():
+
     """Fetch tide data for Point Atkinson from Stormglass API"""
     import requests
     import pandas as pd
@@ -27,7 +215,7 @@ def fetchTidesPointAtkinson():
         lat = 49.3304
         lon = -123.2646
 
-        if MAKE_LIVE_REQUESTS:
+        if MAKE_LIVE_REQUESTS_STORMGLASS:
             # Stormglass API configuration
             base_url = "https://api.stormglass.io/v2/tide/extremes/point"
             api_key = st.secrets["stormglass_key"]
@@ -51,7 +239,7 @@ def fetchTidesPointAtkinson():
             }
 
             response = requests.get(base_url, params=params, headers=headers, timeout=10)
-            return response
+            return response.json()
 
         else:
             #container.warning("Using stub data for tide data")
@@ -85,51 +273,16 @@ def fetchTidesPointAtkinson():
         return None
 
 
-def process_tide_data(response, container=None):
-        if not response:
-            error_msg = ("No response.")
-            container.warning(error_msg)
-            return None
+def process_tide_data(data, container=None, use_chat_gpt=False):
 
-        if response.status_code == 402:
-            error_msg = ("API quota exceeded. Please wait for quota reset or check your subscription. "
-                         "Using cached data if available.")
-            if container:
-                container.warning(error_msg)
-            return None
-
-        if response.status_code == 500:
-            error_msg = ("Internal Server Error – We had a problem with our server. Try again later..")
-            if container:
-                container.warning(error_msg)
-            return None
-
-        if response.status_code == 503:
-            error_msg = ("Service Unavailable – We’re temporarily offline for maintenance. Please try again later.")
-            if container:
-                container.warning(error_msg)
-            return None
-
-        if response.status_code != 200:
-            error_msg = f"Failed to fetch tide data. Status code: {response.status_code}"
-            if container:
-                container.error(error_msg)
-            return None
-
-        data = response.json()
         print (data)
 
-
-
-        # 'meta': {'cost': 1, 'dailyQuota': 10, 'datum': 'MSL', 'end': '2025-05-04 01:00', 'lat': 49.337, 'lng': -123.263, 'offset': 0, 'requestCount': 6, 'start': '2025-05-02 01:00', 'station': {'distance': 1, 'lat': 49.34, 'lng': -123.25, 'name': 'station', 'source': 'ticon3('}}'
-
-        data = {'data': [{'height': 0.5114702042385154, 'time': '2025-05-02T11:16:00+00:00', 'type': 'low'}, {'height': 0.8861352612764213, 'time': '2025-05-02T15:04:00+00:00', 'type': 'high'}, {'height': -2.339105387160864, 'time': '2025-05-02T22:49:00+00:00', 'type': 'low'}, {'height': 1.5511464556228052, 'time': '2025-05-03T06:52:00+00:00', 'type': 'high'}, {'height': 0.4471043324619499, 'time': '2025-05-03T12:40:00+00:00', 'type': 'low'}, {'height': 0.6249055747798654, 'time': '2025-05-03T15:55:00+00:00', 'type': 'high'}, {'height': -2.0247559153700725, 'time': '2025-05-03T23:44:00+00:00', 'type': 'low'}, {'height': 1.4711212002069232, 'time': '2025-05-04T07:51:00+00:00', 'type': 'high'}, {'height': 0.2401116280506163, 'time': '2025-05-04T14:23:00+00:00', 'type': 'low'}, {'height': 0.3448168313068383, 'time': '2025-05-04T17:10:00+00:00', 'type': 'high'}, {'height': -1.6944775406122297, 'time': '2025-05-05T00:43:00+00:00', 'type': 'low'}, {'height': 1.4152651862548065, 'time': '2025-05-05T08:44:00+00:00', 'type': 'high'}], 'meta': {'cost': 1, 'dailyQuota': 10, 'datum': 'MSL', 'end': '2025-05-05 09:00', 'lat': 49.337, 'lng': -123.263, 'offset': 0, 'requestCount': 10, 'start': '2025-05-02 09:00', 'station': {'distance': 1, 'lat': 49.34, 'lng': -123.25, 'name': 'station', 'source': 'ticon3'}}}
         # Convert predictions to pandas DataFrame
         predictions = []
 
         dt = None
 
-        for prediction in data['data']:  # Take only first 8 points
+        for prediction in data['data']:
             dt = pd.to_datetime(prediction['time'])
             dt = dt.tz_convert('America/Vancouver')
             predictions.append({
@@ -138,20 +291,20 @@ def process_tide_data(response, container=None):
             })
 
     # correct to stormio data
-    # add +2.94m to all tides
-        for i in range(len(predictions)):
-           predictions[i]['Height'] = predictions[i]['Height'] + 2.94
-           predictions[i]['Time (PDT)& Date'] = predictions[i]['Time (PDT)& Date'] + pd.Timedelta(hours=0, minutes=18)
+        if USE_STORMGLASS:
+        # add +2.94m to all tides - stormglass gets it wrong
+            for i in range(len(predictions)):
+               predictions[i]['Height'] = predictions[i]['Height'] + 2.94
+               predictions[i]['Time (PDT)& Date'] = predictions[i]['Time (PDT)& Date'] + pd.Timedelta(hours=0, minutes=18)
 
         # Create DataFrame and sort by time
         tide_df = pd.DataFrame(predictions)
         tide_df = tide_df.sort_values('Time (PDT)& Date', ignore_index=True)
-        print(tide_df)  # Add this line at the end of fetchTidesPointAtkinson() to see the output
+        print(tide_df)
         return tide_df
 
 
-
-def displayTideTable(tide_df, container=None):
+def display_tide_table_text(tide_df, container=None):
 
     if container:
         draw = container
@@ -206,6 +359,48 @@ def parse_tide_datetime(time_str):
         print(f"Error parsing datetime: {e}")
         return pd.NaT
 
+
+# After creating tide_df, add interpolation:
+from scipy.interpolate import CubicSpline
+def create_smooth_tides(df):
+    # Use existing timezone-aware timestamps
+    times = df['datetime']
+    base_time = times.iloc[0]
+
+    # Convert to seconds since base_time using timestamp() method
+    x = [(t.timestamp() - base_time.timestamp()) / 3600 for t in times]
+    y = df['Height'].values
+
+    # Create more points for smooth curve
+    x_smooth = np.linspace(min(x), max(x), 200)  # 200 points for smooth curve
+
+    # Cubic spline interpolation
+    cs = CubicSpline(x, y, bc_type='natural')
+    y_smooth = cs(x_smooth)
+
+    # Convert back to timestamps while preserving timezone
+    # Create timedelta objects and add them to the base_time
+    times_smooth = pd.Series([
+        base_time + pd.Timedelta(seconds=h * 3600)
+        for h in x_smooth
+    ])
+
+    return pd.DataFrame({
+        'datetime': times_smooth,
+        'Height': y_smooth
+    })
+
+
+def extract_meters(height_str):
+    try:
+        # Extract the number before 'm'
+        meters = float(height_str.split('m')[0].strip())
+        return meters
+    except (ValueError, AttributeError) as e:
+        print(f"Error parsing height from value: {height_str}")
+        return None
+
+
 def create_natural_tide_chart(tide_df, container=None):
     if container:
         draw = container
@@ -236,14 +431,6 @@ def create_natural_tide_chart(tide_df, container=None):
     # Debug: Print the data types and check for any non-numeric values
     print("Height column data:", tide_df['Height'])
 
-    def extract_meters(height_str):
-        try:
-            # Extract the number before 'm'
-            meters = float(height_str.split('m')[0].strip())
-            return meters
-        except (ValueError, AttributeError) as e:
-            print(f"Error parsing height from value: {height_str}")
-            return None
 
     tide_df['Height'] = tide_df['Height'].astype(str).apply(extract_meters)
 
@@ -267,36 +454,6 @@ def create_natural_tide_chart(tide_df, container=None):
     print("ALL TIDES CLEAN HEIGHT")
     print("----------------------------------------------------------------------------")
     print(tide_df)
-
-    # After creating tide_df, add interpolation:
-    from scipy.interpolate import CubicSpline
-    def create_smooth_tides(df):
-        # Use existing timezone-aware timestamps
-        times = df['datetime']
-        base_time = times.iloc[0]
-
-        # Convert to seconds since base_time using timestamp() method
-        x = [(t.timestamp() - base_time.timestamp()) / 3600 for t in times]
-        y = df['Height'].values
-
-        # Create more points for smooth curve
-        x_smooth = np.linspace(min(x), max(x), 200)  # 200 points for smooth curve
-
-        # Cubic spline interpolation
-        cs = CubicSpline(x, y, bc_type='natural')
-        y_smooth = cs(x_smooth)
-
-        # Convert back to timestamps while preserving timezone
-        # Create timedelta objects and add them to the base_time
-        times_smooth = pd.Series([
-            base_time + pd.Timedelta(seconds=h * 3600)
-            for h in x_smooth
-        ])
-
-        return pd.DataFrame({
-            'datetime': times_smooth,
-            'Height': y_smooth
-        })
 
     # Create interpolated dataframe
     smooth_tide_df = create_smooth_tides(tide_df)
@@ -489,7 +646,86 @@ def create_natural_tide_chart(tide_df, container=None):
             "No data available"
         )
 
-    displayTideTable(tide_df=tide_df, container=draw)
+    if USE_CHAT_GPT:
+        draw.badge("From ChatGPT")
+    else:
+        draw.badge("From Stormglass.io")
+
+    display_tide_table_text(tide_df=tide_df, container=draw) # debug
+
+
+
+def displayErrorWithResponseIfNeeded(container = None, response = None):
+    if not response:
+        error_msg = ("No response.")
+        container.warning(error_msg)
+        return None
+
+    if response.status_code == 402:
+        error_msg = ("API quota exceeded. Please wait for quota reset or check your subscription. "
+                     "Using cached data if available.")
+        if container:
+            container.warning(error_msg)
+        return None
+
+    if response.status_code == 500:
+        error_msg = ("Internal Server Error – We had a problem with our server. Try again later..")
+        if container:
+            container.warning(error_msg)
+        return None
+
+    if response.status_code == 503:
+        error_msg = ("Service Unavailable – We’re temporarily offline for maintenance. Please try again later.")
+        if container:
+            container.warning(error_msg)
+        return None
+
+    if response.status_code != 200:
+        error_msg = f"Failed to fetch tide data. Status code: {response.status_code}"
+        if container:
+            container.error(error_msg)
+        return None
+
+
+def processResponseToJSONStormglass(container = None, response = None):
+    data = None
+    displayErrorWithResponseIfNeeded(container, response)
+    data = response.json()
+    return data
+
+
+def processResponseToJSONOpenAI(container = None, response = None):
+    displayErrorWithResponseIfNeeded(container, response)
+
+    if USE_CHAT_GPT:
+        import json
+        data_txt = (response.json()['choices'][0]['message']['content'])
+        # Clean up the text before parsing
+        # Remove any leading/trailing whitespace
+        data_txt = data_txt.strip()
+
+        # If the string starts with a backtick block (common in ChatGPT responses), remove it
+        if data_txt.startswith('```json'):
+            data_txt = data_txt.replace('```json', '', 1)
+        if data_txt.startswith('```'):
+            data_txt = data_txt.replace('```', '', 1)
+        if data_txt.endswith('```'):
+            data_txt = data_txt[:-3]
+
+        # Remove any leading/trailing whitespace again after cleaning
+        data_txt = data_txt.strip()
+
+        try:
+            data = json.loads(data_txt)
+            return data
+        except json.JSONDecodeError as e:
+            print(f"Error parsing JSON: {e}")
+            print("Raw content:", data_txt)
+            # Fallback to empty data structure
+            data = {"data": []}
+    return None
+
+
 
 # Modify your displayPointAtkinsonTides function to use the new visualization
 def displayPointAtkinsonTides(container=None):
@@ -499,12 +735,44 @@ def displayPointAtkinsonTides(container=None):
         draw = st
 
     # Fetch the tide data
-    response = fetchTidesPointAtkinson()
-    tide_data = process_tide_data(response, container)
+    if USE_BEAUTIFULSOUP:
+        draw.badge("USE_BEAUTIFULSOUP")
+    if USE_CHAT_GPT:
+        draw.badge("USE_CHAT_GPT")
+    if USE_STORMGLASS:
+        draw.badge("USE_STORMGLASS")
 
-    if tide_data is not None:
-        # Create the natural tide chart
-        create_natural_tide_chart(tide_data, container)
+    data = None
+
+    if USE_BEAUTIFULSOUP:
+        response = beautifulSoupFetchTidesForURL("https://www.tides.gc.ca/en/stations/07795")
+        data = response
+        # response is a json
+
+    if USE_CHAT_GPT:
+        response = openAIFetchTidesForURL("https://www.tides.gc.ca/en/stations/07795")
+        # response is a response with a json
+        data = processResponseToJSONOpenAI(draw, response)
+
+    if USE_STORMGLASS:
+        response = stormglassFetchTidesPointAtkinson()
+        if 'errors' in response:
+            if 'key' in response['errors']:
+                error_msg = response['errors']['key']
+                if error_msg == 'API quota exceeded':
+                    draw.error("Stormglass API quota exceeded. Please wait for quota reset or check your subscription.")
+        else:
+            data = processResponseToJSONStormglass(draw, response)
+
+        # response is a response
+    if data:
+        tide_data = process_tide_data(data, draw, use_chat_gpt=USE_CHAT_GPT)
+        if tide_data:
+            # Create the natural tide chart
+            create_natural_tide_chart(tide_data, draw)
+        else:
+            draw.error("Unable to fetch tide data. Please try again later.")
+
     else:
-        draw.error("Unable to fetch tide data. Please try again later.")
+        draw.error("No data from fetch_tides.")
 
