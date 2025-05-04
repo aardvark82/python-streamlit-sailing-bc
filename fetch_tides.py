@@ -31,9 +31,8 @@ def fetchTidesPointAtkinson(_container=None):
         if MAKE_LIVE_REQUESTS:
             # Stormglass API configuration
             base_url = "https://api.stormglass.io/v2/tide/extremes/point"
-            api_key = "ff4b3118-2856-11f0-8567-0242ac130003-ff4b31b8-2856-11f0-8567-0242ac130003" # ackermans+test1@gmail.com
-                      # "4b108f2a-27f4-11f0-88e2-0242ac130003-4b109010-27f4-11f0-88e2-0242ac130003" ackermans@gmail.com
-            
+            api_key = st.secrets["stormglass_key"]
+
             vancouver_tz = pytz.timezone('America/Vancouver')
             now = datetime.now(vancouver_tz)
             

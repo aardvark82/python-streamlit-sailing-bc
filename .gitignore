@@ -1,3 +1,4 @@
 __pycache__/fetch_tides.cpython-313.pyc
 /__pycache__
 *.pyc
+/.streamlit/

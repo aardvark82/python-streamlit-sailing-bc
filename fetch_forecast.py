@@ -10,9 +10,69 @@ from timeago import format as timeago_format
 import streamlit as st
 import requests
 from bs4 import BeautifulSoup
+import pandas as pd
+
+URL_forecast_howesound = 'https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=06400'
+
+def openAIParseForecastForURL(container, url):
+    res = ''
+
+    import json
+    import os
+
+    openai_api_key = st.secrets["OpenAI_key"] # put yout api key here
+    if openai_api_key is None:
+        raise ValueError("OpenAI API key is not set in environment variables.")
+
+
+    response = requests.get(url, timeout=10)
+    response.raise_for_status()
+
+    chat_gpt_msg = "Make it short and just the table. Parse this forecast and extract a table with the following columns: time, wind speed, max wind speed, wind direction. "
+    chat_gpt_msg = chat_gpt_msg + response.text
+    url_api = "https://api.openai.com/v1/chat/completions"
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {openai_api_key}"
+    }
+
+    data = {
+        "model": "gpt-4o",
+        "messages": [
+            {
+                "role": "system",
+                "content": "You are an expert meteorologist ."
+            },
+            {
+                "role": "user",
+                "content": chat_gpt_msg
+            }
+        ]
+    }
+
+    response = requests.post(url_api, headers=headers, json=data)
+
+    # Check if the request was successful
+    if response.status_code == 200:
+        print("Response from OpenAI:", response.json())
+        print('\n')
+        print(response.json()['choices'][0]['message']['content'])
+        res = response.json()['choices'][0]['message']['content']
+    else:
+        print("Error:", response.status_code, response.text)
+        res=("Error:", response.status_code, response.text)
+
+    return res
+
+
 
 def fetch_howe_sound_forecast():
-    url = "https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=06400"
+    url = URL_forecast_howesound
+    return fetch_marine_forecast_for_url(url)
+
+def fetch_marine_forecast_for_url(url):
+    url = URL_forecast_howesound
 
     try:
         response = requests.get(url, timeout=10)
@@ -127,8 +187,61 @@ def fetch_howe_sound_forecast():
         }
 
 
+import re
+from datetime import datetime, timedelta
+
+
+def parse_wind_forecast(forecast_text):
+    # Split into time segments
+    segments = forecast_text.split('then')
+
+    # Initialize list to store parsed data
+    wind_data = []
+
+    # Regular expressions for parsing
+    wind_pattern = r'(?P<direction>[A-Za-z]+)\s+(?:inflow|outflow)?\s*(?P<speed>\d+)\s*to\s*(?P<speed_high>\d+)'
+
+    for segment in segments:
+        segment = segment.strip()
+
+        # Extract time period
+        time_period = ""
+        if "evening" in segment.lower():
+            time_period = "Evening"
+        elif "afternoon" in segment.lower():
+            time_period = "Afternoon"
+        elif "morning" in segment.lower():
+            time_period = "Morning"
+        elif "overnight" in segment.lower():
+            time_period = "Overnight"
+        elif "late overnight" in segment.lower():
+            time_period = "Late Overnight"
+
+        # Extract wind information
+        if "light" in segment.lower():
+            wind_data.append({
+                "time_period": time_period,
+                "direction": "Variable",
+                "speed": "Light",
+                "speed_range": "<15"
+            })
+        else:
+            match = re.search(wind_pattern, segment)
+            if match:
+                wind_data.append({
+                    "time_period": time_period,
+                    "direction": match.group("direction"),
+                    "speed_range": f"{match.group('speed')}-{match.group('speed_high')}",
+                    "speed": f"{match.group('speed')}-{match.group('speed_high')}"
+                })
+
+    return wind_data
+
 
 def display_howe_sound_forecast(container=None):
+    return display_marine_forecast_for_url(container=container, url=URL_forecast_howesound)
+
+def display_marine_forecast_for_url(container=None, url=''):
     if container is None:
         container = st
 
@@ -137,6 +250,13 @@ def display_howe_sound_forecast(container=None):
     title = result['title']
     subtitle = result['subtitle']
     forecast = result['forecast']
+
+    # Display the structured wind table
+    chatgpt_forecast = openAIParseForecastForURL(container=container, url=url)
+    container.badge("chatGPT forecast")
+    container.markdown(chatgpt_forecast)
+
+    container.badge("BeautifulSoup forecast")
 
     if issue_date:
         # Display relative and absolute dates
@@ -159,3 +279,7 @@ def display_howe_sound_forecast(container=None):
             """.format(bold_forecast), unsafe_allow_html=True)
     else:
         container.error("Unable to fetch Howe Sound marine forecast")
+
+    container.error
+
+    return None
