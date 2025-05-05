@@ -18,7 +18,7 @@ USE_STORMGLASS = True #otherwise use stormglass.io API
 MAKE_LIVE_REQUESTS_STORMGLASS = True
 API_KEY_STORMGLASS_IO = '4b108f2a-27f4-11f0-88e2-0242ac130003-4b109010-27f4-11f0-88e2-0242ac130003'
 
-
+CANADA_GOVERNMENT_TIDE_POINT_ATKINSON = "https://www.tides.gc.ca/en/stations/07795""
 
 import re
 from datetime import datetime, timedelta
@@ -743,6 +743,7 @@ def displayPointAtkinsonTides(container=None):
         draw.badge("USE_STORMGLASS")
 
     data = None
+    draw.write(CANADA_GOVERNMENT_TIDE_POINT_ATKINSON)
 
     if USE_BEAUTIFULSOUP:
         response = beautifulSoupFetchTidesForURL("https://www.tides.gc.ca/en/stations/07795")

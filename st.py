@@ -16,7 +16,7 @@ import pytz
 
 from timeago import format as timeago_format
 
-st.badge("v8", color="blue")
+st.badge("v9", color="blue")
 
 
 def prettydate(d):

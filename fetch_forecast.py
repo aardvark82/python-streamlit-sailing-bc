@@ -274,6 +274,9 @@ def display_marine_forecast_for_url(container=None, url=''):
 
     # Display the structured wind table
     chatgpt_forecast = openAIFetchForecastForURL(url=url)
+
+    container.draw(url)
+
     container.badge("chatGPT forecast")
     container.markdown(chatgpt_forecast)
 
