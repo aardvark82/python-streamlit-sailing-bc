@@ -661,31 +661,32 @@ def displayErrorWithResponseIfNeeded(container = None, response = None):
         container.warning(error_msg)
         return None
 
-    if hasattr(response, 'status_code'):  # Check if response object has status_code attribute
-        if response.status_code == 402:
-            error_msg = ("API quota exceeded. Please wait for quota reset or check your subscription. "
-                         "Using cached data if available.")
-            if container:
-                container.warning(error_msg)
-            return None
+    if isinstance(response, dict):
+        if hasattr(response, 'status_code'):  # Check if response object has status_code attribute
+            if response.status_code == 402:
+                error_msg = ("API quota exceeded. Please wait for quota reset or check your subscription. "
+                             "Using cached data if available.")
+                if container:
+                    container.warning(error_msg)
+                return None
 
-        if response.status_code == 500:
-            error_msg = ("Internal Server Error – We had a problem with our server. Try again later..")
-            if container:
-                container.warning(error_msg)
-            return None
+            if response.status_code == 500:
+                error_msg = ("Internal Server Error – We had a problem with our server. Try again later..")
+                if container:
+                    container.warning(error_msg)
+                return None
 
-        if response.status_code == 503:
-            error_msg = ("Service Unavailable – We’re temporarily offline for maintenance. Please try again later.")
-            if container:
-                container.warning(error_msg)
-            return None
+            if response.status_code == 503:
+                error_msg = ("Service Unavailable – We’re temporarily offline for maintenance. Please try again later.")
+                if container:
+                    container.warning(error_msg)
+                return None
 
-        if response.status_code != 200:
-            error_msg = f"Failed to fetch tide data. Status code: {response.status_code}"
-            if container:
-                container.error(error_msg)
-            return None
+            if response.status_code != 200:
+                error_msg = f"Failed to fetch tide data. Status code: {response.status_code}"
+                if container:
+                    container.error(error_msg)
+                return None
 
     if isinstance(response, dict) and 'data' in response:
         data = response['data']
