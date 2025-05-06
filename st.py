@@ -87,7 +87,8 @@ def parseJerichoWindHistory(container = None):
         draw = st
     # https://jsca.bc.ca/main/downld02.txt
     url = "https://jsca.bc.ca/main/downld02.txt"
-    container.write(url)
+
+    container.write('https://jsca.bc.ca/services/weather/ -  data from csv '+ url)
 
     res = requests.get(url)
     # stupid csv file as 2 first rows as column headers with columns 0,1,13,14 first line missing, fix this
