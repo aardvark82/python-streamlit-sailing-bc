@@ -70,9 +70,25 @@ def displayWindWarningIfNeeded(wind_speed, container=None):
         draw = container
     else:
         draw = st
-    warning_wind = (wind_speed>9)
-    if warning_wind:
-        draw.badge("Wind warning", color="orange")
+
+    try:
+        # Convert to numeric if it's a DataFrame/Series
+        if isinstance(wind_speed, (pd.DataFrame, pd.Series)):
+            wind_speed = pd.to_numeric(wind_speed, errors='coerce')
+            if isinstance(wind_speed, pd.Series):
+                wind_speed = wind_speed.iloc[0]  # Get the first value if it's a Series
+
+        # Convert to float if it's a string
+        if isinstance(wind_speed, str):
+            wind_speed = float(wind_speed)
+
+        warning_wind = (wind_speed > 9)
+        if warning_wind:
+            draw.badge("Wind warning", color="orange")
+    except (ValueError, TypeError) as e:
+        print(f"Error processing wind speed: {e}")
+        return
+
 
 from fetch_tides import displayPointAtkinsonTides
 
