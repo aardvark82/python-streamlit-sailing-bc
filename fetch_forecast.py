@@ -267,6 +267,10 @@ def display_marine_forecast_for_url(container=None, url=''):
     wind_warning = result['wind_warning']
     strong_wind_warning = result['strong_wind_warning']
 
+    container.subheader("Marine Forecast for "+title)
+
+    container.write(url)
+
     if wind_warning:
         container.badge("wind warning in effect", color="orange")
     if strong_wind_warning:
@@ -274,8 +278,6 @@ def display_marine_forecast_for_url(container=None, url=''):
 
     # Display the structured wind table
     chatgpt_forecast = openAIFetchForecastForURL(url=url)
-
-    container.draw(url)
 
     container.badge("chatGPT forecast")
     container.markdown(chatgpt_forecast)
@@ -306,6 +308,5 @@ def display_marine_forecast_for_url(container=None, url=''):
     else:
         container.error("Unable to fetch Howe Sound marine forecast")
 
-    container.error
 
     return None

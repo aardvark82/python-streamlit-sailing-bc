@@ -56,6 +56,7 @@ def headerbox():
         "Pam Rocks",
         "Howe Sound"
     ])
+
     displayPointAtkinsonTides(container=tab1)
     parseJerichoWindHistory(container=tab2)
     refreshBuoy('46146','Halibut Bank', container=tab3)
@@ -86,6 +87,8 @@ def parseJerichoWindHistory(container = None):
         draw = st
     # https://jsca.bc.ca/main/downld02.txt
     url = "https://jsca.bc.ca/main/downld02.txt"
+    container.write(url)
+
     res = requests.get(url)
     # stupid csv file as 2 first rows as column headers with columns 0,1,13,14 first line missing, fix this
     csv_raw = res.content.decode('utf-8')
@@ -143,6 +146,8 @@ def parseJerichoWindHistory(container = None):
     cols = df.columns.tolist()
     df = df[['datetime'] + cols[:-1]]  # excluding the last column since it's datetime
 
+    displayWindWarningIfNeeded(df.iloc[-1, 9], container=draw)
+
 #display time
     datetime_last_measurement = df.iloc[-1, 0]  # -1 for last row, 1 for second column (0-based index)
     displayStreamlitDateTime(datetime_last_measurement, draw)
@@ -153,7 +158,6 @@ def parseJerichoWindHistory(container = None):
     temp_out = df.iloc[-1, 1]  # -1 for last row, 1 for second column (0-based index)
 
     col1, col2, col3, col4, col5 = draw.columns(5)
-    displayWindWarningIfNeeded(df.iloc[-1, 9], container=draw)
     col1.metric(label="Wind Speed",     value=df.iloc[-1, 6])
     col2.metric(label="Wind High",      value=df.iloc[-1, 9])
     col3.metric(label="Bar",            value=df.iloc[-1, 14])
@@ -198,6 +202,7 @@ def refreshBuoy(buoy = '46146', title = 'Halibut Bank - 46146', container = None
     else:
         draw = st
     url = f'https://www.weather.gc.ca/marine/weatherConditions-currentConditions_e.html?mapID=02&siteID=14305&stationID={buoy}'
+
     res = requests.get(url)
 
     soup = BeautifulSoup(res.content, 'html.parser')
@@ -242,16 +247,16 @@ def refreshBuoy(buoy = '46146', title = 'Halibut Bank - 46146', container = None
         #data_watertemp = row.parent.find_all('td')[5]  # last cell in the row
 
     draw.subheader('Weather Data for '+ title + ' - ' + buoy)
-
-    displayStreamlitDateTime(time, draw)
+    draw.write(url)
 
     import re
     winds = re.findall(r'\d+', data_wind)
     highest_wind = 0
     if winds:
         highest_wind = int(winds[0])
-
     displayWindWarningIfNeeded(highest_wind, container=draw)
+    displayStreamlitDateTime(time, draw)
+
     draw.text(data_wind )
 
     waves = re.findall(r'\d+', data_wave_height)
@@ -272,7 +277,6 @@ def refreshBuoy(buoy = '46146', title = 'Halibut Bank - 46146', container = None
     col2.metric("Wave Period", data_waveperiod)
     col3.metric("Pressure", data_pressure)
 
-    draw.write(url)
     # st.code(soup) # debug HTML
 
 

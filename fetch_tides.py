@@ -728,11 +728,13 @@ def processResponseToJSONOpenAI(container = None, response = None):
 
 
 # Modify your displayPointAtkinsonTides function to use the new visualization
-def displayPointAtkinsonTides(container=None):
+def displayPointAtkinsonTides(container=None, title="Point Atkinson"):
     if container:
         draw = container
     else:
         draw = st
+
+    container.subheader("Tides for "+title)
 
     # Fetch the tide data
     if USE_BEAUTIFULSOUP:
