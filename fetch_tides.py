@@ -107,11 +107,18 @@ def seleniumGetTidesFromURL(url):
     import pandas as pd
     import time
     import io
-    # At the beginning of seleniumGetTidesFromURL function, add download options
+
+    # Configure Chrome options for cloud environment
     options = Options()
     options.add_argument('--headless')
     options.add_argument('--disable-gpu')
     options.add_argument('--no-sandbox')
+    options.add_argument('--disable-dev-shm-usage')
+    options.add_argument('--disable-software-rasterizer')
+    options.add_argument('--disable-extensions')
+    options.add_argument('--disable-infobars')
+
+
     import os
     download_dir = os.path.abspath("temp_downloads")
     os.makedirs(download_dir, exist_ok=True)

@@ -16,7 +16,7 @@ import pytz
 
 from timeago import format as timeago_format
 
-st.badge("v10", color="blue")
+st.badge("v11", color="blue")
 
 
 def cached_fetch_url(url):
