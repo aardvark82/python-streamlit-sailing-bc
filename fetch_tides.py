@@ -102,24 +102,20 @@ import selenium
 def seleniumGetTidesFromURL(url):
     """Fetch tide data from a URL using Selenium"""
     from selenium import webdriver
-    from selenium.webdriver import FirefoxOptions
-    options = FirefoxOptions()
-    from selenium import webdriver
-    from selenium.common.exceptions import TimeoutException
     from selenium.webdriver.common.by import By
-    from selenium.webdriver.firefox.options import Options
-    from selenium.webdriver.firefox.service import Service
-    from selenium.webdriver.firefox.options import Options
-    from selenium.webdriver.common.by import By
-    from selenium.webdriver.support import expected_conditions as EC
-    from selenium.webdriver.support.ui import WebDriverWait
-    from webdriver_manager.firefox import GeckoDriverManager
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.chrome.service import Service
+    from webdriver_manager.chrome import ChromeDriverManager
+
+    def get_driver():
+        return webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
     import pandas as pd
     import time
     import io
 
     # Configure Chrome options for cloud environment
+    options = Options()
     options.add_argument('--headless')
     options.add_argument('--disable-gpu')
     options.add_argument('--no-sandbox')
@@ -128,31 +124,20 @@ def seleniumGetTidesFromURL(url):
     options.add_argument('--disable-extensions')
     options.add_argument('--disable-infobars')
 
-    import os
-    # Set Firefox binary location for Linux environments
-    if os.path.exists('/usr/bin/firefox-esr'):
-        options.binary_location = '/usr/bin/firefox-esr'
-    elif os.path.exists('/usr/bin/firefox'):
-        options.binary_location = '/usr/bin/firefox'
 
     import os
     download_dir = os.path.abspath("temp_downloads")
     os.makedirs(download_dir, exist_ok=True)
-    # Configure Firefox download preferences
-    options.set_preference("browser.download.folderList", 2)
-    options.set_preference("browser.download.dir", download_dir)
-    options.set_preference("browser.download.manager.showWhenStarting", False)
-    options.set_preference("browser.helperApps.neverAsk.saveToDisk", "text/csv")
-    options.set_preference("browser.download.manager.useWindow", False)
-    options.set_preference("browser.download.manager.focusWhenStarting", False)
-    options.set_preference("browser.download.manager.showAlertOnComplete", False)
+    options.add_experimental_option("prefs", {
+        "download.default_directory": download_dir,
+        "download.prompt_for_download": False,
+        "download.directory_upgrade": True,
+        "safebrowsing.enabled": True
+    })
 
     # Initialize the driver with service
-    service = Service(GeckoDriverManager().install())
-    driver = webdriver.Firefox(
-        options=options,
-        service=service,
-    )
+    service = Service()
+    driver = webdriver.Chrome(service=service, options=options)
 
     try:
         # Load the tides page
