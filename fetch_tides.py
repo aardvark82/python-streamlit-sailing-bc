@@ -104,6 +104,8 @@ def seleniumGetTidesFromURL(url):
     from selenium import webdriver
     from selenium.webdriver.common.by import By
     from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.chrome.service import Service
+
     import pandas as pd
     import time
     import io
@@ -129,9 +131,9 @@ def seleniumGetTidesFromURL(url):
         "safebrowsing.enabled": True
     })
 
-
-    # Initialize the driver
-    driver = webdriver.Chrome(options=options)
+    # Initialize the driver with service
+    service = Service()
+    driver = webdriver.Chrome(service=service, options=options)
 
     try:
         # Load the tides page
