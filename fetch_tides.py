@@ -798,6 +798,36 @@ def processResponseToJSONStormglass(container = None, response = None):
 
     return data
 
+
+def find_local_extrema(df):
+    ''' the tides csv is supersampled - use this method to keep only local maxima and minima'''
+    # Convert to numpy array for easier processing
+    height_array = df['height'].values
+
+    # Find local maxima
+    maxima_indices = []
+    for i in range(1, len(height_array) - 1):
+        if height_array[i - 1] < height_array[i] > height_array[i + 1]:
+            maxima_indices.append(i)
+
+    # Find local minima
+    minima_indices = []
+    for i in range(1, len(height_array) - 1):
+        if height_array[i - 1] > height_array[i] < height_array[i + 1]:
+            minima_indices.append(i)
+
+    # Combine indices and create new dataframe with only extrema
+    extrema_indices = sorted(maxima_indices + minima_indices)
+    df_extrema = df.iloc[extrema_indices].copy()
+
+    # Add type column
+    df_extrema['type'] = ['high' if i in maxima_indices else 'low' for i in extrema_indices]
+
+    return df_extrema
+
+
+
+
 def processCSVResponseToJSONSelenium(container = None, _csv = None):
     if not _csv:
         container.error("No CSV data received")
@@ -806,6 +836,8 @@ def processCSVResponseToJSONSelenium(container = None, _csv = None):
     import io
     _csv_no_timezone = _csv.replace(' PDT', '').replace(' PST', '')
     df = pd.read_csv(io.StringIO(_csv_no_timezone), on_bad_lines='skip', sep=',', skipinitialspace=True)
+
+
 
     # 2. Combine 'Date' and 'Time' columns and convert to timezone-aware ISO format
     df['datetime'] = pd.to_datetime(df[df.columns[0]])
@@ -816,6 +848,8 @@ def processCSVResponseToJSONSelenium(container = None, _csv = None):
     # 3. Rename 'Predicted (m)' column to 'height'
     df.rename(columns={'predictions (m)': 'height'}, inplace=True)
 
+    #4.  keeps only local maximas and minimas
+    df = find_local_extrema(df)
 
     # 5. Build JSON structure
     json_result = []
@@ -823,20 +857,18 @@ def processCSVResponseToJSONSelenium(container = None, _csv = None):
         json_result.append({
             'Height': round(float(row['height']), 4),
             'Time (PDT)& Date': row['datetime'],
-            'type': 'none'
+            'type': row['type']
         })
 
 
     # Display first 10 lines of CSV
-    container.text('First 10 lines of CSV:')
+    #container.text('First 10 lines of CSV:')
     csv_lines = _csv.split('\n')[:10]
-    container.text('\n'.join(csv_lines))
+    #container.text('\n'.join(csv_lines))
 
     # Display first 10 items of JSON
-    container.text('First 10 items of JSON:')
-    container.text(json_result[:10])
-
-    container.text(json_result)
+    #container.text('First 10 items of JSON:')
+    #container.text(json_result[:10])
 
     return json_result
 
@@ -901,9 +933,9 @@ def displayPointAtkinsonTides(container=None, title="Point Atkinson"):
     if USE_SELENIUM:
         _csv = seleniumGetTidesFromURL('https://www.tides.gc.ca/en/stations/07795')
 
-        # too much data, grab only every 30th line (30 minutes)
+        # too much data, grab only every 10th line (10 minutes)
         csv_lines = _csv.splitlines()
-        csv_subsampled = '\n'.join(csv_lines[::30])
+        csv_subsampled = '\n'.join(csv_lines[::20])
         # 7 days of data - grab only 1/3 of the data
         csv_lines2 = csv_subsampled.splitlines()
         halfway_point = len(csv_lines2) // 3
