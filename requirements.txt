@@ -9,6 +9,7 @@ numpy
 scipy
 timeago
 selenium # tides click CSV export button
+webdriver-manager  # tides click CSV export button - Gecko Streamlit Cloud selenium
 
 
 
