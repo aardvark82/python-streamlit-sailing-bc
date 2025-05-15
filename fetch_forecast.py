@@ -14,7 +14,12 @@ import pandas as pd
 
 URL_forecast_howesound = 'https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=06400'
 
-@st.cache_data(ttl=1800)  # Cache for 1/2 hours
+def cached_fetch_url(url):
+    response = requests.get(url, timeout=25)
+    response.raise_for_status()
+    return response
+
+@st.cache_data(ttl=1800)
 def openAIFetchForecastForURL(url):
     res = ''
 
@@ -25,7 +30,7 @@ def openAIFetchForecastForURL(url):
     if openai_api_key is None:
         raise ValueError("OpenAI API key is not set in environment variables.")
 
-    response = requests.get(url, timeout=25)
+    response = cached_fetch_url(url)
     response.raise_for_status()
 
     chat_gpt_msg = "Make it short and just the table. Parse this forecast and extract a table with the following columns: time, wind speed, max wind speed, wind direction. "
@@ -71,12 +76,19 @@ def fetch_howe_sound_forecast():
     url = URL_forecast_howesound
     return fetch_marine_forecast_for_url(url)
 
+
+
+@st.cache_data(ttl=1800)
 def fetch_marine_forecast_for_url(url):
+    """
+       Fetches marine forecast data from a given URL, parsing wind warnings and forecast details.
+       Extracts issue date, wind conditions, and other weather information.
+       Returns a dictionary containing the processed forecast data with error handling.
+       """
     url = URL_forecast_howesound
 
     try:
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
+        response = cached_fetch_url(url)
 
         soup = BeautifulSoup(response.content, 'html.parser')
         if not soup:

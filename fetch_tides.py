@@ -11,9 +11,11 @@ import pandas as pd
 from datetime import datetime
 import pytz
 
-USE_BEAUTIFULSOUP = False #otherwise use stormglass.io API
-USE_CHAT_GPT = False #otherwise use stormglass.io API
-USE_STORMGLASS = True #otherwise use stormglass.io API
+USE_SELENIUM = True #otherwise use
+
+USE_BEAUTIFULSOUP = False #otherwise use
+USE_CHAT_GPT = False #otherwise use
+USE_STORMGLASS = False #otherwise use stormglass.io API
 
 MAKE_LIVE_REQUESTS_STORMGLASS = True
 API_KEY_STORMGLASS_IO = '4b108f2a-27f4-11f0-88e2-0242ac130003-4b109010-27f4-11f0-88e2-0242ac130003'
@@ -22,6 +24,12 @@ CANADA_GOVERNMENT_TIDE_POINT_ATKINSON = "https://www.tides.gc.ca/en/stations/077
 
 import re
 from datetime import datetime, timedelta
+
+
+def cached_fetch_url(url):
+    response = requests.get(url, timeout=25)
+    response.raise_for_status()
+    return response
 
 #@st.cache_data(ttl=1800)  # Cache for 1/2 hours
 def beautifulSoupFetchTidesForURL(url):
@@ -88,6 +96,75 @@ def beautifulSoupFetchTidesForURL(url):
 
     print(data)
     return data
+
+import selenium
+@st.cache_data(ttl=1800)
+def seleniumGetTidesFromURL(url):
+    """Fetch tide data from a URL using Selenium"""
+    from selenium import webdriver
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.chrome.options import Options
+    import pandas as pd
+    import time
+    import io
+    # At the beginning of seleniumGetTidesFromURL function, add download options
+    options = Options()
+    options.add_argument('--headless')
+    options.add_argument('--disable-gpu')
+    options.add_argument('--no-sandbox')
+    import os
+    download_dir = os.path.abspath("temp_downloads")
+    os.makedirs(download_dir, exist_ok=True)
+    options.add_experimental_option("prefs", {
+        "download.default_directory": download_dir,
+        "download.prompt_for_download": False,
+        "download.directory_upgrade": True,
+        "safebrowsing.enabled": True
+    })
+
+
+    # Initialize the driver
+    driver = webdriver.Chrome(options=options)
+
+    try:
+        # Load the tides page
+        url = "https://www.tides.gc.ca/en/stations/07795"
+        driver.get(url)
+
+        # Wait to make sure the page loads completely
+        time.sleep(3)
+
+        # Find the "7 Day Export to CSV" button by partial text
+        export_button = driver.find_element(By.ID, "export_button")
+
+        # Click the button (it will open a new URL with a downloadable CSV)
+        export_button.click()
+
+        # Wait briefly for form submission and potential page load
+        time.sleep(3)
+
+        # Get the most recently downloaded file
+        import glob
+        files = glob.glob(os.path.join(download_dir, "*.csv"))
+        if not files:
+            raise Exception("No CSV file was downloaded")
+
+        latest_file = max(files, key=os.path.getctime)
+
+        # Read the file content
+        with open(latest_file, 'r') as file:
+            csv_content = file.read()
+
+        return csv_content
+
+    except Exception as e:
+        print(f"Error: {e}")
+
+    finally:
+        if driver:
+            driver.quit()
+
+    return None
 
 
 #@st.cache_data(ttl=1800)  # Cache for 1/2 hours
@@ -274,6 +351,10 @@ def stormglassFetchTidesPointAtkinson():
 
 
 def process_tide_data(data, container=None, use_chat_gpt=False):
+        ''' expects a JSON, with either data:[] or just
+        Height':
+        'Time (PDT)& Date'
+        '''
 
         print (data)
 
@@ -282,19 +363,24 @@ def process_tide_data(data, container=None, use_chat_gpt=False):
 
         dt = None
 
-        for prediction in data['data']:
-            dt = pd.to_datetime(prediction['time'])
-            dt = dt.tz_convert('America/Vancouver')
-            predictions.append({
-                'Time (PDT)& Date': dt,
-                'Height': float(prediction['height'])
-            })
+        if 'data' not in data:
+            ''' parse tide data from gov canada 7 day CSV'''
+            predictions = data
+        else:
+            ''' parse Stormglass like JSON '''
+            for prediction in data['data']:
+                dt = pd.to_datetime(prediction['time'])
+                dt = dt.tz_convert('America/Vancouver')
+                predictions.append({
+                    'Time (PDT)& Date': dt,
+                    'Height': float(prediction['height'])
+                })
 
     # correct to stormio data
         if USE_STORMGLASS:
-        # add +2.94m to all tides - stormglass gets it wrong
+        # add +2.64m to all tides - stormglass gets it wrong
             for i in range(len(predictions)):
-               predictions[i]['Height'] = predictions[i]['Height'] + 2.94
+               predictions[i]['Height'] = predictions[i]['Height'] + 2.64
                predictions[i]['Time (PDT)& Date'] = predictions[i]['Time (PDT)& Date'] + pd.Timedelta(hours=0, minutes=18)
 
         # Create DataFrame and sort by time
@@ -648,7 +734,9 @@ def create_natural_tide_chart(tide_df, container=None):
 
     if USE_CHAT_GPT:
         draw.badge("From ChatGPT")
-    else:
+    elif USE_SELENIUM:
+        draw.badge("From Selenium")
+    elif USE_STORMGLASS:
         draw.badge("From Stormglass.io")
 
     display_tide_table_text(tide_df=tide_df, container=draw) # debug
@@ -710,6 +798,47 @@ def processResponseToJSONStormglass(container = None, response = None):
 
     return data
 
+def processCSVResponseToJSONSelenium(container = None, _csv = None):
+    if not _csv:
+        container.error("No CSV data received")
+        return None
+
+    import io
+    _csv_no_timezone = _csv.replace(' PDT', '').replace(' PST', '')
+    df = pd.read_csv(io.StringIO(_csv_no_timezone), on_bad_lines='skip', sep=',', skipinitialspace=True)
+
+    # 2. Combine 'Date' and 'Time' columns and convert to timezone-aware ISO format
+    df['datetime'] = pd.to_datetime(df[df.columns[0]])
+
+    pacific = pytz.timezone('America/Vancouver')
+    df['datetime'] = df['datetime'].apply(lambda dt: pacific.localize(dt).isoformat())
+
+    # 3. Rename 'Predicted (m)' column to 'height'
+    df.rename(columns={'predictions (m)': 'height'}, inplace=True)
+
+
+    # 5. Build JSON structure
+    json_result = []
+    for _, row in df.iterrows():
+        json_result.append({
+            'Height': round(float(row['height']), 4),
+            'Time (PDT)& Date': row['datetime'],
+            'type': 'none'
+        })
+
+
+    # Display first 10 lines of CSV
+    container.text('First 10 lines of CSV:')
+    csv_lines = _csv.split('\n')[:10]
+    container.text('\n'.join(csv_lines))
+
+    # Display first 10 items of JSON
+    container.text('First 10 items of JSON:')
+    container.text(json_result[:10])
+
+    container.text(json_result)
+
+    return json_result
 
 def processResponseToJSONOpenAI(container = None, response = None):
     displayErrorWithResponseIfNeeded(container, response)
@@ -768,6 +897,19 @@ def displayPointAtkinsonTides(container=None, title="Point Atkinson"):
         response = beautifulSoupFetchTidesForURL("https://www.tides.gc.ca/en/stations/07795")
         data = response
         # response is a json
+
+    if USE_SELENIUM:
+        _csv = seleniumGetTidesFromURL('https://www.tides.gc.ca/en/stations/07795')
+
+        # too much data, grab only every 30th line (30 minutes)
+        csv_lines = _csv.splitlines()
+        csv_subsampled = '\n'.join(csv_lines[::30])
+        # 7 days of data - grab only 1/3 of the data
+        csv_lines2 = csv_subsampled.splitlines()
+        halfway_point = len(csv_lines2) // 3
+        csv_half_subsampled = '\n'.join(csv_lines2[:halfway_point])
+
+        data = processCSVResponseToJSONSelenium(draw, csv_half_subsampled)
 
     if USE_CHAT_GPT:
         response = openAIFetchTidesForURL("https://www.tides.gc.ca/en/stations/07795")

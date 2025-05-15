@@ -16,7 +16,13 @@ import pytz
 
 from timeago import format as timeago_format
 
-st.badge("v9", color="blue")
+st.badge("v10", color="blue")
+
+
+def cached_fetch_url(url):
+    response = requests.get(url, timeout=25)
+    response.raise_for_status()
+    return response
 
 
 def prettydate(d):
@@ -106,7 +112,8 @@ def parseJerichoWindHistory(container = None):
 
     container.write('https://jsca.bc.ca/services/weather/ -  data from csv '+ url)
 
-    res = requests.get(url)
+    res = cached_fetch_url(url)
+
     # stupid csv file as 2 first rows as column headers with columns 0,1,13,14 first line missing, fix this
     csv_raw = res.content.decode('utf-8')
     lines = csv_raw.splitlines()
@@ -220,7 +227,7 @@ def refreshBuoy(buoy = '46146', title = 'Halibut Bank - 46146', container = None
         draw = st
     url = f'https://www.weather.gc.ca/marine/weatherConditions-currentConditions_e.html?mapID=02&siteID=14305&stationID={buoy}'
 
-    res = requests.get(url)
+    res = cached_fetch_url(url)
 
     soup = BeautifulSoup(res.content, 'html.parser')
 

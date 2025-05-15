@@ -8,5 +8,7 @@ plotly
 numpy
 scipy
 timeago
+selenium # tides click CSV export button
+
 
 
