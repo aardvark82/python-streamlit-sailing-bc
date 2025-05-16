@@ -1,5 +1,6 @@
 streamlit
 pandas
+requests
 beautifulsoup4
 arrow
 lxml #parse tides

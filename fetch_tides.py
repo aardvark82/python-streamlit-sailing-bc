@@ -128,7 +128,8 @@ def seleniumGetTidesFromURL(url):
 
     # Initialize the driver with service
     service = Service()
-    driver = webdriver.Chrome(service=service, options=options)
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()),
+                              options=options)
 
     try:
         # Load the tides page
