@@ -10,6 +10,7 @@ import pandas as pd
 
 from datetime import datetime
 import pytz
+from selenium.webdriver.common.by import By
 
 USE_SELENIUM = True #otherwise use
 
@@ -106,12 +107,13 @@ def seleniumGetTidesFromURL(url):
     from selenium.webdriver.firefox.service import Service
     from webdriver_manager.firefox import GeckoDriverManager
 
+    import os
+    download_dir = os.path.abspath("temp_downloads")
+
     def get_driver():
         options = Options()
         options.add_argument('-headless')
 
-        import os
-        download_dir = os.path.abspath("temp_downloads")
         os.makedirs(download_dir, exist_ok=True)
 
         # Configure Firefox preferences for downloading
@@ -129,7 +131,8 @@ def seleniumGetTidesFromURL(url):
     driver = get_driver()
 
     import time
-    
+
+
     try:
         # Load the tides page
         url = "https://www.tides.gc.ca/en/stations/07795"
