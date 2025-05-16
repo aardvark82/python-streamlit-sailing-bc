@@ -102,7 +102,6 @@ import selenium
 def seleniumGetTidesFromURL(url):
     """Fetch tide data from a URL using Selenium"""
     from selenium import webdriver
-    from selenium.webdriver.common.by import By
     from selenium.webdriver.chrome.options import Options
     from selenium.webdriver.chrome.service import Service
     from webdriver_manager.chrome import ChromeDriverManager
@@ -110,20 +109,12 @@ def seleniumGetTidesFromURL(url):
     def get_driver():
         return webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
-    import pandas as pd
     import time
-    import io
 
     # Configure Chrome options for cloud environment
     options = Options()
-    options.add_argument('--headless')
     options.add_argument('--disable-gpu')
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
-    options.add_argument('--disable-software-rasterizer')
-    options.add_argument('--disable-extensions')
-    options.add_argument('--disable-infobars')
-
+    options.add_argument('--headless')
 
     import os
     download_dir = os.path.abspath("temp_downloads")
