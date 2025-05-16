@@ -6,6 +6,7 @@ arrow
 lxml #parse tides
 plotly
 numpy
+urllib3
 scipy
 timeago
 selenium # tides click CSV export button
