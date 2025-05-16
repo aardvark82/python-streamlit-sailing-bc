@@ -280,12 +280,13 @@ def display_marine_forecast_for_url(container=None, url=''):
     wind_warning = result['wind_warning']
     strong_wind_warning = result['strong_wind_warning']
 
-    relative_date = timeago_format(issue_date, datetime.now(pytz.timezone('America/Vancouver')))
-    container.header(f"Issued {relative_date}")
 
     container.subheader("Marine Forecast for "+title)
 
     container.write(url)
+
+    relative_date = timeago_format(issue_date, datetime.now(pytz.timezone('America/Vancouver')))
+    container.header(f"Issued {relative_date}")
 
     if wind_warning:
         container.badge("wind warning in effect", color="orange")
