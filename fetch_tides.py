@@ -1,5 +1,4 @@
-
-
+import shutil
 
 import streamlit as st
 import requests
@@ -97,36 +96,54 @@ def beautifulSoupFetchTidesForURL(url):
     print(data)
     return data
 
-import selenium
-@st.cache_data(ttl=1800)
-def seleniumGetTidesFromURL(url):
-    """Fetch tide data from a URL using Selenium"""
-    from selenium import webdriver
-    from selenium.webdriver.common.by import By
-    from selenium.webdriver.chrome.options import Options
-    from selenium.webdriver.chrome.service import Service
-    from webdriver_manager.chrome import ChromeDriverManager
+import subprocess
 
-    def get_driver():
-        return webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+@st.cache_resource(show_spinner=False)
+def get_chromium_version() -> str:
+    try:
+        result = subprocess.run(['chromium', '--version'], capture_output=True, text=True)
+        version = result.stdout.split()[1]
+        return version
+    except Exception as e:
+        return str(e)
 
-    import pandas as pd
-    import time
-    import io
+@st.cache_resource(show_spinner=False)
+def get_chromedriver_path() -> str:
+    return shutil.which('chromedriver')
 
-    # Configure Chrome options for cloud environment
+
+@st.cache_resource(show_spinner=False)
+def get_chromedriver_version() -> str:
+    try:
+        result = subprocess.run(['chromedriver', '--version'], capture_output=True, text=True)
+        version = result.stdout.split()[1]
+        return version
+    except Exception as e:
+        return str(e)
+
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.wait import WebDriverWait
+
+import os
+download_dir = os.path.abspath("temp_downloads")
+
+
+@st.cache_resource(show_spinner=False)
+def get_webdriver_options() -> Options:
     options = Options()
-    options.add_argument('--headless')
-    options.add_argument('--disable-gpu')
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
-    options.add_argument('--disable-software-rasterizer')
-    options.add_argument('--disable-extensions')
-    options.add_argument('--disable-infobars')
+    options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--disable-features=NetworkService")
+    options.add_argument("--window-size=1920x1080")
+    options.add_argument("--disable-features=VizDisplayCompositor")
+    options.add_argument('--ignore-certificate-errors')
+    options.set_capability('goog:loggingPrefs', {'performance': 'ALL'})
 
-
-    import os
-    download_dir = os.path.abspath("temp_downloads")
     os.makedirs(download_dir, exist_ok=True)
     options.add_experimental_option("prefs", {
         "download.default_directory": download_dir,
@@ -135,47 +152,62 @@ def seleniumGetTidesFromURL(url):
         "safebrowsing.enabled": True
     })
 
-    # Initialize the driver with service
-    service = Service()
-    driver = get_driver()
+    return options
 
-    try:
-        # Load the tides page
-        url = "https://www.tides.gc.ca/en/stations/07795"
-        driver.get(url)
+def get_webdriver_service() -> Service:
+    service = Service(
+        executable_path=get_chromedriver_path(),
+    )
+    return service
 
-        # Wait to make sure the page loads completely
-        time.sleep(3)
 
-        # Find the "7 Day Export to CSV" button by partial text
-        export_button = driver.find_element(By.ID, "export_button")
+@st.cache_data(ttl=1800)
+def seleniumGetTidesFromURL(url):
+    """Fetch tide data from a URL using Selenium"""
 
-        # Click the button (it will open a new URL with a downloadable CSV)
-        export_button.click()
+    options = get_webdriver_options()
+    service = get_webdriver_service()
+    with webdriver.Chrome(options=options, service=service) as driver:
 
-        # Wait briefly for form submission and potential page load
-        time.sleep(3)
+        import time
 
-        # Get the most recently downloaded file
-        import glob
-        files = glob.glob(os.path.join(download_dir, "*.csv"))
-        if not files:
-            raise Exception("No CSV file was downloaded")
+        try:
+            # Load the tides page
+            url = "https://www.tides.gc.ca/en/stations/07795"
+            driver.get(url)
 
-        latest_file = max(files, key=os.path.getctime)
+            # Wait to make sure the page loads completely
+            time.sleep(3)
 
-        # Read the file content
-        with open(latest_file, 'r') as file:
-            csv_content = file.read()
+            # Find the "7 Day Export to CSV" button by partial text
+            export_button = driver.find_element(By.ID, "export_button")
 
-        return csv_content
+            # Click the button (it will open a new URL with a downloadable CSV)
+            export_button.click()
 
-    except Exception as e:
-        print(f"Error: {e}")
+            # Wait briefly for form submission and potential page load
+            time.sleep(3)
 
-    finally:
-        if driver:
-            driver.quit()
+            # Get the most recently downloaded file
+            import glob
+            files = glob.glob(os.path.join(download_dir, "*.csv"))
+            if not files:
+                raise Exception("No CSV file was downloaded")
+
+            latest_file = max(files, key=os.path.getctime)
+
+            # Read the file content
+            with open(latest_file, 'r') as file:
+                csv_content = file.read()
+
+            return csv_content
+
+        except Exception as e:
+            print(f"Error: {e}")
+
+        finally:
+            if driver:
+                driver.quit()
 
     return None
 
