@@ -309,9 +309,10 @@ def display_marine_forecast_for_url(container=None, url=''):
 
     df['wind direction'] = df['wind direction'].str.replace('northerly outflow', 'N')
     df['wind direction'] = df['wind direction'].str.replace('southerly inflow', 'S')
+    df['wind speed'] = df['wind speed'].fillna(0)
+    df['max wind speed'] = df['max wind speed'].fillna('<5')
 
     print(*df)
-
 
     col1, col2, col3, col4 = container.columns(4)
     col1.badge( df['time'].iloc[0], color='red')
