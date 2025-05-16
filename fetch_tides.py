@@ -108,7 +108,7 @@ def seleniumGetTidesFromURL(url):
     from webdriver_manager.chrome import ChromeDriverManager
 
     def get_driver():
-        return webdriver.Chrome(service=Service(ChromeDriverManager(version="114.0.5735.90").install()), options=options)
+        return webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
     import pandas as pd
     import time
