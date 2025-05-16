@@ -97,48 +97,39 @@ def beautifulSoupFetchTidesForURL(url):
     print(data)
     return data
 
-import selenium
+
 @st.cache_data(ttl=1800)
 def seleniumGetTidesFromURL(url):
     """Fetch tide data from a URL using Selenium"""
     from selenium import webdriver
-    from selenium.webdriver.common.by import By
-    from selenium.webdriver.chrome.options import Options
-    from selenium.webdriver.chrome.service import Service
-    from webdriver_manager.chrome import ChromeDriverManager
+    from selenium.webdriver.firefox.options import Options
+    from selenium.webdriver.firefox.service import Service
+    from webdriver_manager.firefox import GeckoDriverManager
 
     def get_driver():
-        return webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+        options = Options()
+        options.add_argument('-headless')
 
-    import pandas as pd
-    import time
-    import io
+        import os
+        download_dir = os.path.abspath("temp_downloads")
+        os.makedirs(download_dir, exist_ok=True)
 
-    # Configure Chrome options for cloud environment
-    options = Options()
-    options.add_argument('--headless')
-    options.add_argument('--disable-gpu')
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
-    options.add_argument('--disable-software-rasterizer')
-    options.add_argument('--disable-extensions')
-    options.add_argument('--disable-infobars')
+        # Configure Firefox preferences for downloading
+        options.set_preference("browser.download.folderList", 2)
+        options.set_preference("browser.download.manager.showWhenStarting", False)
+        options.set_preference("browser.download.dir", download_dir)
+        options.set_preference("browser.helperApps.neverAsk.saveToDisk", "text/csv,application/x-csv,application/csv")
 
+        # Create a new Firefox driver instance with GeckoDriverManager
+        service = Service(GeckoDriverManager().install())
+        driver = webdriver.Firefox(service=service, options=options)
+        return driver
 
-    import os
-    download_dir = os.path.abspath("temp_downloads")
-    os.makedirs(download_dir, exist_ok=True)
-    options.add_experimental_option("prefs", {
-        "download.default_directory": download_dir,
-        "download.prompt_for_download": False,
-        "download.directory_upgrade": True,
-        "safebrowsing.enabled": True
-    })
-
-    # Initialize the driver with service
-    service = Service()
+    # Initialize the driver
     driver = get_driver()
 
+    import time
+    
     try:
         # Load the tides page
         url = "https://www.tides.gc.ca/en/stations/07795"
