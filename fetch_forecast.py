@@ -271,6 +271,7 @@ def display_marine_forecast_for_url(container=None, url=''):
     if container is None:
         container = st
 
+
     result = fetch_howe_sound_forecast()
     issue_date = result['issue_date']
     title = result['title']
@@ -278,6 +279,9 @@ def display_marine_forecast_for_url(container=None, url=''):
     forecast = result['forecast']
     wind_warning = result['wind_warning']
     strong_wind_warning = result['strong_wind_warning']
+
+    relative_date = timeago_format(issue_date, datetime.now(pytz.timezone('America/Vancouver')))
+    container.header(f"Issued {relative_date}")
 
     container.subheader("Marine Forecast for "+title)
 
@@ -300,8 +304,6 @@ def display_marine_forecast_for_url(container=None, url=''):
         # Display relative and absolute dates
 
 
-        relative_date = timeago_format(issue_date, datetime.now(pytz.timezone('America/Vancouver')))
-        container.header(f"Issued {relative_date}")
         container.caption(f"({issue_date.strftime('%Y-%m-%d %I:%M %p %Z')})")
 
         # Display title and subtitle
