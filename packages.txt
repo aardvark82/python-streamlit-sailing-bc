@@ -1,2 +1,2 @@
-firefox-esr
+chromium
 
