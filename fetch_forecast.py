@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
@@ -33,7 +35,10 @@ def openAIFetchForecastForURL(url):
     response = cached_fetch_url(url)
     response.raise_for_status()
 
-    chat_gpt_msg = "Make it short and just the table. Parse this forecast and extract a table with the following columns: time, wind speed, max wind speed, wind direction. "
+    chat_gpt_msg = ("Make it short and just the table. "
+                    "Parse this forecast and extract a table with the following columns: time, wind speed, max wind speed, wind direction. "
+                    "Make it a CSV."
+                    "The first few words before the first occurence of 'becoming' describe the current conditions with a time of now and should be the 1st entry in the table")
     chat_gpt_msg = chat_gpt_msg + response.text
     url_api = "https://api.openai.com/v1/chat/completions"
 
@@ -280,9 +285,7 @@ def display_marine_forecast_for_url(container=None, url=''):
     wind_warning = result['wind_warning']
     strong_wind_warning = result['strong_wind_warning']
 
-
     container.subheader("Marine Forecast for "+title)
-
     container.write(url)
 
     relative_date = timeago_format(issue_date, datetime.now(pytz.timezone('America/Vancouver')))
@@ -296,15 +299,41 @@ def display_marine_forecast_for_url(container=None, url=''):
     # Display the structured wind table
     chatgpt_forecast = openAIFetchForecastForURL(url=url)
 
-    container.badge("chatGPT forecast")
-    container.markdown(chatgpt_forecast)
+    import io
+    # Create StringIO object from the CSV string
+    chatgpt_forecast = chatgpt_forecast.replace('```csv','')
+    chatgpt_forecast = chatgpt_forecast.replace('```','')
+    # Read CSV from StringIO
+    csv_stringio = io.StringIO(chatgpt_forecast)
+    df = pd.read_csv(csv_stringio)
 
-    container.badge("BeautifulSoup forecast")
+    df['wind direction'] = df['wind direction'].str.replace('northerly outflow', 'N')
+    df['wind direction'] = df['wind direction'].str.replace('southerly inflow', 'S')
+
+    print(*df)
+
+
+    col1, col2, col3, col4 = container.columns(4)
+    col1.badge( df['time'].iloc[0], color='red')
+    col2.metric("Wind Speed", df['wind speed'].iloc[0])
+    col3.metric("Wind High", df['max wind speed'].iloc[0])
+    col4.metric("Direction", df['wind direction'].iloc[0])
+
+
+    col21, col22, col23, col24 = container.columns(4)
+    col21.badge( df['time'].iloc[1], color='red')
+    col22.metric("Wind Speed", df['wind speed'].iloc[1])
+    col23.metric("Wind High", df['max wind speed'].iloc[1])
+    col24.metric("Direction", df['wind direction'].iloc[1])
+
+    container.dataframe(df)
+    container.badge("chatGPT forecast")
+
+    container.divider()
+
 
     if issue_date:
         # Display relative and absolute dates
-
-
         container.caption(f"({issue_date.strftime('%Y-%m-%d %I:%M %p %Z')})")
 
         # Display title and subtitle
@@ -322,6 +351,7 @@ def display_marine_forecast_for_url(container=None, url=''):
             """.format(bold_forecast), unsafe_allow_html=True)
     else:
         container.error("Unable to fetch Howe Sound marine forecast")
+    container.badge("BeautifulSoup forecast")
 
 
     return None
