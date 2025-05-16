@@ -539,6 +539,12 @@ def create_natural_tide_chart(tide_df, container=None):
         draw = st
 
     #### Time cleaning
+    if USE_CHAT_GPT:
+        draw.badge("From ChatGPT")
+    elif USE_SELENIUM:
+        draw.badge("From Selenium")
+    elif USE_STORMGLASS:
+        draw.badge("From Stormglass.io")
 
     # Cleanup columns
     print("----------------------------------------------------------------------------")
@@ -777,12 +783,7 @@ def create_natural_tide_chart(tide_df, container=None):
             "No data available"
         )
 
-    if USE_CHAT_GPT:
-        draw.badge("From ChatGPT")
-    elif USE_SELENIUM:
-        draw.badge("From Selenium")
-    elif USE_STORMGLASS:
-        draw.badge("From Stormglass.io")
+
 
     display_tide_table_text(tide_df=tide_df, container=draw) # debug
 
