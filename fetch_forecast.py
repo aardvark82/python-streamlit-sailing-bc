@@ -263,6 +263,87 @@ def parse_wind_forecast(forecast_text):
     return wind_data
 
 
+def standardize_wind_direction(direction):
+    if pd.isna(direction):  # Handle NaN values
+        return direction
+
+    if not isinstance(direction, str):  # Handle non-string values
+        return direction
+
+    direction = direction.lower().strip()
+
+    # Dictionary mapping various forms to standard abbreviations
+    direction_map = {
+        'north': 'N',
+        'north northeasterly': 'NNE',
+        'northeast': 'NE',
+        'east northeasterly': 'ENE',
+        'east': 'E',
+        'east southeasterly': 'ESE',
+        'southeast': 'SE',
+        'south southeasterly': 'SSE',
+        'south': 'S',
+        'south southwesterly': 'SSW',
+        'southwest': 'SW',
+        'west southwesterly': 'WSW',
+        'west': 'W',
+        'west northwesterly': 'WNW',
+        'northwest': 'NW',
+        'north northwesterly': 'NNW',
+        'northerly': 'N',
+        'northeasterly': 'NE',
+        'easterly': 'E',
+        'southeasterly': 'SE',
+        'southerly': 'S',
+        'southwesterly': 'SW',
+        'westerly': 'W',
+        'northwesterly': 'NW',
+        'northerly outflow': 'N',
+        'southerly inflow': 'S'
+    }
+
+    return direction_map.get(direction, direction)
+
+
+def create_arrow_html(direction):
+    # Convert cardinal directions to degrees
+    direction_degrees = {
+        'N': 0,
+        'NNE': 22.5,
+        'NE': 45,
+        'ENE': 67.5,
+        'E': 90,
+        'ESE': 112.5,
+        'SE': 135,
+        'SSE': 157.5,
+        'S': 180,
+        'SSW': 202.5,
+        'SW': 225,
+        'WSW': 247.5,
+        'W': 270,
+        'WNW': 292.5,
+        'NW': 315,
+        'NNW': 337.5
+    }
+    degree = direction_degrees.get(direction, 1000)
+    if degree == 1000:
+        return ''
+    else:
+        return f"""
+            <div style="text-align: center;">
+                <div style="
+                    width: 0;
+                    height: 0;
+                    border-left: 10px solid transparent;
+                    border-right: 10px solid transparent;
+                    border-bottom: 30px solid #1f77b4;
+                    display: inline-block;
+                    transform: rotate({180+degree}deg);
+                    margin: 0px;">
+                </div>
+            </div>
+        """
+
 
 def display_marine_forecast_for_url(container=None, url='', title=''):
     if container is None:
@@ -298,8 +379,10 @@ def display_marine_forecast_for_url(container=None, url='', title=''):
     csv_stringio = io.StringIO(chatgpt_forecast)
     df = pd.read_csv(csv_stringio)
 
-    df['wind direction'] = df['wind direction'].str.replace('northerly outflow', 'N')
-    df['wind direction'] = df['wind direction'].str.replace('southerly inflow', 'S')
+
+    # Apply the standardization to the wind direction column
+    df['wind direction'] = df['wind direction'].str.lower().apply(standardize_wind_direction)
+
     df['wind speed'] = df['wind speed'].fillna(0)
     df['max wind speed'] = df['max wind speed'].fillna('<5')
 
@@ -309,14 +392,19 @@ def display_marine_forecast_for_url(container=None, url='', title=''):
     col1.badge( df['time'].iloc[0], color='red')
     col2.metric("Wind Speed", df['wind speed'].iloc[0])
     col3.metric("Wind High", df['max wind speed'].iloc[0])
+
     col4.metric("Direction", df['wind direction'].iloc[0])
+    col4.markdown(create_arrow_html(df['wind direction'].iloc[0]), unsafe_allow_html=True)
 
 
     col21, col22, col23, col24 = container.columns(4)
     col21.badge( df['time'].iloc[1], color='red')
     col22.metric("Wind Speed", df['wind speed'].iloc[1])
     col23.metric("Wind High", df['max wind speed'].iloc[1])
-    col24.metric("Direction", df['wind direction'].iloc[1])
+
+    wind_direction = df['wind direction'].iloc[1]
+    col24.metric("Direction", wind_direction)
+    col24.markdown(create_arrow_html(wind_direction), unsafe_allow_html=True)
 
     container.dataframe(df)
     container.badge("chatGPT forecast")
