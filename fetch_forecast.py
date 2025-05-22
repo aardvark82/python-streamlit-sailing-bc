@@ -327,7 +327,7 @@ def create_arrow_html(direction, wind_speed = ''):
     }
     degree = direction_degrees.get(direction.upper(), 1000)
     if degree == 1000:
-        return '<div style="text-align: center;"><div style="width: 20px; height: 20px; background-color: #1f77b4; border-radius: 50%; display: inline-block;"></div></div>'
+        return '<div style="text-align: center;"><div style="width: 20px; height: 20px;background-color: #808080; border-radius: 50%; display: inline-block;"></div></div>'
     else:
         # Handle different wind speed types
         if isinstance(wind_speed, (int, float)):
