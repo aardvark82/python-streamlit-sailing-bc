@@ -191,12 +191,17 @@ def parseJerichoWindHistory(container = None):
     wind_speed = df.iloc[-1, 1]  # -1 for last row, 1 for second column (0-based index)
     temp_out = df.iloc[-1, 1]  # -1 for last row, 1 for second column (0-based index)
 
-    col1, col2, col3, col4, col5 = draw.columns(5)
+    col1, col2, col3 = draw.columns(3)
     col1.metric(label="Wind Speed",     value=df.iloc[-1, 6])
     col2.metric(label="Wind High",      value=df.iloc[-1, 9])
-    col3.metric(label="Bar",            value=df.iloc[-1, 14])
-    col4.metric(label="Rain",           value=df.iloc[-1, 15])
-    col5.metric(label="Temperature",    value=df.iloc[-1, 1])
+    col3.metric(label="Wind Direction",      value=df.iloc[-1, 7])
+    from fetch_forecast import create_arrow_html
+    col2.markdown(create_arrow_html(df.iloc[-1, 7],df.iloc[-1, 9]), unsafe_allow_html=True)
+
+    col1, col2, col3 = draw.columns(3)
+    col1.metric(label="Bar",            value=df.iloc[-1, 14])
+    col2.metric(label="Rain",           value=df.iloc[-1, 15])
+    col3.metric(label="Temperature",    value=df.iloc[-1, 1])
 
     #display graph of last 6 hours (12 entries)
     #display graph of last 6 hours (12 entries)
