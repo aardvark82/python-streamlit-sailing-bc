@@ -383,9 +383,6 @@ def display_marine_forecast_for_url(container=None, url='', title=''):
     df = df.dropna(how='all')  # Remove empty rows
     df = df.reset_index(drop=True)  # Reset index after dropping rows
 
-    # Standardize wind direction
-    df['wind direction'] = df['wind direction'].str.lower().apply(standardize_wind_direction)
-
     # Apply the standardization to the wind direction column
     df['wind direction'] = df['wind direction'].str.lower().apply(standardize_wind_direction)
 
