@@ -402,7 +402,7 @@ def display_marine_forecast_for_url(container=None, url='', title=''):
 
     wind_direction = df['wind direction'].iloc[0]
     col4.metric("Direction", wind_direction)
-    col4.markdown(create_arrow_html(wind_direction,df['wind speed'].iloc[0] ), unsafe_allow_html=True)
+    col1.markdown(create_arrow_html(wind_direction,df['wind speed'].iloc[0] ), unsafe_allow_html=True)
 
 
     col21, col22, col23, col24 = container.columns(4)
@@ -412,7 +412,7 @@ def display_marine_forecast_for_url(container=None, url='', title=''):
 
     wind_direction = df['wind direction'].iloc[1]
     col24.metric("Direction", wind_direction)
-    col24.markdown(create_arrow_html(wind_direction,df['wind speed'].iloc[1]), unsafe_allow_html=True)
+    col21.markdown(create_arrow_html(wind_direction,df['wind speed'].iloc[1]), unsafe_allow_html=True)
 
     container.dataframe(df)
     container.badge("chatGPT forecast")
