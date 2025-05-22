@@ -325,9 +325,9 @@ def create_arrow_html(direction, wind_speed = ''):
         'NW': 315,
         'NNW': 337.5
     }
-    degree = direction_degrees.get(direction, 1000)
+    degree = direction_degrees.get(direction.upper(), 1000)
     if degree == 1000:
-        return ''
+        return '<div style="text-align: center;"><div style="width: 20px; height: 20px; background-color: #1f77b4; border-radius: 50%; display: inline-block;"></div></div>'
     else:
         # Handle different wind speed types
         if isinstance(wind_speed, (int, float)):
@@ -338,6 +338,9 @@ def create_arrow_html(direction, wind_speed = ''):
             wind_speed_value = int(float(wind_speed)) if wind_speed.replace('.', '').strip().isdigit() else 0
 
         arrow_count = max(0, int(wind_speed_value / 5))
+
+        if arrow_count == 0:
+            return '<div style="text-align: center;"><div style="width: 20px; height: 20px; background-color: #1f77b4; border-radius: 50%; display: inline-block;"></div></div>'
 
         arrow_html = f'<div style="text-align: center; white-space: nowrap;">'
         for _ in range(arrow_count):
@@ -434,7 +437,7 @@ def display_marine_forecast_for_url(container=None, url='', title=''):
             </div>
             """.format(bold_forecast), unsafe_allow_html=True)
     else:
-        container.error("Unable to fetch Howe Sound marine forecast")
+        container.error("Unable to fetch "+title+" marine forecast")
     container.badge("BeautifulSoup forecast")
 
 
