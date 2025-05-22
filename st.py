@@ -54,7 +54,7 @@ from fetch_forecast import display_marine_forecast_for_url
 
 def headerbox():
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "Tides",
         "Jericho Beach",
         "Halibut Bank",
@@ -62,6 +62,7 @@ def headerbox():
         "Pam Rocks",
         "Howe Sound",
         "S of Nanaimo",
+        "N of Nanaimo",
 
     ])
 
@@ -73,9 +74,11 @@ def headerbox():
 
     URL_forecast_howesound = 'https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=06400'
     URL_forecast_south_of_nanaimo = 'https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=14305'
+    URL_forecast_north_of_nanaimo = 'https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=14301'
 
     display_marine_forecast_for_url(container=tab6, url=URL_forecast_howesound, title="Howe Sound")
-    display_marine_forecast_for_url(container=tab7, url=URL_forecast_south_of_nanaimo, title="S of Nanaimo")
+    display_marine_forecast_for_url(container=tab7, url=URL_forecast_south_of_nanaimo, title="South of Nanaimo")
+    display_marine_forecast_for_url(container=tab8, url=URL_forecast_north_of_nanaimo, title="North of Nanaimo")
 
 def displayWindWarningIfNeeded(wind_speed, container=None):
     """ above 9 knots """
