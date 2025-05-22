@@ -378,14 +378,13 @@ def display_marine_forecast_for_url(container=None, url='', title=''):
     chatgpt_forecast = chatgpt_forecast.replace('```','')
     # Read CSV from StringIO
     csv_stringio = io.StringIO(chatgpt_forecast)
-    df = pd.read_csv(csv_stringio,
-                     sep=',',
-                     on_bad_lines='skip',  # Skip problematic lines
-                     )
+    df = pd.read_csv(csv_stringio, sep=',', on_bad_lines='skip')
     # Clean up the dataframe
     df = df.dropna(how='all')  # Remove empty rows
     df = df.reset_index(drop=True)  # Reset index after dropping rows
 
+    # Standardize wind direction
+    df['wind direction'] = df['wind direction'].str.lower().apply(standardize_wind_direction)
 
     # Apply the standardization to the wind direction column
     df['wind direction'] = df['wind direction'].str.lower().apply(standardize_wind_direction)
