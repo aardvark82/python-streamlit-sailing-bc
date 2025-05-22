@@ -14,7 +14,6 @@ import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 
-URL_forecast_howesound = 'https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=06400'
 
 def cached_fetch_url(url):
     response = requests.get(url, timeout=25)
@@ -77,20 +76,15 @@ def openAIFetchForecastForURL(url):
 
 
 
-def fetch_howe_sound_forecast():
-    url = URL_forecast_howesound
-    return fetch_marine_forecast_for_url(url)
-
 
 
 @st.cache_data(ttl=1800)
-def fetch_marine_forecast_for_url(url):
+def fetch_marine_forecast_for_url(url, title):
     """
        Fetches marine forecast data from a given URL, parsing wind warnings and forecast details.
        Extracts issue date, wind conditions, and other weather information.
        Returns a dictionary containing the processed forecast data with error handling.
        """
-    url = URL_forecast_howesound
 
     try:
         response = cached_fetch_url(url)
@@ -182,7 +176,7 @@ def fetch_marine_forecast_for_url(url):
                 'suggestion': "Please check back later for updated forecast"
             }
 
-        title = "Howe Sound"  # This appears to be static based on the page URL
+        title = title  # This appears to be static based on the page URL
 
         return {
             'error': False,
@@ -269,15 +263,12 @@ def parse_wind_forecast(forecast_text):
     return wind_data
 
 
-def display_howe_sound_forecast(container=None):
-    return display_marine_forecast_for_url(container=container, url=URL_forecast_howesound)
 
-def display_marine_forecast_for_url(container=None, url=''):
+def display_marine_forecast_for_url(container=None, url='', title=''):
     if container is None:
         container = st
 
-
-    result = fetch_howe_sound_forecast()
+    result = fetch_marine_forecast_for_url(url, title)
     issue_date = result['issue_date']
     title = result['title']
     subtitle = result['subtitle']

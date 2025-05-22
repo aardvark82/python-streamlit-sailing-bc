@@ -50,17 +50,19 @@ def displayStreamlitDateTime(datetime, container=None):
     draw.text(datetime_van)
 
 # Selector
-from fetch_forecast import display_howe_sound_forecast
+from fetch_forecast import display_marine_forecast_for_url
 
 def headerbox():
 
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "Tides",
         "Jericho Beach",
         "Halibut Bank",
         "Point Atkinson",
         "Pam Rocks",
-        "Howe Sound"
+        "Howe Sound",
+        "S of Nanaimo",
+
     ])
 
     displayPointAtkinsonTides(container=tab1)
@@ -68,7 +70,12 @@ def headerbox():
     refreshBuoy('46146','Halibut Bank', container=tab3)
     refreshBuoy('WSB', 'Point Atkinson', container=tab4)
     refreshBuoy('WAS', 'Pam Rocks', container=tab5)
-    display_howe_sound_forecast(container=tab6)
+
+    URL_forecast_howesound = 'https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=06400'
+    URL_forecast_south_of_nanaimo = 'https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=14305'
+
+    display_marine_forecast_for_url(container=tab6, url=URL_forecast_howesound, title="Howe Sound")
+    display_marine_forecast_for_url(container=tab7, url=URL_forecast_south_of_nanaimo, title="S of Nanaimo")
 
 def displayWindWarningIfNeeded(wind_speed, container=None):
     """ above 9 knots """
