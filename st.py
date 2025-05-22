@@ -305,6 +305,12 @@ def refreshBuoy(buoy = '46146', title = 'Halibut Bank - 46146', container = None
 
     col1, col2, col3 = draw.columns(3)
     col1.metric("Wind", data_wind )
+    wind_direction = data_wind.split()[0] if data_wind and isinstance(data_wind, str) else data_wind
+    ## display a few wind indicators for 5,10,15,20 knots etc...
+    wind_speed = data_wind.split()[1] if data_wind and isinstance(data_wind, str) else data_wind
+    from fetch_forecast import create_arrow_html
+    col1.markdown(create_arrow_html(wind_direction, wind_speed), unsafe_allow_html=True)
+
     col2.metric("Wave Height", data_wave_height)
     col3.metric("Air Temp", data_airtemp)
     col1.metric("Water Temp", data_watertemp)

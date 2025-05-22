@@ -305,7 +305,7 @@ def standardize_wind_direction(direction):
     return direction_map.get(direction, direction)
 
 
-def create_arrow_html(direction):
+def create_arrow_html(direction, wind_speed = ''):
     # Convert cardinal directions to degrees
     direction_degrees = {
         'N': 0,
@@ -329,20 +329,21 @@ def create_arrow_html(direction):
     if degree == 1000:
         return ''
     else:
-        return f"""
-            <div style="text-align: center;">
-                <div style="
-                    width: 0;
-                    height: 0;
-                    border-left: 10px solid transparent;
-                    border-right: 10px solid transparent;
-                    border-bottom: 30px solid #1f77b4;
-                    display: inline-block;
-                    transform: rotate({180+degree}deg);
-                    margin: 0px;">
-                </div>
-            </div>
-        """
+        # Handle different wind speed types
+        if isinstance(wind_speed, (int, float)):
+            wind_speed_value = int(wind_speed)
+        else:
+            # Convert string to number if possible
+            wind_speed = str(wind_speed).split()[0]  # Get first part of string
+            wind_speed_value = int(float(wind_speed)) if wind_speed.replace('.', '').strip().isdigit() else 0
+
+        arrow_count = max(0, int(wind_speed_value / 5))
+
+        arrow_html = f'<div style="text-align: center; white-space: nowrap;">'
+        for _ in range(arrow_count):
+            arrow_html += f'<div style="width: 0; height: 0; border-left: 10px solid transparent; border-right: 10px solid transparent; border-bottom: 30px solid #1f77b4; display: inline-block; transform: rotate({180+degree}deg); margin: 0 5px;"></div>'
+        arrow_html += '</div>'
+        return arrow_html
 
 
 def display_marine_forecast_for_url(container=None, url='', title=''):
@@ -377,7 +378,13 @@ def display_marine_forecast_for_url(container=None, url='', title=''):
     chatgpt_forecast = chatgpt_forecast.replace('```','')
     # Read CSV from StringIO
     csv_stringio = io.StringIO(chatgpt_forecast)
-    df = pd.read_csv(csv_stringio)
+    df = pd.read_csv(csv_stringio,
+                     sep=',',
+                     on_bad_lines='skip',  # Skip problematic lines
+                     )
+    # Clean up the dataframe
+    df = df.dropna(how='all')  # Remove empty rows
+    df = df.reset_index(drop=True)  # Reset index after dropping rows
 
 
     # Apply the standardization to the wind direction column
@@ -393,8 +400,9 @@ def display_marine_forecast_for_url(container=None, url='', title=''):
     col2.metric("Wind Speed", df['wind speed'].iloc[0])
     col3.metric("Wind High", df['max wind speed'].iloc[0])
 
-    col4.metric("Direction", df['wind direction'].iloc[0])
-    col4.markdown(create_arrow_html(df['wind direction'].iloc[0]), unsafe_allow_html=True)
+    wind_direction = df['wind direction'].iloc[0]
+    col4.metric("Direction", wind_direction)
+    col4.markdown(create_arrow_html(wind_direction,df['wind speed'].iloc[0] ), unsafe_allow_html=True)
 
 
     col21, col22, col23, col24 = container.columns(4)
@@ -404,7 +412,7 @@ def display_marine_forecast_for_url(container=None, url='', title=''):
 
     wind_direction = df['wind direction'].iloc[1]
     col24.metric("Direction", wind_direction)
-    col24.markdown(create_arrow_html(wind_direction), unsafe_allow_html=True)
+    col24.markdown(create_arrow_html(wind_direction,df['wind speed'].iloc[1]), unsafe_allow_html=True)
 
     container.dataframe(df)
     container.badge("chatGPT forecast")
