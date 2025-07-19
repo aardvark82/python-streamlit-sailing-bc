@@ -16,7 +16,7 @@ import pytz
 
 from timeago import format as timeago_format
 
-st.badge("v13", color="blue")
+st.badge("v14", color="blue")
 
 
 def cached_fetch_url(url):
@@ -51,10 +51,11 @@ def displayStreamlitDateTime(datetime, container=None):
 
 # Selector
 from fetch_forecast import display_marine_forecast_for_url
+from fetch_forecast import display_beach_quality_for_url
 
 def headerbox():
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
         "Tides",
         "Jericho Beach",
         "Halibut Bank",
@@ -63,6 +64,7 @@ def headerbox():
         "Howe Sound",
         "S of Nanaimo",
         "N of Nanaimo",
+        "Beach",
 
     ])
 
@@ -79,6 +81,7 @@ def headerbox():
     display_marine_forecast_for_url(container=tab6, url=URL_forecast_howesound, title="Howe Sound")
     display_marine_forecast_for_url(container=tab7, url=URL_forecast_south_of_nanaimo, title="South of Nanaimo")
     display_marine_forecast_for_url(container=tab8, url=URL_forecast_north_of_nanaimo, title="North of Nanaimo")
+    display_beach_quality_for_url(container=tab9, url=URL_forecast_north_of_nanaimo, title="Beach water quality")
 
 def displayWindWarningIfNeeded(wind_speed, container=None):
     """ above 9 knots """

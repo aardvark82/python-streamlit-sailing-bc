@@ -9,6 +9,6 @@ numpy
 scipy
 timeago
 selenium # tides click CSV export button
-
+pdfplumber # beach quality values
 
 
