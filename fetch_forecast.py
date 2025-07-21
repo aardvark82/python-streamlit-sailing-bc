@@ -372,7 +372,13 @@ def create_arrow_html(direction, wind_speed = ''):
             'NW': 315,
             'NNW': 337.5
         }
-        degree = direction_degrees.get(direction.upper(), 1000)
+
+        degree = 0
+        try:    
+            degree = direction_degrees.get(direction.upper(), 1000)
+        except Exception as e:
+            degree = 1000
+            
         if degree == 1000:
             return '<div style="text-align: center;"><div style="width: 20px; height: 20px;background-color: #808080; border-radius: 50%; display: inline-block;"></div></div>'
         else:
