@@ -463,45 +463,49 @@ def fetch_from_open_weather(lat: float, lon: float, api_key: str) -> WeatherData
             "appid": api_key,
             "units": "metric"
         }
-
+        
         current_response = requests.get(base_url, params=current_params)
         current_response.raise_for_status()
         current_data = current_response.json()
-
-        # Get forecast for precipitation
+        
+        # Get forecast
         forecast_params = {
             "lat": lat,
             "lon": lon,
             "appid": api_key,
             "units": "metric",
-            "cnt": 8  # Get 24 hours of forecast (8 x 3-hour intervals)
+            "cnt": 8
         }
-
+        
         forecast_response = requests.get(forecast_url, params=forecast_params)
         forecast_response.raise_for_status()
         forecast_data = forecast_response.json()
-
+        
         # Get precipitation data from forecast
         next_3_hours_precip = forecast_data['list'][0].get('rain', {}).get('3h', 0) if 'list' in forecast_data else 0
-
+        
         # Sum up precipitation for next 24 hours
         next_24_hours_precip = sum(
             item.get('rain', {}).get('3h', 0)
             for item in forecast_data.get('list', [])[:8]
         )
-
-        # Create WeatherData object using current weather data
+        
+        # Create WeatherData object
         weather_data = WeatherData(
             temperature=current_data['main']['temp'],
             cloud_condition=current_data['weather'][0]['description'],
             outside_humidity=current_data['main']['humidity'],
             next_3_hours_precipitation=next_3_hours_precip,
             next_24_hours_precipitation=next_24_hours_precip,
-            timestamp=datetime.fromtimestamp(current_data['dt'])
+            timestamp=datetime.fromtimestamp(current_data['dt']),
+            wind_speed_now=current_data['wind']['speed'],
+            wind_direction_now=current_data['wind']['deg'],
+            wind_speed_3h=forecast_data['list'][0]['wind']['speed'],
+            wind_direction_3h=forecast_data['list'][0]['wind']['deg']
         )
-
+        
         return weather_data
-
+        
     except requests.RequestException as e:
         st.error(f"Error fetching weather data: {str(e)}")
         return None
