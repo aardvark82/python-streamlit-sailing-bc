@@ -416,20 +416,29 @@ def display_humidity_for_url(container=None, url='', title=''):
     weather_data = fetch_from_open_weather(VANCOUVER_LAT, VANCOUVER_LON, api_key)
 
     if weather_data:
-        # Display weather information
         col1, col2 = container.columns(2)
-
+        
+        # Convert wind speeds from m/s to knots
+        wind_speed_now_kts = weather_data.wind_speed_now * 1.94384
+        wind_speed_3h_kts = weather_data.wind_speed_3h * 1.94384
+        
         with col1:
             st.metric("Temperature", f"{weather_data.temperature:.1f}°C")
             st.metric("Humidity", f"{weather_data.outside_humidity}%")
-            st.metric("Wind Now", f"{weather_data.outside_humidity}%")
-            st.metric("Wind 3 hours", f"{weather_data.outside_humidity}%")
+            wind_dir_now = get_wind_direction(weather_data.wind_direction_now)
+            st.metric("Wind Now", f"{wind_dir_now} {wind_speed_now_kts:.1f}kts")
+            wind_dir_3h = get_wind_direction(weather_data.wind_direction_3h)
+            st.metric("Wind in 3h", f"{wind_dir_3h} {wind_speed_3h_kts:.1f}kts")
 
         with col2:
             st.metric("Cloud Condition", weather_data.cloud_condition)
             st.metric("3h Precipitation", f"{weather_data.next_3_hours_precipitation:.1f}mm")
             st.metric("24h Precipitation", f"{weather_data.next_24_hours_precipitation:.1f}mm")
 
+        from fetch_forecast import create_arrow_html
+        col1.markdown(create_arrow_html(wind_dir_now, wind_speed_now_kts), 
+                     unsafe_allow_html=True)
+        
         container.caption(f"Last updated: {weather_data.timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
 
 
@@ -444,6 +453,10 @@ class WeatherData:
     next_3_hours_precipitation: float
     next_24_hours_precipitation: float
     timestamp: datetime
+    wind_speed_now: float
+    wind_direction_now: int
+    wind_speed_3h: float
+    wind_direction_3h: int
 
 
 @st.cache_data(ttl=60)  # Cache for 1 minute
@@ -451,10 +464,9 @@ def fetch_from_open_weather(lat: float, lon: float, api_key: str) -> WeatherData
     """
     Fetch weather data from OpenWeatherMap API
     """
-    # Base URL for OpenWeatherMap API
     base_url = "https://api.openweathermap.org/data/2.5/weather"
     forecast_url = "https://api.openweathermap.org/data/2.5/forecast"
-
+    
     try:
         # Get current weather
         current_params = {
@@ -514,6 +526,14 @@ def fetch_from_open_weather(lat: float, lon: float, api_key: str) -> WeatherData
         st.write("Current data:", current_data)
         st.write("Forecast data:", forecast_data)
         return None
+
+def get_wind_direction(degrees: int) -> str:
+    """
+    Convert wind direction from degrees to cardinal direction
+    """
+    directions = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
+    index = round(degrees / (360. / len(directions))) % len(directions)
+    return directions[index]
 
 
 def display_beach_quality_for_url(container=None, url='', title=''):
