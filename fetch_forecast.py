@@ -419,6 +419,10 @@ def display_beach_quality_for_url(container=None, url='', title=''):
     col1, col2, col3, col4 = container.columns(4)
     col1.text( 'Sandy cove station 1 BWV-04-01')
     col2.badge(ecoli_sample1, color='green')
+
+    ecoli_sample1 = ecoli_sample1.replace("<",'')
+    ecoli_sample2 = ecoli_sample2.replace("<",'')
+
     if int(ecoli_sample1) > 200:
         col2.badge( ecoli_sample1, color='orange')
     if int(ecoli_sample1) > 400:
