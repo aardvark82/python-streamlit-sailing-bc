@@ -883,7 +883,11 @@ def processCSVResponseToJSONSelenium(container = None, _csv = None):
     _csv_no_timezone = _csv.replace(' PDT', '').replace(' PST', '')
     df = pd.read_csv(io.StringIO(_csv_no_timezone), on_bad_lines='skip', sep=',', skipinitialspace=True)
 
+    # Debug: Print column names
+    print("Available columns:", df.columns.tolist())
 
+    # Remove BOM character from column names
+    df.columns = df.columns.str.replace('ï»¿', '')
 
     # 2. Combine 'Date' and 'Time' columns and convert to timezone-aware ISO format
     df['datetime'] = pd.to_datetime(df[df.columns[0]])
@@ -891,8 +895,37 @@ def processCSVResponseToJSONSelenium(container = None, _csv = None):
     pacific = pytz.timezone('America/Vancouver')
     df['datetime'] = df['datetime'].apply(lambda dt: pacific.localize(dt).isoformat())
 
-    # 3. Rename 'Predicted (m)' column to 'height'
-    df.rename(columns={'predictions (m)': 'height'}, inplace=True)
+    # 3. Rename 'Predicted (m)' column to 'height' - try different possible column names
+    if 'predictions (m)' in df.columns:
+        df.rename(columns={'predictions (m)': 'height'}, inplace=True)
+    elif 'Predicted (m)' in df.columns:
+        df.rename(columns={'Predicted (m)': 'height'}, inplace=True)
+    elif 'prediction (m)' in df.columns:
+        df.rename(columns={'prediction (m)': 'height'}, inplace=True)
+    else:
+        if container:
+            container.error("Could not find predictions column. Available columns: " + ", ".join(df.columns.tolist()))
+        else:
+            print("Could not find predictions column. Available columns:", df.columns.tolist())
+            # Calculate predictions from observations and the difference
+        df['height'] = df['observations (m)'] - df['Observations minus predictions (m)']
+
+    # Calculate predictions and ensure numeric values
+    df['observations (m)'] = pd.to_numeric(df['observations (m)'], errors='coerce')
+    df['Observations minus predictions (m)'] = pd.to_numeric(df['Observations minus predictions (m)'], errors='coerce')
+    df['height'] = df['observations (m)'] - df['Observations minus predictions (m)']
+
+    # Remove any rows with NaN values
+    df = df.dropna(subset=['height'])
+
+    # Debug: Print data shape after processing
+    print("DataFrame shape after processing:", df.shape)
+    print("Height column stats:", df['height'].describe())
+
+    if len(df) < 3:
+        if container:
+            container.error(f"Not enough valid data points (only {len(df)} found)")
+        return None
 
     #4.  keeps only local maximas and minimas
     df = find_local_extrema(df)
