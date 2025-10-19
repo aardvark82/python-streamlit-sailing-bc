@@ -179,6 +179,15 @@ def seleniumGetTidesFromURL(url):
             # Wait to make sure the page loads completely
             time.sleep(3)
 
+            from selenium.webdriver.support import expected_conditions as EC
+            from selenium.webdriver.support.ui import Select
+
+            select_element = driver.find_element(By.ID, "export-select")
+            select = Select(select_element)
+            select.select_by_value("Predictions")
+            time.sleep(1)
+
+
             # Find the "7 Day Export to CSV" button by partial text
             export_button = driver.find_element(By.ID, "export_button")
 
@@ -898,6 +907,8 @@ def processCSVResponseToJSONSelenium(container = None, _csv = None):
     # 3. Rename 'Predicted (m)' column to 'height' - try different possible column names
     if 'predictions (m)' in df.columns:
         df.rename(columns={'predictions (m)': 'height'}, inplace=True)
+        print("COLUMN TIDES: 'predictions (m)'")
+
     elif 'Predicted (m)' in df.columns:
         df.rename(columns={'Predicted (m)': 'height'}, inplace=True)
     elif 'prediction (m)' in df.columns:
@@ -911,9 +922,9 @@ def processCSVResponseToJSONSelenium(container = None, _csv = None):
         df['height'] = df['observations (m)'] - df['Observations minus predictions (m)']
 
     # Calculate predictions and ensure numeric values
-    df['observations (m)'] = pd.to_numeric(df['observations (m)'], errors='coerce')
-    df['Observations minus predictions (m)'] = pd.to_numeric(df['Observations minus predictions (m)'], errors='coerce')
-    df['height'] = df['observations (m)'] - df['Observations minus predictions (m)']
+    #df['observations (m)'] = pd.to_numeric(df['observations (m)'], errors='coerce')
+    #df['Observations minus predictions (m)'] = pd.to_numeric(df['Observations minus predictions (m)'], errors='coerce')
+    #df['height'] = df['predictions (m)']
 
     # Remove any rows with NaN values
     df = df.dropna(subset=['height'])
