@@ -478,8 +478,20 @@ def display_marine_forecast_for_url(container=None, url='', title=''):
     # Apply the standardization to the wind direction column
     df['wind direction'] = df['wind direction'].str.lower().apply(standardize_wind_direction)
 
-    df['wind speed'] = df['wind speed'].fillna(0)
-    df['max wind speed'] = df['max wind speed'].fillna('<5')
+    # Handle '<' values in wind speed columns
+    def clean_wind_speed(x):
+        if pd.isna(x):
+            return 0
+        if isinstance(x, str) and '<' in x:
+            return float(x.replace('<', ''))
+        if isinstance(x, str) and 'light' in x:
+            return float(2)
+
+        return float(x)
+
+    df['wind speed'] = df['wind speed'].apply(clean_wind_speed)
+    # Convert max wind speed to string to avoid PyArrow conversion
+    df['max wind speed'] = df['max wind speed'].astype(str)
 
     print(*df)
 
