@@ -415,13 +415,21 @@ def display_humidity_for_url(container=None, url='', title=''):
     # Fetch weather data
     weather_data = fetch_from_open_weather(VANCOUVER_LAT, VANCOUVER_LON, api_key)
 
+    # display time
+    vancouver_tz = pytz.timezone('America/Vancouver')
+    weather_timestamp_van = weather_data.timestamp.astimezone(vancouver_tz)
+    relative_date = timeago_format(weather_timestamp_van, datetime.now(pytz.timezone('America/Vancouver')))
+    container.header(f"Issued {relative_date}")
+    # container.caption(f"Last updated: {relative_date}")
+
     if weather_data:
         col1, col2 = container.columns(2)
         
         # Convert wind speeds from m/s to knots
         wind_speed_now_kts = weather_data.wind_speed_now * 1.94384
         wind_speed_3h_kts = weather_data.wind_speed_3h * 1.94384
-        
+
+
         with col1:
             st.metric("Temperature", f"{weather_data.temperature:.1f}°C")
             st.metric("Humidity", f"{weather_data.outside_humidity}%")
@@ -447,8 +455,6 @@ def display_humidity_for_url(container=None, url='', title=''):
         from fetch_forecast import create_arrow_html
         col2.markdown(create_arrow_html(wind_dir_now, wind_speed_3h_kts),
                      unsafe_allow_html=True)
-
-        container.caption(f"Last updated: {weather_data.timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
 
 
 from dataclasses import dataclass
