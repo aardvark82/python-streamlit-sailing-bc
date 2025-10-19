@@ -177,7 +177,7 @@ def seleniumGetTidesFromURL(url):
             driver.get(url)
 
             # Wait to make sure the page loads completely
-            time.sleep(3)
+            time.sleep(1)
 
             from selenium.webdriver.support import expected_conditions as EC
             from selenium.webdriver.support.ui import Select
@@ -185,8 +185,6 @@ def seleniumGetTidesFromURL(url):
             select_element = driver.find_element(By.ID, "export-select")
             select = Select(select_element)
             select.select_by_value("Predictions")
-            time.sleep(1)
-
 
             # Find the "7 Day Export to CSV" button by partial text
             export_button = driver.find_element(By.ID, "export_button")
