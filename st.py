@@ -52,20 +52,21 @@ def displayStreamlitDateTime(datetime, container=None):
 # Selector
 from fetch_forecast import display_marine_forecast_for_url
 from fetch_forecast import display_beach_quality_for_url
+from fetch_forecast import display_humidity_for_url
 
 def headerbox():
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
         "Tides",
-        "Jericho Beach",
+        "Jericho",
         "Halibut Bank",
-        "Point Atkinson",
+        "Pt Atkinson",
         "Pam Rocks",
         "Howe Sound",
-        "S of Nanaimo",
-        "N of Nanaimo",
+        "S Nanaimo",
+        "N Nanaimo",
         "Beach",
-
+        'Weather'
     ])
 
     displayPointAtkinsonTides(container=tab1)
@@ -82,6 +83,7 @@ def headerbox():
     display_marine_forecast_for_url(container=tab7, url=URL_forecast_south_of_nanaimo, title="South of Nanaimo")
     display_marine_forecast_for_url(container=tab8, url=URL_forecast_north_of_nanaimo, title="North of Nanaimo")
     display_beach_quality_for_url(container=tab9, url=URL_forecast_north_of_nanaimo, title="Beach water quality")
+    display_humidity_for_url(container=tab10, url=URL_forecast_north_of_nanaimo, title="Weather")
 
 def displayWindWarningIfNeeded(wind_speed, container=None):
     """ above 9 knots """

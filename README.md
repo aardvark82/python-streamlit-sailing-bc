@@ -16,6 +16,10 @@ https://python-app-sailing-bc-nckqtfynerhhf26ujtt5u6.streamlit.app/
 ## Live Buoy data from government of Canada at Halibut Bank (parsed with BeautifulSoup4)
 https://www.weather.gc.ca/marine/weatherConditions-currentConditions_e.html?mapID=02&siteID=14305&stationID=46146
 
+## live weather API from openweathermap.org
+https://home.openweathermap.org/
+- 1000 calls/day for free
+
 ## live wind data from land stations WAS and WSB (parsed with BeautifulSoup4)
 https://www.weather.gc.ca/marine/weatherConditions-currentConditions_e.html?mapID=02&siteID=14305&stationID=WAS
 https://www.weather.gc.ca/marine/weatherConditions-currentConditions_e.html?mapID=02&siteID=14305&stationID=WSB

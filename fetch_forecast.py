@@ -402,6 +402,116 @@ def create_arrow_html(direction, wind_speed = ''):
             return arrow_html
     
 
+def display_humidity_for_url(container=None, url='', title=''):
+    if container is None:
+        container = st
+
+    # Example coordinates for West Vancouver
+    VANCOUVER_LAT = 49.32
+    VANCOUVER_LON = -123.16
+    # Get API key from Streamlit secrets
+    api_key = st.secrets["openweather_api_key"]
+
+    # Fetch weather data
+    weather_data = fetch_from_open_weather(VANCOUVER_LAT, VANCOUVER_LON, api_key)
+
+    if weather_data:
+        # Display weather information
+        col1, col2 = container.columns(2)
+
+        with col1:
+            st.metric("Temperature", f"{weather_data.temperature:.1f}°C")
+            st.metric("Humidity", f"{weather_data.outside_humidity}%")
+            st.metric("Wind Now", f"{weather_data.outside_humidity}%")
+            st.metric("Wind 3 hours", f"{weather_data.outside_humidity}%")
+
+        with col2:
+            st.metric("Cloud Condition", weather_data.cloud_condition)
+            st.metric("3h Precipitation", f"{weather_data.next_3_hours_precipitation:.1f}mm")
+            st.metric("24h Precipitation", f"{weather_data.next_24_hours_precipitation:.1f}mm")
+
+        container.caption(f"Last updated: {weather_data.timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
+
+
+from dataclasses import dataclass
+from datetime import datetime
+
+@dataclass
+class WeatherData:
+    temperature: float
+    cloud_condition: str
+    outside_humidity: int
+    next_3_hours_precipitation: float
+    next_24_hours_precipitation: float
+    timestamp: datetime
+
+
+@st.cache_data(ttl=60)  # Cache for 1 minute
+def fetch_from_open_weather(lat: float, lon: float, api_key: str) -> WeatherData:
+    """
+    Fetch weather data from OpenWeatherMap API
+    """
+    # Base URL for OpenWeatherMap API
+    base_url = "https://api.openweathermap.org/data/2.5/weather"
+    forecast_url = "https://api.openweathermap.org/data/2.5/forecast"
+
+    try:
+        # Get current weather
+        current_params = {
+            "lat": lat,
+            "lon": lon,
+            "appid": api_key,
+            "units": "metric"
+        }
+
+        current_response = requests.get(base_url, params=current_params)
+        current_response.raise_for_status()
+        current_data = current_response.json()
+
+        # Get forecast for precipitation
+        forecast_params = {
+            "lat": lat,
+            "lon": lon,
+            "appid": api_key,
+            "units": "metric",
+            "cnt": 8  # Get 24 hours of forecast (8 x 3-hour intervals)
+        }
+
+        forecast_response = requests.get(forecast_url, params=forecast_params)
+        forecast_response.raise_for_status()
+        forecast_data = forecast_response.json()
+
+        # Get precipitation data from forecast
+        next_3_hours_precip = forecast_data['list'][0].get('rain', {}).get('3h', 0) if 'list' in forecast_data else 0
+
+        # Sum up precipitation for next 24 hours
+        next_24_hours_precip = sum(
+            item.get('rain', {}).get('3h', 0)
+            for item in forecast_data.get('list', [])[:8]
+        )
+
+        # Create WeatherData object using current weather data
+        weather_data = WeatherData(
+            temperature=current_data['main']['temp'],
+            cloud_condition=current_data['weather'][0]['description'],
+            outside_humidity=current_data['main']['humidity'],
+            next_3_hours_precipitation=next_3_hours_precip,
+            next_24_hours_precipitation=next_24_hours_precip,
+            timestamp=datetime.fromtimestamp(current_data['dt'])
+        )
+
+        return weather_data
+
+    except requests.RequestException as e:
+        st.error(f"Error fetching weather data: {str(e)}")
+        return None
+    except KeyError as e:
+        st.error(f"Error parsing weather data: {str(e)}")
+        st.write("Current data:", current_data)
+        st.write("Forecast data:", forecast_data)
+        return None
+
+
 def display_beach_quality_for_url(container=None, url='', title=''):
     if container is None:
         container = st
