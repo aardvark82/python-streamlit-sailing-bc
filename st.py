@@ -315,9 +315,15 @@ def refreshBuoy(buoy = '46146', title = 'Halibut Bank - 46146', container = None
 
     col1, col2, col3 = draw.columns(3)
     col1.metric("Wind", data_wind )
-    wind_direction = data_wind.split()[0] if data_wind and isinstance(data_wind, str) else data_wind
-    ## display a few wind indicators for 5,10,15,20 knots etc...
-    wind_speed = data_wind.split()[1] if data_wind and isinstance(data_wind, str) else data_wind
+    # Safe parsing of wind data
+    try:
+        parts = data_wind.strip().split() if data_wind and isinstance(data_wind, str) else []
+        wind_direction = parts[0] if len(parts) > 0 else "N/A"
+        wind_speed = parts[1] if len(parts) > 1 else "0"
+    except (AttributeError, IndexError) as e:
+        print(f"Error parsing wind data: {e}")
+        wind_direction = "N/A"
+        wind_speed = "0"
     from fetch_forecast import create_arrow_html
     col1.markdown(create_arrow_html(wind_direction, wind_speed), unsafe_allow_html=True)
 
