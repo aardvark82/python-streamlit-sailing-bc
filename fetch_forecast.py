@@ -431,23 +431,33 @@ def display_humidity_for_url(container=None, url='', title=''):
 
 
         with col1:
-            st.metric("Temperature", f"{weather_data.temperature:.1f}°C")
-            st.metric("Humidity", f"{weather_data.outside_humidity}%")
-            st.metric("3h Precipitation", f"{weather_data.next_3_hours_precipitation:.1f}mm")
+            # Add sunrise time as the first metric
+            sunrise_time = weather_data.sunrise.strftime('%I:%M %p')
+            st.metric("🌅 Sunrise", sunrise_time)
+            
+            # Existing metrics...
+            st.metric("🌡️ Temperature", f"{weather_data.temperature:.1f}°C")
+            st.metric("💧️ Humidity", f"{weather_data.outside_humidity}%")
+            st.metric("🌧️ 3h Precipitation", f"{weather_data.next_3_hours_precipitation:.1f}mm")
             wind_dir_now = get_wind_direction(weather_data.wind_direction_now)
-            st.metric("Wind Now", f"{wind_dir_now} {wind_speed_now_kts:.1f}kts")
+            st.metric("💨 Wind Now", f"{wind_dir_now} {wind_speed_now_kts:.1f}kts")
 
         with col2:
-            st.metric("Cloud Condition", weather_data.cloud_condition)
+            # Add sunset time as the first metric
+            sunset_time = weather_data.sunset.strftime('%I:%M %p')
+            st.metric("🪐 Sunset", sunset_time)
+            
+            # Existing metrics...
+            st.metric("☁️ Cloud Condition", weather_data.cloud_condition)
             # The icon code from your weather data is "04d"
             icon_code = weather_data.weather_icon
             icon_url = f"http://openweathermap.org/img/wn/{icon_code}@2x.png"  # @2x for larger size
             # Display in Streamlit
             st.image(icon_url, width=64)  # Adjust width as needed
 
-            st.metric("24h Precipitation", f"{weather_data.next_24_hours_precipitation:.1f}mm")
+            st.metric("🌧️ 24h Precipitation", f"{weather_data.next_24_hours_precipitation:.1f}mm")
             wind_dir_3h = get_wind_direction(weather_data.wind_direction_3h)
-            st.metric("Wind in 3h", f"{wind_dir_3h} {wind_speed_3h_kts:.1f}kts")
+            st.metric("💨 Wind in 3h", f"{wind_dir_3h} {wind_speed_3h_kts:.1f}kts")
 
         from fetch_forecast import create_arrow_html
         col1.markdown(create_arrow_html(wind_dir_now, wind_speed_now_kts), 
@@ -555,6 +565,8 @@ class WeatherData:
     wind_speed_3h: float
     wind_direction_3h: int
     weather_icon: str
+    sunrise: datetime  # Add this field
+    sunset: datetime   # Add this field
 
 
 @st.cache_data(ttl=60)
@@ -577,6 +589,17 @@ def fetch_from_open_weather(lat: float, lon: float, api_key: str) -> WeatherData
         current_response = requests.get(base_url, params=current_params)
         current_response.raise_for_status()
         current_data = current_response.json()
+        
+        # Convert sunrise and sunset timestamps to datetime objects
+        vancouver_tz = pytz.timezone('America/Vancouver')
+        sunrise = datetime.fromtimestamp(current_data['sys']['sunrise'])
+        sunset = datetime.fromtimestamp(current_data['sys']['sunset'])
+        
+        # Make them timezone aware
+        sunrise = vancouver_tz.localize(sunrise)
+        sunset = vancouver_tz.localize(sunset)
+        
+        # Rest of the existing code...
         
         # Get 3-day hourly forecast
         hourly_forecast_url = "https://api.openweathermap.org/data/2.5/forecast"
@@ -603,6 +626,9 @@ def fetch_from_open_weather(lat: float, lon: float, api_key: str) -> WeatherData
         
         # Create WeatherData object
         weather_data = WeatherData(
+            # Existing fields...
+            sunrise=sunrise,
+            sunset=sunset,
             temperature=current_data['main']['temp'],
             cloud_condition=current_data['weather'][0]['description'],
             outside_humidity=current_data['main']['humidity'],
@@ -619,13 +645,8 @@ def fetch_from_open_weather(lat: float, lon: float, api_key: str) -> WeatherData
         
         return weather_data
         
-    except requests.RequestException as e:
-        st.error(f"Error fetching weather data: {str(e)}")
-        return None
-    except KeyError as e:
-        st.error(f"Error parsing weather data: {str(e)}")
-        st.write("Current data:", current_data)
-        st.write("Forecast data:", hourly_data)
+    except Exception as e:
+        print(f"Error fetching weather data: {e}")
         return None
 
 def get_wind_direction(degrees: int) -> str:
