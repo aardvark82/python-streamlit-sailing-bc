@@ -432,7 +432,7 @@ def display_humidity_for_url(container=None, url='', title=''):
 
         with col1:
             # Add sunrise time as the first metric
-            sunrise_time = weather_data.sunrise.strftime('%I:%M %p')
+            sunrise_time = weather_data.sunrise.astimezone(pytz.timezone('America/Vancouver')).strftime('%I:%M %p')
             st.metric("🌅 Sunrise", sunrise_time)
             
             # Existing metrics...
@@ -444,7 +444,7 @@ def display_humidity_for_url(container=None, url='', title=''):
 
         with col2:
             # Add sunset time as the first metric
-            sunset_time = weather_data.sunset.strftime('%I:%M %p')
+            sunset_time = weather_data.sunset.astimezone(pytz.timezone('America/Vancouver')).strftime('%I:%M %p')
             st.metric("🪐 Sunset", sunset_time)
             
             # Existing metrics...
@@ -591,14 +591,14 @@ def fetch_from_open_weather(lat: float, lon: float, api_key: str) -> WeatherData
         current_data = current_response.json()
         
         # Convert sunrise and sunset timestamps to datetime objects
+        # Create UTC datetime first
+        sunrise = datetime.fromtimestamp(current_data['sys']['sunrise'], tz=pytz.UTC)
+        sunset = datetime.fromtimestamp(current_data['sys']['sunset'], tz=pytz.UTC)
         vancouver_tz = pytz.timezone('America/Vancouver')
-        sunrise = datetime.fromtimestamp(current_data['sys']['sunrise'])
-        sunset = datetime.fromtimestamp(current_data['sys']['sunset'])
-        
-        # Make them timezone aware
-        sunrise = vancouver_tz.localize(sunrise)
-        sunset = vancouver_tz.localize(sunset)
-        
+
+        # Convert to Vancouver time
+        sunrise = sunrise.astimezone(vancouver_tz)
+        sunset = sunset.astimezone(vancouver_tz)
         # Rest of the existing code...
         
         # Get 3-day hourly forecast
