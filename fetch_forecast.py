@@ -432,7 +432,7 @@ def display_humidity_for_url(container=None, url='', title=''):
 
         with col1:
             # Add sunrise time as the first metric
-            sunrise_time = weather_data.sunrise.astimezone(pytz.timezone('America/Vancouver')).strftime('%I:%M %p')
+            sunrise_time = weather_data.sunrise.astimezone(pytz.timezone('America/Vancouver')).strftime('%H:%M')
             st.metric("🌅 Sunrise", sunrise_time)
             
             # Existing metrics...
@@ -444,7 +444,7 @@ def display_humidity_for_url(container=None, url='', title=''):
 
         with col2:
             # Add sunset time as the first metric
-            sunset_time = weather_data.sunset.astimezone(pytz.timezone('America/Vancouver')).strftime('%I:%M %p')
+            sunset_time = weather_data.sunset.astimezone(pytz.timezone('America/Vancouver')).strftime('%H:%M')
             st.metric("🪐 Sunset", sunset_time)
             
             # Existing metrics...
