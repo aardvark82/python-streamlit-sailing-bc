@@ -37,7 +37,7 @@ def openAIFetchForecastForURL(url):
     chat_gpt_msg = ("Make it short and just the table. "
                     "Parse this forecast and extract a table with the following columns: time, wind speed, max wind speed, wind direction. "
                     "Make it a CSV."
-                    "The first few words before the first occurence of 'becoming' describe the current conditions with a time of now and should be the 1st entry in the table")
+                    "The first few words before the first occurence of 'bebecoming' describe the current conditions with a time of now and should be the 1st entry in the table")
     chat_gpt_msg = chat_gpt_msg + response.text
     url_api = "https://api.openai.com/v1/chat/completions"
 
@@ -456,12 +456,91 @@ def display_humidity_for_url(container=None, url='', title=''):
         col2.markdown(create_arrow_html(wind_dir_now, wind_speed_3h_kts),
                      unsafe_allow_html=True)
 
+        # Add precipitation forecast chart
+        display_precipitation_forecast(weather_data, container)
+
+
+def display_precipitation_forecast(weather_data, container):
+    import plotly.graph_objects as go
+    from datetime import datetime, timedelta
+    
+    # Process forecast data
+    timestamps = []
+    precip_chances = []
+    
+    vancouver_tz = pytz.timezone('America/Vancouver')
+    
+    for item in weather_data.hourly_forecast:
+        dt = datetime.fromtimestamp(item['dt']).astimezone(vancouver_tz)
+        timestamps.append(dt)
+        # Get precipitation probability (convert from 0-1 to percentage)
+        pop = item.get('pop', 0) * 100
+        precip_chances.append(pop)
+    
+    # Create figure
+    fig = go.Figure()
+    
+    # Add precipitation chance bars
+    fig.add_trace(go.Bar(
+        x=timestamps,
+        y=precip_chances,
+        name='Precipitation Chance',
+        marker_color='rgba(58, 134, 255, 0.6)'
+    ))
+    
+    # Customize layout
+    fig.update_layout(
+        title='3-Day Precipitation Forecast',
+        xaxis_title='Time',
+        yaxis_title='Precipitation Chance (%)',
+        yaxis=dict(range=[0, 100]),
+        plot_bgcolor='white',
+        hovermode='x unified'
+    )
+    
+    # Add day separators and labels
+    for day in range(4):  # 0 to 3 days
+        base_time = datetime.now(vancouver_tz).replace(hour=0, minute=0, second=0, microsecond=0)
+        day_start = base_time + timedelta(days=day)
+        
+        # Add vertical line for day boundary
+        fig.add_vline(
+            x=day_start,
+            line_dash="dash",
+            line_color="gray",
+            opacity=0.5
+        )
+        
+        # Add day label
+        fig.add_annotation(
+            x=day_start,
+            y=100,
+            text=day_start.strftime('%A'),
+            showarrow=False,
+            yshift=10
+        )
+        
+        # Add hour markers (0, 6, 12, 18)
+        for hour in [0, 6, 12, 18]:
+            time_mark = day_start + timedelta(hours=hour)
+            fig.add_annotation(
+                x=time_mark,
+                y=-5,
+                text=f"{hour:02d}:00",
+                showarrow=False,
+                yshift=-20
+            )
+    
+    # Display the chart
+    container.plotly_chart(fig, use_container_width=True)
+
 
 from dataclasses import dataclass
 from datetime import datetime
 
 @dataclass
 class WeatherData:
+    hourly_forecast: list
     temperature: float
     cloud_condition: str
     outside_humidity: int
@@ -475,7 +554,7 @@ class WeatherData:
     weather_icon: str
 
 
-@st.cache_data(ttl=60)  # Cache for 1 minute
+@st.cache_data(ttl=60)
 def fetch_from_open_weather(lat: float, lon: float, api_key: str) -> WeatherData:
     """
     Fetch weather data from OpenWeatherMap API
@@ -496,26 +575,27 @@ def fetch_from_open_weather(lat: float, lon: float, api_key: str) -> WeatherData
         current_response.raise_for_status()
         current_data = current_response.json()
         
-        # Get forecast
-        forecast_params = {
+        # Get 3-day hourly forecast
+        hourly_forecast_url = "https://api.openweathermap.org/data/2.5/forecast"
+        hourly_params = {
             "lat": lat,
             "lon": lon,
             "appid": api_key,
             "units": "metric",
-            "cnt": 8
+            "cnt": 72  # 3 days of hourly data (24 * 3)
         }
         
-        forecast_response = requests.get(forecast_url, params=forecast_params)
-        forecast_response.raise_for_status()
-        forecast_data = forecast_response.json()
+        hourly_response = requests.get(hourly_forecast_url, params=hourly_params)
+        hourly_response.raise_for_status()
+        hourly_data = hourly_response.json()
         
         # Get precipitation data from forecast
-        next_3_hours_precip = forecast_data['list'][0].get('rain', {}).get('3h', 0) if 'list' in forecast_data else 0
+        next_3_hours_precip = hourly_data['list'][0].get('rain', {}).get('3h', 0) if 'list' in hourly_data else 0
         
         # Sum up precipitation for next 24 hours
         next_24_hours_precip = sum(
             item.get('rain', {}).get('3h', 0)
-            for item in forecast_data.get('list', [])[:8]
+            for item in hourly_data.get('list', [])[:8]
         )
         
         # Create WeatherData object
@@ -528,9 +608,10 @@ def fetch_from_open_weather(lat: float, lon: float, api_key: str) -> WeatherData
             timestamp=datetime.fromtimestamp(current_data['dt']),
             wind_speed_now=current_data['wind']['speed'],
             wind_direction_now=current_data['wind']['deg'],
-            wind_speed_3h=forecast_data['list'][0]['wind']['speed'],
-            wind_direction_3h=forecast_data['list'][0]['wind']['deg'],
-            weather_icon = current_data["weather"][0]["icon"]
+            wind_speed_3h=hourly_data['list'][0]['wind']['speed'],
+            wind_direction_3h=hourly_data['list'][0]['wind']['deg'],
+            weather_icon = current_data["weather"][0]["icon"],
+            hourly_forecast=hourly_data['list']
         )
         
         return weather_data
@@ -541,7 +622,7 @@ def fetch_from_open_weather(lat: float, lon: float, api_key: str) -> WeatherData
     except KeyError as e:
         st.error(f"Error parsing weather data: {str(e)}")
         st.write("Current data:", current_data)
-        st.write("Forecast data:", forecast_data)
+        st.write("Forecast data:", hourly_data)
         return None
 
 def get_wind_direction(degrees: int) -> str:
@@ -631,12 +712,29 @@ def display_marine_forecast_for_url(container=None, url='', title=''):
 
     # Handle '<' values in wind speed columns
     def clean_wind_speed(x):
+
+        def extract_highest_integer(text):
+            # Find all sequences of digits in the string
+            numbers_as_strings = re.findall(r'\d+', text)
+            if not numbers_as_strings:
+                return None  # No integers found in the string
+            # Convert the found strings to integers
+            integers = [int(num_str) for num_str in numbers_as_strings]
+            # Return the maximum integer
+            return max(integers)
+
         if pd.isna(x):
             return 0
         if isinstance(x, str) and '<' in x:
             return float(x.replace('<', ''))
         if isinstance(x, str) and 'light' in x:
             return float(2)
+        if isinstance(x, str):
+            nbr = extract_highest_integer(x)
+            if nbr:
+                return float(nbr)
+            else:
+                return float(-1)
 
         return float(x)
 
