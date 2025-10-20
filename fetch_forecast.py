@@ -534,10 +534,11 @@ def display_precipitation_forecast(weather_data, container):
                 showarrow=False,
                 yshift=-20
             )
-    
-    # Display the chart
-    container.plotly_chart(fig, use_container_width=True)
 
+    # Display the chart
+    container.write("Debug: Starting precipitation forecast display")
+    container.plotly_chart(fig, use_container_width=True)
+    container.write(f"Debug: Received weather data with {len(weather_data.hourly_forecast)} forecast items")
 
 from dataclasses import dataclass
 from datetime import datetime
