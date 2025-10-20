@@ -490,16 +490,20 @@ def display_precipitation_forecast(weather_data, container):
     
     # Customize layout
     fig.update_layout(
-        title='3-Day Precipitation Forecast',
+        title='5-Day Precipitation Forecast',
         xaxis_title='Time',
         yaxis_title='Precipitation Chance (%)',
         yaxis=dict(range=[0, 100]),
         plot_bgcolor='white',
-        hovermode='x unified'
+        hovermode='x unified',
+        xaxis=dict(
+            dtick=8 * 3600 * 1000,  # 8 hours in milliseconds
+            tickformat='%H:00',     # Show hours in 24-hour format
+        )
     )
     
     # Add day separators and labels
-    for day in range(4):  # 0 to 3 days
+    for day in range(6):  # 0 to 3 days
         base_time = datetime.now(vancouver_tz).replace(hour=0, minute=0, second=0, microsecond=0)
         day_start = base_time + timedelta(days=day)
         
@@ -520,8 +524,8 @@ def display_precipitation_forecast(weather_data, container):
             yshift=10
         )
         
-        # Add hour markers (0, 6, 12, 18)
-        for hour in [0, 6, 12, 18]:
+        # Add hour markers every 8 hours (00:00, 08:00, 16:00)
+        for hour in [0, 8, 16]:
             time_mark = day_start + timedelta(hours=hour)
             fig.add_annotation(
                 x=time_mark,
