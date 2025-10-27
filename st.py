@@ -50,8 +50,7 @@ def displayStreamlitDateTime(datetime, container=None):
     draw.text(datetime_van)
 
 # Selector
-from fetch_forecast import display_marine_forecast_for_url, display_humidity_for_lat_long, \
-    display_beach_quality_for_sandy_cove
+from fetch_forecast import display_marine_forecast_for_url
 from fetch_forecast import display_beach_quality_for_sandy_cove
 from fetch_forecast import display_humidity_for_lat_long
 
