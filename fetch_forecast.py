@@ -402,18 +402,15 @@ def create_arrow_html(direction, wind_speed = ''):
             return arrow_html
     
 
-def display_humidity_for_url(container=None, url='', title=''):
+def display_humidity_for_lat_long(container=None, lat=None, long=None, title=''):
     if container is None:
         container = st
 
-    # Example coordinates for West Vancouver
-    VANCOUVER_LAT = 49.32
-    VANCOUVER_LON = -123.16
     # Get API key from Streamlit secrets
     api_key = st.secrets["openweather_api_key"]
 
     # Fetch weather data
-    weather_data = fetch_from_open_weather(VANCOUVER_LAT, VANCOUVER_LON, api_key)
+    weather_data = fetch_from_open_weather(lat, long, api_key)
 
     # display time
     vancouver_tz = pytz.timezone('America/Vancouver')
@@ -737,9 +734,11 @@ def get_wind_direction(degrees: int) -> str:
     return directions[index]
 
 
-def display_beach_quality_for_url(container=None, url='', title=''):
+def display_beach_quality_for_sandy_cove(container=None, title=''):
     if container is None:
         container = st
+
+    container.subheader(title)
 
     ecoli_sample1, ecoli_sample2, time_measurement = fetch_water_quality_for_url(url='https://www.vch.ca/en/Documents/VCH-beach-route3.pdf', title=title)
 

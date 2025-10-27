@@ -50,14 +50,15 @@ def displayStreamlitDateTime(datetime, container=None):
     draw.text(datetime_van)
 
 # Selector
-from fetch_forecast import display_marine_forecast_for_url
-from fetch_forecast import display_beach_quality_for_url
-from fetch_forecast import display_humidity_for_url
+from fetch_forecast import display_marine_forecast_for_url, display_humidity_for_lat_long, \
+    display_beach_quality_for_sandy_cove
+from fetch_forecast import display_beach_quality_for_sandy_cove
+from fetch_forecast import display_humidity_for_lat_long
 
 def headerbox():
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
-        "Tides",
+    tab10, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab1 = st.tabs([
+        "Weather",
         "Jericho",
         "Halibut Bank",
         "Pt Atkinson",
@@ -66,24 +67,30 @@ def headerbox():
         "S Nanaimo",
         "N Nanaimo",
         "Beach",
-        'Weather'
+        'Tides'
     ])
+    # Example coordinates for West Vancouver
+    VANCOUVER_LAT = 49.32
+    VANCOUVER_LON = -123.16
 
-    displayPointAtkinsonTides(container=tab1)
+    display_humidity_for_lat_long(container=tab10, lat=VANCOUVER_LAT, long=VANCOUVER_LON, title="Weather")
+    display_beach_quality_for_sandy_cove(container=tab10, title="Beach water quality Sandy Cove")
+    display_point_atkinson_tides(container=tab10)
+
     parseJerichoWindHistory(container=tab2)
     refreshBuoy('46146','Halibut Bank', container=tab3)
     refreshBuoy('WSB', 'Point Atkinson', container=tab4)
     refreshBuoy('WAS', 'Pam Rocks', container=tab5)
 
-    URL_forecast_howesound = 'https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=06400'
-    URL_forecast_south_of_nanaimo = 'https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=14305'
-    URL_forecast_north_of_nanaimo = 'https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=14301'
 
     display_marine_forecast_for_url(container=tab6, url=URL_forecast_howesound, title="Howe Sound")
     display_marine_forecast_for_url(container=tab7, url=URL_forecast_south_of_nanaimo, title="South of Nanaimo")
     display_marine_forecast_for_url(container=tab8, url=URL_forecast_north_of_nanaimo, title="North of Nanaimo")
     display_beach_quality_for_url(container=tab9, url=URL_forecast_north_of_nanaimo, title="Beach water quality")
-    display_humidity_for_url(container=tab10, url=URL_forecast_north_of_nanaimo, title="Weather")
+
+
+    display_point_atkinson_tides(container=tab1)
+
 
 def displayWindWarningIfNeeded(wind_speed, container=None):
     """ above 9 knots """
@@ -111,7 +118,7 @@ def displayWindWarningIfNeeded(wind_speed, container=None):
         return
 
 
-from fetch_tides import displayPointAtkinsonTides
+from fetch_tides import display_point_atkinson_tides
 
 
 def parseJerichoWindHistory(container = None):

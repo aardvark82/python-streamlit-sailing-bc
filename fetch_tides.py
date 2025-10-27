@@ -994,7 +994,7 @@ def processResponseToJSONOpenAI(container = None, response = None):
 
 
 # Modify your displayPointAtkinsonTides function to use the new visualization
-def displayPointAtkinsonTides(container=None, title="Point Atkinson"):
+def display_point_atkinson_tides(container=None, title="Point Atkinson"):
     if container:
         draw = container
     else:
