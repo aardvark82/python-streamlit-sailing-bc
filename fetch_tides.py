@@ -640,8 +640,6 @@ def create_natural_tide_chart(tide_df, container=None):
     print("----------------------------------------------------------------------------")
     print(smooth_tide_df)
 
-    # Create the visualization
-    draw.subheader("🌊 Point Atkinson Tide Chart")
 
     # Use Plotly for better interactivity
     import plotly.graph_objects as go
@@ -994,13 +992,13 @@ def processResponseToJSONOpenAI(container = None, response = None):
 
 
 # Modify your displayPointAtkinsonTides function to use the new visualization
-def display_point_atkinson_tides(container=None, title="Point Atkinson"):
+def display_point_atkinson_tides(container=None, title="🌊Tides for Point Atkinson"):
     if container:
         draw = container
     else:
         draw = st
 
-    container.subheader("Tides for "+title)
+    container.subheader(title)
 
     # Fetch the tide data
     if USE_BEAUTIFULSOUP:
