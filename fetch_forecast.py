@@ -466,10 +466,9 @@ def display_humidity_for_url(container=None, url='', title=''):
         col2.markdown(create_arrow_html(wind_dir_now, wind_speed_3h_kts),
                      unsafe_allow_html=True)
 
-        # Add precipitation forecast chart
+        # Add a precipitation forecast chart
         display_precipitation_forecast(weather_data, container)
-        # Add wind forecast chart
-        display_wind_forecast(weather_data, container)
+
 
 def display_precipitation_forecast(weather_data, container):
     import plotly.graph_objects as go
@@ -485,8 +484,13 @@ def display_precipitation_forecast(weather_data, container):
         dt = datetime.fromtimestamp(item['dt']).astimezone(vancouver_tz)
         timestamps.append(dt)
         # Get precipitation probability (convert from 0-1 to percentage)
-        pop = item.get('pop', 0) * 100
-        precip_chances.append(pop)
+        pop = item.get('pop', 0) * 30
+        rain = item.get('rain', 0)
+        risk_of_rain = -.1
+        if rain:
+            risk_of_rain = rain.get('3h', 0)
+
+        precip_chances.append(risk_of_rain*10)
     
     # Create figure
     fig = go.Figure()
@@ -504,7 +508,7 @@ def display_precipitation_forecast(weather_data, container):
         title='5-Day Precipitation Forecast',
         xaxis_title='Time',
         yaxis_title='Precipitation Chance (%)',
-        yaxis=dict(range=[0, 100]),
+        yaxis=dict(range=[0, 30]),
         plot_bgcolor='white',
         hovermode='x unified',
         xaxis=dict(
@@ -547,9 +551,10 @@ def display_precipitation_forecast(weather_data, container):
             )
 
     # Display the chart
+    add_wind_forecast_to_plotly_chart(weather_data, fig)
     container.plotly_chart(fig, use_container_width=True)
 
-def display_wind_forecast(weather_data, container):
+def add_wind_forecast_to_plotly_chart(weather_data, fig):
     import plotly.graph_objects as go
     from datetime import datetime, timedelta
     
@@ -568,10 +573,7 @@ def display_wind_forecast(weather_data, container):
         wind_gust = item['wind'].get('gust', wind_speed) * 1.94384  # Convert to knots
         wind_speeds.append(wind_speed)
         wind_gusts.append(wind_gust)
-    
-    # Create figure
-    fig = go.Figure()
-    
+
     # Add wind speed line
     fig.add_trace(go.Scatter(
         x=timestamps,
@@ -624,9 +626,6 @@ def display_wind_forecast(weather_data, container):
         )
         
 
-
-    # Display the chart
-    container.plotly_chart(fig, use_container_width=True)
 
 from dataclasses import dataclass
 from datetime import datetime

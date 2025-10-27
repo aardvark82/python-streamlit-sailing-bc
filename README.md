@@ -19,6 +19,8 @@ https://www.weather.gc.ca/marine/weatherConditions-currentConditions_e.html?mapI
 ## live weather API from openweathermap.org
 https://home.openweathermap.org/
 - 1000 calls/day for free
+Example: Vancouver 5 day 3 hour forecast 
+- http://api.openweathermap.org/data/2.5/forecast?lat=49.32&lon=-123.16&appid=84db6de5dad88cc4e822d5b3cf5e7714
 
 ## live wind data from land stations WAS and WSB (parsed with BeautifulSoup4)
 https://www.weather.gc.ca/marine/weatherConditions-currentConditions_e.html?mapID=02&siteID=14305&stationID=WAS
