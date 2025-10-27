@@ -468,7 +468,8 @@ def display_humidity_for_url(container=None, url='', title=''):
 
         # Add precipitation forecast chart
         display_precipitation_forecast(weather_data, container)
-
+        # Add wind forecast chart
+        display_wind_forecast(weather_data, container)
 
 def display_precipitation_forecast(weather_data, container):
     import plotly.graph_objects as go
@@ -544,6 +545,85 @@ def display_precipitation_forecast(weather_data, container):
                 showarrow=False,
                 yshift=-20
             )
+
+    # Display the chart
+    container.plotly_chart(fig, use_container_width=True)
+
+def display_wind_forecast(weather_data, container):
+    import plotly.graph_objects as go
+    from datetime import datetime, timedelta
+    
+    # Process forecast data
+    timestamps = []
+    wind_speeds = []
+    wind_gusts = []
+    
+    vancouver_tz = pytz.timezone('America/Vancouver')
+    
+    for item in weather_data.hourly_forecast:
+        dt = datetime.fromtimestamp(item['dt']).astimezone(vancouver_tz)
+        timestamps.append(dt)
+        # Get wind speed and gust (convert from m/s to knots)
+        wind_speed = item['wind'].get('speed', 0) * 1.94384  # Convert to knots
+        wind_gust = item['wind'].get('gust', wind_speed) * 1.94384  # Convert to knots
+        wind_speeds.append(wind_speed)
+        wind_gusts.append(wind_gust)
+    
+    # Create figure
+    fig = go.Figure()
+    
+    # Add wind speed line
+    fig.add_trace(go.Scatter(
+        x=timestamps,
+        y=wind_speeds,
+        name='Wind Speed',
+        line=dict(color='blue', width=2)
+    ))
+    
+    # Add wind gust line
+    fig.add_trace(go.Scatter(
+        x=timestamps,
+        y=wind_gusts,
+        name='Wind Gust',
+        line=dict(color='red', width=2, dash='dash')
+    ))
+    
+    # Customize layout
+    fig.update_layout(
+        title='5-Day Wind Forecast',
+        xaxis_title='Time',
+        yaxis_title='Wind Speed (knots)',
+        plot_bgcolor='white',
+        hovermode='x unified',
+        xaxis=dict(
+            dtick=8 * 3600 * 1000,  # 8 hours in milliseconds
+            tickformat='%H:00',     # Show hours in 24-hour format
+        )
+    )
+    
+    # Add day separators and labels
+    for day in range(6):  # 0 to 5 days
+        base_time = datetime.now(vancouver_tz).replace(hour=0, minute=0, second=0, microsecond=0)
+        day_start = base_time + timedelta(days=day)
+        
+        # Add vertical line for day boundary
+        fig.add_vline(
+            x=day_start,
+            line_dash="dash",
+            line_color="gray",
+            opacity=0.5
+        )
+        
+        # Add day label
+        fig.add_annotation(
+            x=day_start,
+            y=max(max(wind_speeds), max(wind_gusts)),
+            text=day_start.strftime('%A'),
+            showarrow=False,
+            yshift=10
+        )
+        
+
 
     # Display the chart
     container.plotly_chart(fig, use_container_width=True)
@@ -795,7 +875,7 @@ def display_marine_forecast_for_url(container=None, url='', title=''):
 
     if issue_date:
         # Display relative and absolute dates
-        container.caption(f"({issue_date.strftime('%Y-%m-%d %I:%M %p %Z')})")
+        container.caption(f"({issue_date.strftime('%Y-%m-%d %H:%M %Z')})")
 
         # Display title and subtitle
         container.subheader(title)
