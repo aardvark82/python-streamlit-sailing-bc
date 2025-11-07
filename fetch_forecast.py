@@ -419,8 +419,9 @@ def display_humidity_for_lat_long(container=None, lat=None, long=None, title='')
     container.header(f"Issued {relative_date}")
     # container.caption(f"Last updated: {relative_date}")
 
+
     if weather_data:
-        col1, col2 = container.columns(2)
+        col1, col2, col3 = container.columns(3)
         
         # Convert wind speeds from m/s to knots
         wind_speed_now_kts = weather_data.wind_speed_now * 1.94384
@@ -431,11 +432,15 @@ def display_humidity_for_lat_long(container=None, lat=None, long=None, title='')
             # Add sunrise time as the first metric
             sunrise_time = weather_data.sunrise.astimezone(pytz.timezone('America/Vancouver')).strftime('%H:%M')
             st.metric("🌅 Sunrise", sunrise_time)
-            
+
             # Existing metrics...
-            st.metric("🌡️ Temperature", f"{weather_data.temperature:.1f}°C")
-            st.metric("💧️ Humidity", f"{weather_data.outside_humidity}%")
-            st.metric("🌧️ 3h Precipitation", f"{weather_data.next_3_hours_precipitation:.1f}mm")
+            #st.metric("☁️ Cloud Condition", weather_data.cloud_condition)
+            # The icon code from your weather data is "04d"
+            icon_code = weather_data.weather_icon
+            icon_url = f"http://openweathermap.org/img/wn/{icon_code}@2x.png"  # @2x for larger size
+            # Display in Streamlit
+            st.image(icon_url, width=64)  # Adjust width as needed
+
             wind_dir_now = get_wind_direction(weather_data.wind_direction_now)
             st.metric("💨 Wind Now", f"{wind_dir_now} {wind_speed_now_kts:.1f}kts")
 
@@ -444,17 +449,18 @@ def display_humidity_for_lat_long(container=None, lat=None, long=None, title='')
             sunset_time = weather_data.sunset.astimezone(pytz.timezone('America/Vancouver')).strftime('%H:%M')
             st.metric("🪐 Sunset", sunset_time)
             
-            # Existing metrics...
-            st.metric("☁️ Cloud Condition", weather_data.cloud_condition)
-            # The icon code from your weather data is "04d"
-            icon_code = weather_data.weather_icon
-            icon_url = f"http://openweathermap.org/img/wn/{icon_code}@2x.png"  # @2x for larger size
-            # Display in Streamlit
-            st.image(icon_url, width=64)  # Adjust width as needed
+            st.metric("🌧️ 3h Precipitation", f"{weather_data.next_3_hours_precipitation:.1f}mm")
 
-            st.metric("🌧️ 24h Precipitation", f"{weather_data.next_24_hours_precipitation:.1f}mm")
             wind_dir_3h = get_wind_direction(weather_data.wind_direction_3h)
             st.metric("💨 Wind in 3h", f"{wind_dir_3h} {wind_speed_3h_kts:.1f}kts")
+
+
+        with col3:
+            st.metric("🌡️ Temperature", f"{weather_data.temperature:.1f}°C")
+            st.metric("🌧️ 24h Precipitation", f"{weather_data.next_24_hours_precipitation:.1f}mm")
+            # Existing metrics...
+            st.metric("💧️ Humidity", f"{weather_data.outside_humidity}%")
+
 
         from fetch_forecast import create_arrow_html
         col1.markdown(create_arrow_html(wind_dir_now, wind_speed_now_kts), 
@@ -503,19 +509,20 @@ def display_precipitation_forecast(weather_data, container):
     # Customize layout
     fig.update_layout(
         title='5-Day Precipitation Forecast',
-        xaxis_title='Time',
+        xaxis_title='Day',  # Changed from 'Time' to 'Day'
         yaxis_title='Precipitation Chance (%)',
         yaxis=dict(range=[0, 30]),
         plot_bgcolor='white',
         hovermode='x unified',
         xaxis=dict(
-            dtick=8 * 3600 * 1000,  # 8 hours in milliseconds
-            tickformat='%H:00',     # Show hours in 24-hour format
+            dtick='D1',  # Set tick marks to show every day
+            tickformat='%A',  # Format to show full day name
+            tickangle=45,  # Angle the labels for better readability
         )
     )
     
     # Add day separators and labels
-    for day in range(6):  # 0 to 3 days
+    for day in range(6):  # 0 to 5 days
         base_time = datetime.now(vancouver_tz).replace(hour=0, minute=0, second=0, microsecond=0)
         day_start = base_time + timedelta(days=day)
         
@@ -527,25 +534,14 @@ def display_precipitation_forecast(weather_data, container):
             opacity=0.5
         )
         
-        # Add day label
+        # Add day label at the top
         fig.add_annotation(
             x=day_start,
             y=100,
-            text=day_start.strftime('%A'),
+            text=day_start.strftime('%A'),  # Full day name
             showarrow=False,
             yshift=10
         )
-        
-        # Add hour markers every 8 hours (00:00, 08:00, 16:00)
-        for hour in [0, 8, 16]:
-            time_mark = day_start + timedelta(hours=hour)
-            fig.add_annotation(
-                x=time_mark,
-                y=-5,
-                text=f"{hour:02d}:00",
-                showarrow=False,
-                yshift=-20
-            )
 
     # Display the chart
     add_wind_forecast_to_plotly_chart(weather_data, fig)

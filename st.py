@@ -16,9 +16,6 @@ import pytz
 
 from timeago import format as timeago_format
 
-st.badge("v15", color="blue")
-
-
 def cached_fetch_url(url):
     response = requests.get(url, timeout=25)
     response.raise_for_status()
@@ -93,6 +90,7 @@ def headerbox():
 
 
     display_point_atkinson_tides(container=tab1)
+    st.badge("v20", color="blue")
 
 
 def displayWindWarningIfNeeded(wind_speed, container=None):
