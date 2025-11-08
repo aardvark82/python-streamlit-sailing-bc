@@ -21,7 +21,7 @@ from streamlit_autorefresh import st_autorefresh
 
 # Call the component to set up the auto-refresh
 # interval is in milliseconds, so 15 minutes = 15 * 60 * 1000 = 900000
-st_autorefresh(interval=900000, key="data_refresher")
+st_autorefresh(interval=300000, key="data_refresher")
 
 
 def cached_fetch_url(url):
