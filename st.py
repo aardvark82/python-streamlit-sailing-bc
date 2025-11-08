@@ -16,6 +16,14 @@ import pytz
 
 from timeago import format as timeago_format
 
+import streamlit as st
+from streamlit_autorefresh import st_autorefresh
+
+# Call the component to set up the auto-refresh
+# interval is in milliseconds, so 15 minutes = 15 * 60 * 1000 = 900000
+st_autorefresh(interval=900000, key="data_refresher")
+
+
 def cached_fetch_url(url):
     response = requests.get(url, timeout=25)
     response.raise_for_status()
@@ -91,6 +99,7 @@ def headerbox():
 
     display_point_atkinson_tides(container=tab1)
     st.badge("v20", color="blue")
+    st.write("This application will auto-refresh every 15 minutes.")
 
 
 def displayWindWarningIfNeeded(wind_speed, container=None):
