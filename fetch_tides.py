@@ -1012,11 +1012,14 @@ def display_point_atkinson_tides(container=None, title="🌊Tides for Point Atki
     draw.write(CANADA_GOVERNMENT_TIDE_POINT_ATKINSON)
 
     if USE_BEAUTIFULSOUP:
+        draw.info('USE_BEAUTIFULSOUP')
         response = beautifulSoupFetchTidesForURL("https://www.tides.gc.ca/en/stations/07795")
         data = response
         # response is a json
 
     if USE_SELENIUM:
+        draw.info('USE_SELENIUM')
+
         _csv = seleniumGetTidesFromURL('https://www.tides.gc.ca/en/stations/07795')
 
         # too much data, grab only every 10th line (10 minutes)
@@ -1030,11 +1033,15 @@ def display_point_atkinson_tides(container=None, title="🌊Tides for Point Atki
         data = processCSVResponseToJSONSelenium(draw, csv_half_subsampled)
 
     if USE_CHAT_GPT:
+        draw.info('USE_CHAT_GPT')
+
         response = openAIFetchTidesForURL("https://www.tides.gc.ca/en/stations/07795")
         # response is a response with a json
         data = processResponseToJSONOpenAI(draw, response)
 
     if USE_STORMGLASS:
+        draw.info('USE_STORMGLASS')
+
         response = stormglassFetchTidesPointAtkinson()
         if 'errors' in response:
             if 'key' in response['errors']:
