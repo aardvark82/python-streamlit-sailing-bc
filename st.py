@@ -358,31 +358,18 @@ def plot_historical_wind_data(container, buoy_id):
             max_wind = df['wind_speed'].max()
             container.info(f"Min wind speed: {min_wind} knots, Max wind speed: {max_wind} knots")
 
-
             df = df.sort_values('timestamp')
-            df.set_index('timestamp', inplace=True)
 
-            # Resample to hourly data
-            df_hourly = df.resample('H').agg({
-                'wind_speed': 'mean',
-                'direction': 'first'  # Take first direction in each hour
-            })
-
-            # Ensure we span the full 72 hours even if data is sparse
-            now_van = datetime.now(pytz.timezone('America/Vancouver'))
-            full_idx = pd.date_range(start=three_days_ago, end=now_van, freq='H')
-            df_hourly = df_hourly.reindex(full_idx)
-            df_hourly.index.name = 'timestamp'
-
-            # Create plot with Plotly
             import plotly.express as px
-            fig = px.line(df_hourly,
-                          y='wind_speed',
-                          title=f'Wind Speed and Direction Over Last 3 Days - Buoy {buoy_id}',
-                          labels={'wind_speed': 'Wind Speed (knots)',
-                                  'timestamp': 'Time'})
+            fig = px.scatter(df,
+                             x='timestamp',
+                             y='wind_speed',
+                             title=f'Wind Speed and Direction Over Last 3 Days - Buoy {buoy_id}',
+                             labels={'wind_speed': 'Wind Speed (knots)',
+                                     'timestamp': 'Time'})
 
             # Set x-axis range to show last 3 days even if data is sparse
+            now_van = datetime.now(pytz.timezone('America/Vancouver'))
             fig.update_xaxes(range=[three_days_ago, now_van])
             fig.update_yaxes(range=[0, 40])
 
@@ -393,9 +380,7 @@ def plot_historical_wind_data(container, buoy_id):
                     "Speed: %{y:.1f} knots",
                     "Direction: %{customdata}"
                 ]),
-                customdata=df_hourly['direction'],
-                connectgaps=False
-
+                customdata=df['direction']
             )
 
             # Add wind direction arrows
@@ -414,6 +399,29 @@ def plot_historical_wind_data(container, buoy_id):
     except Exception as e:
         print(f"Error fetching historical data: {e}")
         container.error("Could not load historical data")
+
+def record_wind_data_history_for_buoy(buoy, container, wind_speed,direction):
+
+    # Store in KVDB
+    # Store data in KVDB
+    current_time = datetime.now(pytz.timezone('America/Vancouver'))
+    timestamp = current_time.isoformat(timespec='minutes')
+
+    kvdb_url = st.secrets["kvdb_bucket_url"]  #from secrets.toml
+
+    @st.cache_data(ttl=1800)
+    def store_wind_data_cached(kvdb_url,buoy,timestamp, wind_speed,direction):
+        try:
+            # Store wind data,         # Store buoy ID as a prefix
+            requests.put(f"{kvdb_url}/{buoy}_wind_{timestamp}", str(wind_speed))
+            requests.put(f"{kvdb_url}/{buoy}_direction_{timestamp}", direction)
+        except Exception as e:
+            print(f"Error storing data in KVDB: {e}")
+        return 0
+
+    store_wind_data_cached(kvdb_url,buoy,timestamp, wind_speed,direction)
+    # Fetch and plot historical data
+    plot_historical_wind_data(container, buoy)
 
 
 def refreshBuoy(buoy = '46146', title = 'Halibut Bank - 46146', container = None):
@@ -480,28 +488,6 @@ def refreshBuoy(buoy = '46146', title = 'Halibut Bank - 46146', container = None
 
         return direction, highest_speed
 
-    direction, wind_speed = parse_wind_data(data_wind)
-
-    # Store in KVDB
-    # Store data in KVDB
-    current_time = datetime.now(pytz.timezone('America/Vancouver'))
-    timestamp = current_time.isoformat(timespec='minutes')
-
-    kvdb_url = st.secrets["kvdb_bucket_url"]  #from secrets.toml
-
-    @st.cache_data(ttl=1800)
-    def store_wind_data_cached(kvdb_url,buoy,timestamp, wind_speed,direction):
-        try:
-            # Store wind data,         # Store buoy ID as a prefix
-            requests.put(f"{kvdb_url}/{buoy}_wind_{timestamp}", str(wind_speed))
-            requests.put(f"{kvdb_url}/{buoy}_direction_{timestamp}", direction)
-        except Exception as e:
-            print(f"Error storing data in KVDB: {e}")
-        return 0
-
-    store_wind_data_cached(kvdb_url,buoy,timestamp, wind_speed,direction)
-    # Fetch and plot historical data
-    plot_historical_wind_data(container, buoy)
 
     if buoy == '46146':
         data_wave_height = rows[1].find_all('td')[0].text.strip() + 'm'
@@ -565,8 +551,12 @@ def refreshBuoy(buoy = '46146', title = 'Halibut Bank - 46146', container = None
     col2.metric("Wave Period", data_waveperiod)
     col3.metric("Pressure", data_pressure)
 
+
+    direction, wind_speed = parse_wind_data(data_wind)
+    record_wind_data_history_for_buoy(buoy, container, wind_speed, direction)
+
     # st.code(soup) # debug HTML
-    drawMapWithBuoy(container=draw, buoy=None)
+    drawMapWithBuoy(container=draw, buoy=buoy)
 
 
 
