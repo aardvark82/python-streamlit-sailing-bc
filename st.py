@@ -257,6 +257,165 @@ def headerboxMenuDeprecated():
 
     refreshBuoy(buoy = buoy, title = title)
 
+
+def drawMapWithBuoy(container = None, buoy = None):
+#Halibut Bank - 46146
+    latlong =  None
+    if buoy == '46146':
+        latlong = pd.DataFrame({
+            'latitude': [49.34],
+            'longitude': [-123.72]
+        })
+    if buoy == 'WSB':
+        latlong = pd.DataFrame({
+            'latitude': [49.330],
+            'longitude': [-123.2646]
+        })
+    if buoy == 'WAS':
+        latlong = pd.DataFrame({
+            'latitude': [49.49],
+            'longitude': [-123.3]
+        })
+    ## Create a map with the data
+    container.map(latlong, zoom=10)
+
+
+@st.cache_data(ttl=144600)
+def get_wind_value_and_direction_from_kvdb(kvdb_url, key, buoy_id, timestamp_str):
+    return float(requests.get(f"{kvdb_url}/{key}").text), requests.get(
+        f"{kvdb_url}/{buoy_id}_direction_{timestamp_str}").text
+
+
+def plot_historical_wind_data(container, buoy_id):
+    """Fetch and plot historical wind data from KVDB for a specific buoy"""
+    kvdb_url = st.secrets["kvdb_bucket_url"]
+
+    # Fetch all keys from last 3 days
+    try:
+        # Get all keys
+        # Get keys with prefix for this buoy and include values
+        params = {
+            'prefix': f"{buoy_id}_wind_",
+            'values': 'false',
+            'format': 'text'
+        }
+
+
+        response = requests.get(f"{kvdb_url}/", params=params)
+        container.write(f"KVDB API Status Code: {response.status_code}")
+        if response.status_code != 200:
+            container.error(f"KVDB API error: {response.status_code}")
+            return
+
+        try:
+
+            all_keys = response.text.splitlines()
+            if not isinstance(all_keys, list):
+                container.error("Invalid response format from KVDB")
+                container.write("Expected list of keys, got:")
+                container.write(type(all_keys))
+                return
+
+            # Filter keys for wind data from last 3 days
+            three_days_ago = datetime.now(pytz.timezone('America/Vancouver')) - pd.Timedelta(days=3)
+
+            wind_data = []
+            buoy_data = []
+            timestamps = []
+            data_points = []
+            print (f"KVDB all keys stored = {len(all_keys)}")
+            container.write(f"Found {len(all_keys)} total keys in KVDB")
+        except requests.exceptions.JSONDecodeError as e:
+            container.error(f"Failed to parse KVDB response: {str(e)}")
+            container.write("Raw response:")
+            container.code(response.text[:500])  # Show first 500 chars of response
+            return
+
+        for key in all_keys:
+
+            if key.startswith(f"{buoy_id}_wind_"):
+                timestamp_str = key.replace(f"{buoy_id}_wind_", "")
+                try:
+                    timestamp = datetime.fromisoformat(timestamp_str)
+                    if timestamp >= three_days_ago:
+                        # Fetch all values
+
+                        wind_value, direction = get_wind_value_and_direction_from_kvdb(kvdb_url, key, buoy_id, timestamp_str)
+                        container.info(f"Wind value: {wind_value}, Direction: {direction}")
+                        data_points.append({
+                            'timestamp': timestamp,
+                            'wind_speed': wind_value,
+                            'direction': direction
+                        })
+                except Exception as e:
+                    print(f"Error processing key {key}: {e}")
+
+        if data_points:
+            # Create DataFrame
+            df = pd.DataFrame(data_points)
+
+            min_wind = df['wind_speed'].min()
+            max_wind = df['wind_speed'].max()
+            container.info(f"Min wind speed: {min_wind} knots, Max wind speed: {max_wind} knots")
+
+
+            df = df.sort_values('timestamp')
+            df.set_index('timestamp', inplace=True)
+
+            # Resample to hourly data
+            df_hourly = df.resample('H').agg({
+                'wind_speed': 'mean',
+                'direction': 'first'  # Take first direction in each hour
+            })
+
+            # Ensure we span the full 72 hours even if data is sparse
+            now_van = datetime.now(pytz.timezone('America/Vancouver'))
+            full_idx = pd.date_range(start=three_days_ago, end=now_van, freq='H')
+            df_hourly = df_hourly.reindex(full_idx)
+            df_hourly.index.name = 'timestamp'
+
+            # Create plot with Plotly
+            import plotly.express as px
+            fig = px.line(df_hourly,
+                          y='wind_speed',
+                          title=f'Wind Speed and Direction Over Last 3 Days - Buoy {buoy_id}',
+                          labels={'wind_speed': 'Wind Speed (knots)',
+                                  'timestamp': 'Time'})
+
+            # Set x-axis range to show last 3 days even if data is sparse
+            fig.update_xaxes(range=[three_days_ago, now_van])
+            fig.update_yaxes(range=[0, 40])
+
+            # Add direction information to hover text
+            fig.update_traces(
+                hovertemplate="<br>".join([
+                    "Time: %{x}",
+                    "Speed: %{y:.1f} knots",
+                    "Direction: %{customdata}"
+                ]),
+                customdata=df_hourly['direction'],
+                connectgaps=False
+
+            )
+
+            # Add wind direction arrows
+            # from fetch_forecast import create_arrow_html
+            #
+            # for idx, row in df_hourly.iterrows():
+            #     container.markdown(
+            #         f"<div style='text-align: center; margin-bottom: -30px;'>{create_arrow_html(row['direction'], row['wind_speed'])}</div>",
+            #         unsafe_allow_html=True
+            #     )
+
+            container.plotly_chart(fig, use_container_width=True)
+        else:
+            container.warning(f"No data available for buoy {buoy_id} in the selected period")
+
+    except Exception as e:
+        print(f"Error fetching historical data: {e}")
+        container.error("Could not load historical data")
+
+
 def refreshBuoy(buoy = '46146', title = 'Halibut Bank - 46146', container = None):
     if container:
         draw = container
@@ -280,17 +439,71 @@ def refreshBuoy(buoy = '46146', title = 'Halibut Bank - 46146', container = None
         columns = row.find_all('td')
         # print('COLUMNS LENGTH:', len(columns))
 
-
     # --- debug end ---
 
     rows = table.tbody.find_all('tr')
     print('TABLE LENGTH:', len(rows))
 
     data_wind = data_pressure = data_wave_height = data_airtemp = data_waveperiod = data_watertemp = 'N/A'
-    if buoy == '46146':
-        data_wind = rows[0].find_all('td')[0].text.strip()
-        data_pressure = rows[0].find_all('td')[1].text.strip() + 'kPa'
 
+    data_wind = rows[0].find_all('td')[0].text.strip()
+
+    # parse wind speed from wind data. take the gust value or highest value. also extract direction. Here are some examples of potential values
+    # Here are some examples of potential values N19 gusts 24          WNW3         E7gusts10
+    def parse_wind_data(wind_text):
+        """
+        Parse wind data text to extract direction and highest speed value.
+        Returns tuple of (direction, highest_speed)
+
+        Examples:
+        'N 19 gusts 24' -> ('N', 24)
+        'WNW 3' -> ('WNW', 3)
+        'E 7 gusts 10' -> ('E', 10)
+        """
+        if not isinstance(wind_text, str) or not wind_text.strip():
+            return None, 0
+
+        # Split the string into parts
+        parts = wind_text.strip().split()
+        if not parts:
+            return None, 0
+
+        # First part is typically the direction
+        direction = parts[0]
+
+        # Extract all numbers from the string
+        import re
+        numbers = [int(num) for num in re.findall(r'\d+', wind_text)]
+
+        # Get the highest number (either gust or regular speed)
+        highest_speed = max(numbers) if numbers else 0
+
+        return direction, highest_speed
+
+    direction, wind_speed = parse_wind_data(data_wind)
+
+    # Store in KVDB
+    # Store data in KVDB
+    current_time = datetime.now(pytz.timezone('America/Vancouver'))
+    timestamp = current_time.isoformat(timespec='minutes')
+
+    kvdb_url = st.secrets["kvdb_bucket_url"]  #from secrets.toml
+
+    @st.cache_data(ttl=1800)
+    def store_wind_data_cached(kvdb_url,buoy,timestamp, wind_speed,direction):
+        try:
+            # Store wind data,         # Store buoy ID as a prefix
+            requests.put(f"{kvdb_url}/{buoy}_wind_{timestamp}", str(wind_speed))
+            requests.put(f"{kvdb_url}/{buoy}_direction_{timestamp}", direction)
+        except Exception as e:
+            print(f"Error storing data in KVDB: {e}")
+        return 0
+
+    store_wind_data_cached(kvdb_url,buoy,timestamp, wind_speed,direction)
+    # Fetch and plot historical data
+    plot_historical_wind_data(container, buoy)
+
+    if buoy == '46146':
         data_wave_height = rows[1].find_all('td')[0].text.strip() + 'm'
         data_airtemp = rows[1].find_all('td')[1].text.strip() + '°C'
 
@@ -298,9 +511,10 @@ def refreshBuoy(buoy = '46146', title = 'Halibut Bank - 46146', container = None
         data_watertemp = rows[2].find_all('td')[1].text.strip() + '°C'
 
     if buoy == 'WSB': # Point Atkinson
-        data_wind = rows[0].find_all('td')[0].text.strip()
+        None
+
     if buoy == 'WAS': # Pam Rocks
-        data_wind = rows[0].find_all('td')[0].text.strip()
+        None
 
     # data_wave_height = row.parent.find_all('td')[1]  # last cell in the row
         #data_airtemp = row.parent.find_all('td')[3]  # last cell in the row
@@ -308,6 +522,7 @@ def refreshBuoy(buoy = '46146', title = 'Halibut Bank - 46146', container = None
         #data_watertemp = row.parent.find_all('td')[5]  # last cell in the row
 
     draw.subheader('Weather Data for '+ title + ' - ' + buoy)
+
     draw.write(url)
 
     import re
@@ -351,25 +566,9 @@ def refreshBuoy(buoy = '46146', title = 'Halibut Bank - 46146', container = None
     col3.metric("Pressure", data_pressure)
 
     # st.code(soup) # debug HTML
+    drawMapWithBuoy(container=draw, buoy=None)
 
 
-#Halibut Bank - 46146
-    if buoy == '46146':
-        data = pd.DataFrame({
-            'latitude': [49.34],
-            'longitude': [-123.72]
-        })
-    if buoy == 'WSB':
-        data = pd.DataFrame({
-            'latitude': [49.330],
-            'longitude': [-123.2646]
-        })
-    if buoy == 'WAS':
-        data = pd.DataFrame({
-            'latitude': [49.49],
-            'longitude': [-123.3]
-        })
-    ## Create a map with the data
-    draw.map(data, zoom=10)
 
+# initialize application
 headerbox()
