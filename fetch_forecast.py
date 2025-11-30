@@ -641,7 +641,7 @@ class WeatherData:
     sunset: datetime   # Add this field
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=300)
 def fetch_from_open_weather(lat: float, lon: float, api_key: str) -> WeatherData:
     """
     Fetch weather data from OpenWeatherMap API
