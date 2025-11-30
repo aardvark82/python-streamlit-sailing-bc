@@ -360,6 +360,19 @@ def plot_historical_wind_data(container, buoy_id):
 
             df = df.sort_values('timestamp')
 
+            # Map directions to degrees for Plotly arrows
+            direction_map = {
+                'N': 0, 'NNE': 22.5, 'NE': 45, 'ENE': 67.5,
+                'E': 90, 'ESE': 112.5, 'SE': 135, 'SSE': 157.5,
+                'S': 180, 'SSW': 202.5, 'SW': 225, 'WSW': 247.5,
+                'W': 270, 'WNW': 292.5, 'NW': 315, 'NNW': 337.5
+            }
+            df['degree'] = df['direction'].map(direction_map).fillna(0)
+            # Plotly uses CCW rotation from Up.
+            # We want arrows to point with the wind.
+            # (180 - degree) converts Meteo (CW from N) to Plotly (CCW from Up)
+            df['rotation'] = (180 - df['degree']) % 360
+
             import plotly.express as px
             fig = px.scatter(df,
                              x='timestamp',
@@ -373,8 +386,14 @@ def plot_historical_wind_data(container, buoy_id):
             fig.update_xaxes(range=[three_days_ago, now_van])
             fig.update_yaxes(range=[0, 40])
 
-            # Add direction information to hover text
+            # Add direction information to hover text and use arrow markers
             fig.update_traces(
+                marker=dict(
+                    symbol='arrow-up',
+                    size=14,
+                    angle=df['rotation'],
+                    line=dict(width=1, color='DarkSlateGrey')
+                ),
                 hovertemplate="<br>".join([
                     "Time: %{x}",
                     "Speed: %{y:.1f} knots",
@@ -382,15 +401,6 @@ def plot_historical_wind_data(container, buoy_id):
                 ]),
                 customdata=df['direction']
             )
-
-            # Add wind direction arrows
-            # from fetch_forecast import create_arrow_html
-            #
-            # for idx, row in df_hourly.iterrows():
-            #     container.markdown(
-            #         f"<div style='text-align: center; margin-bottom: -30px;'>{create_arrow_html(row['direction'], row['wind_speed'])}</div>",
-            #         unsafe_allow_html=True
-            #     )
 
             container.plotly_chart(fig, use_container_width=True)
         else:
