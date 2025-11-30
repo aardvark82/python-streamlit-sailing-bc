@@ -554,10 +554,10 @@ def create_natural_tide_chart(tide_df, container=None):
         draw.badge("From Stormglass.io")
 
     # Cleanup columns
-    print("----------------------------------------------------------------------------")
-    print("ALL TIDES")
-    print("----------------------------------------------------------------------------")
-    print(tide_df)
+    # print("----------------------------------------------------------------------------")
+    # print("ALL TIDES")
+    # print("----------------------------------------------------------------------------")
+    # print(tide_df)
 
     print("Columns in tide_df:", tide_df.columns)
     # The datetime is already in the Time column, so we'll use that directly
@@ -565,15 +565,15 @@ def create_natural_tide_chart(tide_df, container=None):
     tide_df = tide_df.rename(columns={'Time (PDT)& Date': 'datetime'})
 
     tide_df['datetime'] = tide_df['datetime'].apply(parse_tide_datetime)
-    print("----------------------------------------------------------------------------")
-    print("ALL TIDES CLEAN TIME")
-    print("----------------------------------------------------------------------------")
-    print(tide_df)
+    # print("----------------------------------------------------------------------------")
+    # print("ALL TIDES CLEAN TIME")
+    # print("----------------------------------------------------------------------------")
+    # print(tide_df)
 
     #### Height cleaning
     # Clean the height data - remove any 'm' or other units if present
     # Debug: Print the data types and check for any non-numeric values
-    print("Height column data:", tide_df['Height'])
+    # print("Height column data:", tide_df['Height'])
 
 
     tide_df['Height'] = tide_df['Height'].astype(str).apply(extract_meters)
@@ -594,10 +594,10 @@ def create_natural_tide_chart(tide_df, container=None):
         # Optionally, report or handle NAs here
         # For now, let's forward-fill them (or use .dropna())
         tide_df['Height'] = tide_df['Height'].fillna(method='ffill')
-    print("----------------------------------------------------------------------------")
-    print("ALL TIDES CLEAN HEIGHT")
-    print("----------------------------------------------------------------------------")
-    print(tide_df)
+    # print("----------------------------------------------------------------------------")
+    # print("ALL TIDES CLEAN HEIGHT")
+    # print("----------------------------------------------------------------------------")
+    #print(tide_df)
 
     # Create interpolated dataframe
     smooth_tide_df = create_smooth_tides(tide_df)
@@ -635,10 +635,10 @@ def create_natural_tide_chart(tide_df, container=None):
         xp=x_timestamps,
         fp=tide_df['Height'].values
     )
-    print("----------------------------------------------------------------------------")
-    print("smooth tide_interpolated")
-    print("----------------------------------------------------------------------------")
-    print(smooth_tide_df)
+    # print("----------------------------------------------------------------------------")
+    # print("smooth tide_interpolated")
+    # print("----------------------------------------------------------------------------")
+    # print(smooth_tide_df)
 
 
     # Use Plotly for better interactivity
@@ -648,14 +648,14 @@ def create_natural_tide_chart(tide_df, container=None):
     pacific_tz = pytz.timezone('America/Los_Angeles')
 
     fig = go.Figure()
-    print("----------------------------------------------------------------------------")
-    print(" tide_df BEFORE DRAW")
-    print("----------------------------------------------------------------------------")
-    print(tide_df)
-    print("----------------------------------------------------------------------------")
-    print(" smooth_tide_df BEFORE DRAW")
-    print("----------------------------------------------------------------------------")
-    print(smooth_tide_df)
+    # print("----------------------------------------------------------------------------")
+    # print(" tide_df BEFORE DRAW")
+    # print("----------------------------------------------------------------------------")
+    # print(tide_df)
+    # print("----------------------------------------------------------------------------")
+    # print(" smooth_tide_df BEFORE DRAW")
+    # print("----------------------------------------------------------------------------")
+    # print(smooth_tide_df)
 
     # Add the smooth tide line
     fig.add_trace(go.Scatter(
@@ -926,8 +926,8 @@ def processCSVResponseToJSONSelenium(container = None, _csv = None):
     df = df.dropna(subset=['height'])
 
     # Debug: Print data shape after processing
-    print("DataFrame shape after processing:", df.shape)
-    print("Height column stats:", df['height'].describe())
+    # print("DataFrame shape after processing:", df.shape)
+    # print("Height column stats:", df['height'].describe())
 
     if len(df) < 3:
         if container:
