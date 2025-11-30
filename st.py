@@ -341,7 +341,7 @@ def plot_historical_wind_data(container, buoy_id):
                         # Fetch all values
 
                         wind_value, direction = get_wind_value_and_direction_from_kvdb(kvdb_url, key, buoy_id, timestamp_str)
-                        container.info(f"Wind value: {wind_value}, Direction: {direction}")
+                        # container.info(f"Wind value: {wind_value}, Direction: {direction} timestamp: {timestamp_str}"  )
                         data_points.append({
                             'timestamp': timestamp,
                             'wind_speed': wind_value,
