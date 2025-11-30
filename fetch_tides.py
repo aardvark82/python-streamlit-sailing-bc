@@ -30,7 +30,7 @@ def cached_fetch_url(url):
     response.raise_for_status()
     return response
 
-#@st.cache_data(ttl=1800)  # Cache for 1/2 hours
+@st.cache_data(ttl=1800)  # Cache for 1/2 hours
 def beautifulSoupFetchTidesForURL(url):
     # Download the page (you may need headers if blocked)
     # url = "https://www.tides.gc.ca/en/stations/07795"
@@ -219,7 +219,7 @@ def seleniumGetTidesFromURL(url):
     return None
 
 
-#@st.cache_data(ttl=1800)  # Cache for 1/2 hours
+@st.cache_data(ttl=1800)  # Cache for 1/2 hours
 def openAIFetchTidesForURL(url):
     res = ''
 
