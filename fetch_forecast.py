@@ -80,7 +80,7 @@ import pdfplumber
 import io
 import re
 
-@st.cache_data(ttl=1800)
+@st.cache_data(ttl=18800)
 def fetch_water_quality_for_url(url, title):
     try:
         st.write(f"Fetching data for: {title}")
@@ -721,6 +721,7 @@ def fetch_from_open_weather(lat: float, lon: float, api_key: str) -> WeatherData
     except Exception as e:
         print(f"Error fetching weather data: {e}")
         return None
+
 
 def get_wind_direction(degrees: int) -> str:
     """
