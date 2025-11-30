@@ -530,8 +530,8 @@ def display_precipitation_forecast(weather_data, container):
         fig.add_vline(
             x=day_start,
             line_dash="dash",
-            line_color="gray",
-            opacity=0.5
+            line_color="green",
+            opacity=0.8
         )
         
         # Add day label at the top
@@ -540,7 +540,8 @@ def display_precipitation_forecast(weather_data, container):
             y=100,
             text=day_start.strftime('%A'),  # Full day name
             showarrow=False,
-            yshift=10
+            yshift=10,
+            font=dict(color="green", size=12,  weight="bold")
         )
 
     # Display the chart
@@ -795,98 +796,4 @@ def display_marine_forecast_for_url(container=None, url='', title=''):
     chatgpt_forecast = openAIFetchForecastForURL(url=url)
 
     import io
-    # Create StringIO object from the CSV string
-    chatgpt_forecast = chatgpt_forecast.replace('```csv','')
-    chatgpt_forecast = chatgpt_forecast.replace('```','')
-    # Read CSV from StringIO
-    csv_stringio = io.StringIO(chatgpt_forecast)
-    df = pd.read_csv(csv_stringio, sep=',', on_bad_lines='skip')
-    # Clean up the dataframe
-    df = df.dropna(how='all')  # Remove empty rows
-    df = df.reset_index(drop=True)  # Reset index after dropping rows
-
-    # Apply the standardization to the wind direction column
-    df['wind direction'] = df['wind direction'].str.lower().apply(standardize_wind_direction)
-
-    # Handle '<' values in wind speed columns
-    def clean_wind_speed(x):
-
-        def extract_highest_integer(text):
-            # Find all sequences of digits in the string
-            numbers_as_strings = re.findall(r'\d+', text)
-            if not numbers_as_strings:
-                return None  # No integers found in the string
-            # Convert the found strings to integers
-            integers = [int(num_str) for num_str in numbers_as_strings]
-            # Return the maximum integer
-            return max(integers)
-
-        if pd.isna(x):
-            return 0
-        if isinstance(x, str) and '<' in x:
-            return float(x.replace('<', ''))
-        if isinstance(x, str) and 'light' in x:
-            return float(2)
-        if isinstance(x, str):
-            nbr = extract_highest_integer(x)
-            if nbr:
-                return float(nbr)
-            else:
-                return float(-1)
-
-        return float(x)
-
-    df['wind speed'] = df['wind speed'].apply(clean_wind_speed)
-    # Convert max wind speed to string to avoid PyArrow conversion
-    df['max wind speed'] = df['max wind speed'].astype(str)
-
-    print(*df)
-
-    col1, col2, col3, col4 = container.columns(4)
-    col1.badge( df['time'].iloc[0], color='red')
-    col2.metric("Wind Speed", df['wind speed'].iloc[0])
-    col3.metric("Wind High", df['max wind speed'].iloc[0])
-
-    wind_direction = df['wind direction'].iloc[0]
-    col4.metric("Direction", wind_direction)
-    col1.markdown(create_arrow_html(wind_direction,df['wind speed'].iloc[0] ), unsafe_allow_html=True)
-
-
-    col21, col22, col23, col24 = container.columns(4)
-    col21.badge( df['time'].iloc[1], color='red')
-    col22.metric("Wind Speed", df['wind speed'].iloc[1])
-    col23.metric("Wind High", df['max wind speed'].iloc[1])
-
-    wind_direction = df['wind direction'].iloc[1]
-    col24.metric("Direction", wind_direction)
-    col21.markdown(create_arrow_html(wind_direction,df['wind speed'].iloc[1]), unsafe_allow_html=True)
-
-    container.dataframe(df)
-    container.badge("chatGPT forecast")
-
-    container.divider()
-
-
-    if issue_date:
-        # Display relative and absolute dates
-        container.caption(f"({issue_date.strftime('%Y-%m-%d %H:%M %Z')})")
-
-        # Display title and subtitle
-        container.subheader(title)
-        container.write(subtitle)
-
-        # Display forecast with bold numbers
-        if forecast:
-            # Bold all numbers in the forecast
-            bold_forecast = re.sub(r'(\d+(?:\.\d+)?)', r'**\1**', forecast)
-            container.markdown("""
-            <div style="padding: 1em; border-radius: 5px; background-color: #f0f2f6;">
-                {}
-            </div>
-            """.format(bold_forecast), unsafe_allow_html=True)
-    else:
-        container.error("Unable to fetch "+title+" marine forecast")
-    container.badge("BeautifulSoup forecast")
-
-
-    return None
+    # Create StringIO
