@@ -415,8 +415,8 @@ def record_wind_data_history_for_buoy(buoy, container, wind_speed,direction):
     # Store in KVDB
     # Store data in KVDB
     current_time = datetime.now(pytz.timezone('America/Vancouver'))
-    # Truncate minutes to nearest 10 minutes
-    current_time = current_time.replace(minute=current_time.minute // 10 * 10, second=0, microsecond=0)
+    # Truncate minutes to nearest 30 minutes
+    current_time = current_time.replace(minute=current_time.minute // 30 * 30, second=0, microsecond=0)
     timestamp = current_time.isoformat(timespec='minutes')
 
     kvdb_url = st.secrets["kvdb_bucket_url"]  #from secrets.toml
