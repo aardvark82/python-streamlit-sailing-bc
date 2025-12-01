@@ -122,7 +122,7 @@ def fetch_water_quality_for_url(url, title):
         return ecoli_sample1, ecoli_sample2, time_measurement
 
     except Exception as e:
-        st.error(f"Failed to fetch or parse water quality data from {url}: {e}")
+        #_draw.error(f"Failed to fetch or parse water quality data from {url}: {e}")
         return None, None
 
 @st.cache_data(ttl=1800)
@@ -734,23 +734,23 @@ def get_wind_direction(degrees: int) -> str:
     return directions[index]
 
 
-def display_beach_quality_for_sandy_cove(container=None, title=''):
-    if container is None:
-        container = st
+def display_beach_quality_for_sandy_cove(draw=None, title=''):
+    if draw is None:
+        draw = st
 
-    container.subheader(title)
+    draw.subheader(title)
 
-    ecoli_sample1, ecoli_sample2, time_measurement = fetch_water_quality_for_url(url='https://www.vch.ca/en/Documents/VCH-beach-route3.pdf', title=title)
+    ecoli_sample1, ecoli_sample2, time_measurement = fetch_water_quality_for_url(_draw = draw, url='https://www.vch.ca/en/Documents/VCH-beach-route3.pdf', title=title)
 
     relative_date = timeago_format(time_measurement, datetime.now(pytz.timezone('America/Vancouver')))
 
-    container.header(f"Issued {relative_date}")
+    draw.header(f"Issued {relative_date}")
     if not ecoli_sample1:
         ecoli_sample1 = 'not found'
     if not ecoli_sample2:
         ecoli_sample2 = 'not found'
 
-    col1, col2, col3, col4 = container.columns(4)
+    col1, col2, col3, col4 = draw.columns(4)
     col1.text( 'Sandy cove station 1 BWV-04-01')
     col2.badge(ecoli_sample1, color='green')
 
@@ -772,9 +772,9 @@ def display_beach_quality_for_sandy_cove(container=None, title=''):
 
 
 
-def display_marine_forecast_for_url(container=None, url='', title=''):
-    if container is None:
-        container = st
+def display_marine_forecast_for_url(draw=None, url='', title=''):
+    if draw is None:
+        draw = st
 
     result = fetch_marine_forecast_for_url(url, title)
     issue_date = result['issue_date']
