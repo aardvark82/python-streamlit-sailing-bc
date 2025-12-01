@@ -35,9 +35,11 @@ def openAIFetchForecastForURL(url):
     response.raise_for_status()
 
     chat_gpt_msg = ("Make it short and just the table. "
-                    "Parse this forecast from marine weather canada (the section called \"Marine Forecast\") and extract a table with the following columns: time, wind speed, max wind speed, wind direction. "
+                    "Parse this forecast from marine weather canada (the section called \"Marine Forecast\") and "
+                    "extract a table with the following columns: time, wind speed, max wind speed, wind direction. "
                     "Make it a CSV."
-                    "The first few words describe the current conditions with a time of now and should be the 1st entry in the table. Here's the forecast HTML:")
+                    "The first few words describe the current conditions with a time of now and should be the 1st entry in the table. "
+                    "Here's the forecast HTML:")
 
     chat_gpt_msg = chat_gpt_msg + response.text
     url_api = "https://api.openai.com/v1/chat/completions"
@@ -49,7 +51,7 @@ def openAIFetchForecastForURL(url):
     }
 
     data = {
-        "model": "gpt-5-nano",
+        "model": "gpt-4o",
         "messages": [
             {
                 "role": "system",
