@@ -773,6 +773,32 @@ def display_beach_quality_for_sandy_cove(draw=None, title=''):
         col4.badge( ecoli_sample2, color='red')
 
 
+def clean_wind_speed(x):
+
+    def extract_highest_integer(text):
+        # Find all sequences of digits in the string
+        numbers_as_strings = re.findall(r'\d+', text)
+        if not numbers_as_strings:
+            return None  # No integers found in the string
+        # Convert the found strings to integers
+        integers = [int(num_str) for num_str in numbers_as_strings]
+        # Return the maximum integer
+        return max(integers)
+
+    if pd.isna(x):
+        return 0
+    if isinstance(x, str) and '<' in x:
+        return float(x.replace('<', ''))
+    if isinstance(x, str) and 'light' in x:
+        return float(2)
+    if isinstance(x, str):
+        nbr = extract_highest_integer(x)
+        if nbr:
+            return float(nbr)
+        else:
+            return float(-1)
+
+    return float(x)
 
 
 def display_marine_forecast_for_url(draw=None, url='', title=''):
@@ -815,35 +841,11 @@ def display_marine_forecast_for_url(draw=None, url='', title=''):
     df = df.reset_index(drop=True)  # Reset index after dropping rows
 
     # Apply the standardization to the wind direction column
-    df['wind direction'] = df['wind direction'].str.lower().apply(standardize_wind_direction)
-
-    # Handle '<' values in wind speed columns
-    def clean_wind_speed(x):
-
-        def extract_highest_integer(text):
-            # Find all sequences of digits in the string
-            numbers_as_strings = re.findall(r'\d+', text)
-            if not numbers_as_strings:
-                return None  # No integers found in the string
-            # Convert the found strings to integers
-            integers = [int(num_str) for num_str in numbers_as_strings]
-            # Return the maximum integer
-            return max(integers)
-
-        if pd.isna(x):
-            return 0
-        if isinstance(x, str) and '<' in x:
-            return float(x.replace('<', ''))
-        if isinstance(x, str) and 'light' in x:
-            return float(2)
-        if isinstance(x, str):
-            nbr = extract_highest_integer(x)
-            if nbr:
-                return float(nbr)
-            else:
-                return float(-1)
-
-        return float(x)
+    try:
+        df['wind direction'] = df['wind direction'].str.lower().apply(standardize_wind_direction)    # Handle '<' values in wind speed columns
+    except Exception as e:
+        print(f"Error applying standardization to wind direction column: {e}")
+        container.warning(f"Error applying standardization to wind direction column: {e}")
 
     df['wind speed'] = df['wind speed'].apply(clean_wind_speed)
     # Convert max wind speed to string to avoid PyArrow conversion
