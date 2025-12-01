@@ -225,16 +225,16 @@ def parseJerichoWindHistory(container = None):
     col2.metric(label="Rain",           value=df.iloc[-1, 15])
     col3.metric(label="Temperature",    value=df.iloc[-1, 1])
 
-    #display graph of last 6 hours (12 entries)
-    #display graph of last 6 hours (12 entries)
+    #display graph of last 12 hours (24 entries)
+    #display graph of last 12 hours (24 entries)
 
     draw.line_chart(
-    data=df.tail(12).set_index(df.columns[0])[
+    data=df.tail(24).set_index(df.columns[0])[
         [df.columns[6], df.columns[9], ]
     ]
     )
 
-    draw.dataframe(df.tail(12))
+    draw.dataframe(df.tail(24))
 
 
 
