@@ -161,7 +161,7 @@ def get_webdriver_service() -> Service:
     return service
 
 
-@st.cache_data(ttl=1800)
+#@st.cache_data(ttl=1800)
 def seleniumGetTidesFromURL(url):
     """Fetch tide data from a URL using Selenium"""
 
@@ -998,7 +998,7 @@ def display_point_atkinson_tides(container=None, title="🌊Tides for Point Atki
     else:
         draw = st
 
-    container.subheader(title)
+    draw.subheader(title)
 
     # Fetch the tide data
     if USE_BEAUTIFULSOUP:
