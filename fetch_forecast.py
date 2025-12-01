@@ -20,7 +20,7 @@ def cached_fetch_url(url):
     response.raise_for_status()
     return response
 
-#@st.cache_data(ttl=1800)
+@st.cache_data(ttl=1800)
 def openAIFetchForecastForURL(url):
     res = ''
 
