@@ -49,7 +49,7 @@ def openAIFetchForecastForURL(url):
     }
 
     data = {
-        "model": "gpt-4o",
+        "model": "gpt-5-nano",
         "messages": [
             {
                 "role": "system",
