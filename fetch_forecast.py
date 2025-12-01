@@ -83,9 +83,9 @@ import io
 import re
 
 @st.cache_data(ttl=18800)
-def fetch_water_quality_for_url(url, title):
+def fetch_water_quality_for_url(_draw, url, title):
     try:
-        st.write(f"Fetching data for: {title}")
+       # _draw.write(f"Fetching data for: {title}")
         response = requests.get(url)
         response.raise_for_status()
 
