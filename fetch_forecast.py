@@ -840,61 +840,79 @@ def display_marine_forecast_for_url(draw=None, url='', title=''):
     df = df.dropna(how='all')  # Remove empty rows
     df = df.reset_index(drop=True)  # Reset index after dropping rows
 
+    # Normalize column names
+    df.columns = df.columns.str.strip().str.lower()
+
     # Apply the standardization to the wind direction column
     try:
-        df['wind direction'] = df['wind direction'].str.lower().apply(standardize_wind_direction)    # Handle '<' values in wind speed columns
+        if 'wind direction' in df.columns:
+            df['wind direction'] = df['wind direction'].str.lower().apply(standardize_wind_direction)
+        else:
+            df['wind direction'] = 'N/A'
     except Exception as e:
         print(f"Error applying standardization to wind direction column: {e}")
-        container.warning(f"Error applying standardization to wind direction column: {e}")
+        draw.warning(f"Error applying standardization to wind direction column: {e}")
 
-    df['wind speed'] = df['wind speed'].apply(clean_wind_speed)
+    if 'wind speed' in df.columns:
+        df['wind speed'] = df['wind speed'].apply(clean_wind_speed)
+    else:
+        df['wind speed'] = 0
+
     # Convert max wind speed to string to avoid PyArrow conversion
-    df['max wind speed'] = df['max wind speed'].astype(str)
+    if 'max wind speed' in df.columns:
+        df['max wind speed'] = df['max wind speed'].astype(str)
+    else:
+        df['max wind speed'] = '0'
+            
+    if 'time' not in df.columns:
+        df['time'] = 'N/A'
 
     print(*df)
 
-    col1, col2, col3, col4 = container.columns(4)
-    col1.badge(df['time'].iloc[0], color='red')
-    col2.metric("Wind Speed", df['wind speed'].iloc[0])
-    col3.metric("Wind High", df['max wind speed'].iloc[0])
+    if not df.empty:
+        col1, col2, col3, col4 = draw.columns(4)
+        col1.badge(df['time'].iloc[0], color='red')
+        col2.metric("Wind Speed", df['wind speed'].iloc[0])
+        col3.metric("Wind High", df['max wind speed'].iloc[0])
 
-    wind_direction = df['wind direction'].iloc[0]
-    col4.metric("Direction", wind_direction)
-    col1.markdown(create_arrow_html(wind_direction, df['wind speed'].iloc[0]), unsafe_allow_html=True)
+        wind_direction = df['wind direction'].iloc[0]
+        col4.metric("Direction", wind_direction)
+        col1.markdown(create_arrow_html(wind_direction, df['wind speed'].iloc[0]), unsafe_allow_html=True)
 
-    col21, col22, col23, col24 = container.columns(4)
-    col21.badge(df['time'].iloc[1], color='red')
-    col22.metric("Wind Speed", df['wind speed'].iloc[1])
-    col23.metric("Wind High", df['max wind speed'].iloc[1])
+        if len(df) > 1:
+            col21, col22, col23, col24 = draw.columns(4)
+            col21.badge(df['time'].iloc[1], color='red')
+            col22.metric("Wind Speed", df['wind speed'].iloc[1])
+            col23.metric("Wind High", df['max wind speed'].iloc[1])
 
-    wind_direction = df['wind direction'].iloc[1]
-    col24.metric("Direction", wind_direction)
-    col21.markdown(create_arrow_html(wind_direction, df['wind speed'].iloc[1]), unsafe_allow_html=True)
+            wind_direction = df['wind direction'].iloc[1]
+            col24.metric("Direction", wind_direction)
+            col21.markdown(create_arrow_html(wind_direction, df['wind speed'].iloc[1]), unsafe_allow_html=True)
 
-    container.dataframe(df)
-    container.badge("chatGPT forecast")
+    draw.dataframe(df)
+    draw.badge("chatGPT forecast")
 
-    container.divider()
+    draw.divider()
 
     if issue_date:
         # Display relative and absolute dates
-        container.caption(f"({issue_date.strftime('%Y-%m-%d %H:%M %Z')})")
+        draw.caption(f"({issue_date.strftime('%Y-%m-%d %H:%M %Z')})")
 
         # Display title and subtitle
-        container.subheader(title)
-        container.write(subtitle)
+        draw.subheader(title)
+        draw.write(subtitle)
 
         # Display forecast with bold numbers
         if forecast:
             # Bold all numbers in the forecast
             bold_forecast = re.sub(r'(\d+(?:\.\d+)?)', r'**\1**', forecast)
-            container.markdown("""
-               <div style="padding: 1em; border-radius: 5px; background-color: #f0f2f6;">
-                   {}
-               </div>
-               """.format(bold_forecast), unsafe_allow_html=True)
-    else:
-        container.error("Unable to fetch " + title + " marine forecast")
-    container.badge("BeautifulSoup forecast")
+            draw.markdown("""
+                   <div style="padding: 1em; border-radius: 5px; background-color: #f0f2f6;">
+                       {}
+                   </div>
+                   """.format(bold_forecast), unsafe_allow_html=True)
+        else:
+            draw.error("Unable to fetch " + title + " marine forecast")
+        draw.badge("BeautifulSoup forecast")
 
-    return None
+        return None
