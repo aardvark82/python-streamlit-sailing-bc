@@ -845,6 +845,8 @@ def display_marine_forecast_for_url(draw=None, url='', title=''):
 
     # Apply the standardization to the wind direction column
     try:
+        if 'wind_direction' in df.columns:
+            df['wind direction'] = df['wind_direction'].str.lower().apply(standardize_wind_direction)
         if 'wind direction' in df.columns:
             df['wind direction'] = df['wind direction'].str.lower().apply(standardize_wind_direction)
         else:
