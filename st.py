@@ -224,18 +224,19 @@ def parseJerichoWindHistory(container = None):
     col1.metric(label="Bar",            value=df.iloc[-1, 14])
     col2.metric(label="Rain",           value=df.iloc[-1, 15])
     col3.metric(label="Temperature",    value=df.iloc[-1, 1])
+    
+    # display graph of last 12 hours (24 entries)
+    import plotly.express as px
 
-    #display graph of last 12 hours (24 entries)
-    #display graph of last 12 hours (24 entries)
+    df_tail = df.tail(24)
+    fig = px.line(df_tail, x='datetime', y=['Wind Speed', 'Wind Hi Speed'],
+                  title="Jericho Wind History (Last 12 Hours)")
+    fig.update_yaxes(range=[0, 30], title="Speed (knots)")
+    fig.add_hline(y=15, line_dash="dot", line_color="red")
 
-    draw.line_chart(
-    data=df.tail(24).set_index(df.columns[0])[
-        [df.columns[6], df.columns[9], ]
-    ]
-    )
+    draw.plotly_chart(fig, use_container_width=True)
 
     draw.dataframe(df.tail(24))
-
 
 
 def headerboxMenuDeprecated():
@@ -385,6 +386,7 @@ def plot_historical_wind_data(container, buoy_id):
             now_van = datetime.now(pytz.timezone('America/Vancouver'))
             fig.update_xaxes(range=[three_days_ago, now_van])
             fig.update_yaxes(range=[0, 40])
+            fig.add_hline(y=15, line_dash="dot", line_color="red")
 
             # Add direction information to hover text and use arrow markers
             fig.update_traces(
