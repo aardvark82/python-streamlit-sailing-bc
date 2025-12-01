@@ -317,6 +317,8 @@ def standardize_wind_direction(direction):
     if not isinstance(direction, str):  # Handle non-string values
         return direction
 
+    direction = direction.replace(' outflow', '').strip()
+
     direction = direction.lower().strip()
 
     # Dictionary mapping various forms to standard abbreviations
@@ -346,7 +348,8 @@ def standardize_wind_direction(direction):
         'westerly': 'W',
         'northwesterly': 'NW',
         'northerly outflow': 'N',
-        'southerly inflow': 'S'
+        'southerly inflow': 'S',
+        'variable': 'V'
     }
 
     return direction_map.get(direction, direction)
