@@ -303,7 +303,7 @@ def plot_historical_wind_data(container, buoy_id):
 
 
         response = requests.get(f"{kvdb_url}/", params=params)
-        container.write(f"KVDB API Status Code: {response.status_code}")
+        # container.write(f"KVDB API Status Code: {response.status_code}")
         if response.status_code != 200:
             container.error(f"KVDB API error: {response.status_code}")
             return
@@ -325,7 +325,7 @@ def plot_historical_wind_data(container, buoy_id):
             timestamps = []
             data_points = []
             print (f"KVDB all keys stored = {len(all_keys)}")
-            container.write(f"Found {len(all_keys)} total keys in KVDB")
+            #container.write(f"Found {len(all_keys)} total keys in KVDB")
         except requests.exceptions.JSONDecodeError as e:
             container.error(f"Failed to parse KVDB response: {str(e)}")
             container.write("Raw response:")
