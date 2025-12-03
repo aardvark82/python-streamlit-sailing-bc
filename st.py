@@ -224,11 +224,11 @@ def parseJerichoWindHistory(container = None):
     col1.metric(label="Bar",            value=df.iloc[-1, 14])
     col2.metric(label="Rain",           value=df.iloc[-1, 15])
     col3.metric(label="Temperature",    value=df.iloc[-1, 1])
-    
+
     # display graph of last 12 hours (24 entries)
     import plotly.express as px
 
-    df_tail = df.tail(24)
+    df_tail = df.tail(24) 
     fig = px.line(df_tail, x='datetime', y=['Wind Speed', 'Wind Hi Speed'],
                   title="Jericho Wind History (Last 12 Hours)")
     fig.update_yaxes(range=[0, 30], title="Speed (knots)")
