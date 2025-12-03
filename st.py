@@ -282,54 +282,56 @@ def drawMapWithBuoy(container = None, buoy = None):
 
 
 @st.cache_data(ttl=144600)
-def get_wind_value_and_direction_from_kvdb(kvdb_url, key, buoy_id, timestamp_str):
-    return float(requests.get(f"{kvdb_url}/{key}").text), requests.get(
-        f"{kvdb_url}/{buoy_id}_direction_{timestamp_str}").text
+def get_wind_value_and_direction_from_cf(base_url, headers, key, buoy_id, timestamp_str):
+    r_speed = requests.get(f"{base_url}/values/{key}", headers=headers)
+    r_dir = requests.get(f"{base_url}/values/{buoy_id}_direction_{timestamp_str}", headers=headers)
+    return float(r_speed.text), r_dir.text
 
 
 def plot_historical_wind_data(container, buoy_id):
-    """Fetch and plot historical wind data from KVDB for a specific buoy"""
-    kvdb_url = st.secrets["kvdb_bucket_url"]
+    """Fetch and plot historical wind data from Cloudflare KV for a specific buoy"""
+    try:
+        account_id = st.secrets["cloudflare_account_id"]
+        namespace_id = st.secrets["cloudflare_namespace_id"]
+        api_token = st.secrets["cloudflare_api_token"]
+    except KeyError:
+        container.warning("Cloudflare secrets not configured (cloudflare_account_id, cloudflare_namespace_id, cloudflare_api_token)")
+        return
+
+    base_url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}"
+    headers = {"Authorization": f"Bearer {api_token}"}
 
     # Fetch all keys from last 3 days
     try:
-        # Get all keys
-        # Get keys with prefix for this buoy and include values
+        # Get keys with prefix for this buoy
         params = {
             'prefix': f"{buoy_id}_wind_",
-            'values': 'false',
-            'format': 'text'
+            'limit': 1000
         }
 
-
-        response = requests.get(f"{kvdb_url}/", params=params)
-        # container.write(f"KVDB API Status Code: {response.status_code}")
+        response = requests.get(f"{base_url}/keys", params=params, headers=headers)
+        
         if response.status_code != 200:
-            container.error(f"KVDB API error: {response.status_code}")
+            container.error(f"Cloudflare API error: {response.status_code}")
             return
 
         try:
-
-            all_keys = response.text.splitlines()
-            if not isinstance(all_keys, list):
-                container.error("Invalid response format from KVDB")
-                container.write("Expected list of keys, got:")
-                container.write(type(all_keys))
+            data = response.json()
+            if not data.get("success", False):
+                container.error(f"Cloudflare API error: {data.get('errors')}")
                 return
+            
+            all_keys = [item["name"] for item in data.get("result", [])]
 
             # Filter keys for wind data from last 3 days
             three_days_ago = datetime.now(pytz.timezone('America/Vancouver')) - pd.Timedelta(days=3)
 
-            wind_data = []
-            buoy_data = []
-            timestamps = []
             data_points = []
-            print (f"KVDB all keys stored = {len(all_keys)}")
-            #container.write(f"Found {len(all_keys)} total keys in KVDB")
+            print (f"Cloudflare keys found = {len(all_keys)}")
         except requests.exceptions.JSONDecodeError as e:
-            container.error(f"Failed to parse KVDB response: {str(e)}")
+            container.error(f"Failed to parse Cloudflare response: {str(e)}")
             container.write("Raw response:")
-            container.code(response.text[:500])  # Show first 500 chars of response
+            container.code(response.text[:500])
             return
 
         for key in all_keys:
@@ -340,9 +342,8 @@ def plot_historical_wind_data(container, buoy_id):
                     timestamp = datetime.fromisoformat(timestamp_str)
                     if timestamp >= three_days_ago:
                         # Fetch all values
-
-                        wind_value, direction = get_wind_value_and_direction_from_kvdb(kvdb_url, key, buoy_id, timestamp_str)
-                        # container.info(f"Wind value: {wind_value}, Direction: {direction} timestamp: {timestamp_str}"  )
+                        wind_value, direction = get_wind_value_and_direction_from_cf(base_url, headers, key, buoy_id, timestamp_str)
+                        
                         data_points.append({
                             'timestamp': timestamp,
                             'wind_speed': wind_value,
@@ -376,11 +377,11 @@ def plot_historical_wind_data(container, buoy_id):
 
             import plotly.express as px
             fig = px.scatter(df,
-                             x='timestamp',
-                             y='wind_speed',
-                             title=f'Wind Speed and Direction Over Last 3 Days - Buoy {buoy_id}',
-                             labels={'wind_speed': 'Wind Speed (knots)',
-                                     'timestamp': 'Time'})
+                                x='timestamp',
+                                y='wind_speed',
+                                title=f'Wind Speed and Direction Over Last 3 Days - Buoy {buoy_id}',
+                                labels={'wind_speed': 'Wind Speed (knots)',
+                                        'timestamp': 'Time'})
 
             # Set x-axis range to show last 3 days even if data is sparse
             now_van = datetime.now(pytz.timezone('America/Vancouver'))
@@ -412,28 +413,37 @@ def plot_historical_wind_data(container, buoy_id):
         print(f"Error fetching historical data: {e}")
         container.error("Could not load historical data")
 
+
 def record_wind_data_history_for_buoy(buoy, container, wind_speed,direction):
 
-    # Store in KVDB
-    # Store data in KVDB
+    # Store in Cloudflare KV
     current_time = datetime.now(pytz.timezone('America/Vancouver'))
     # Truncate minutes to nearest 30 minutes
     current_time = current_time.replace(minute=current_time.minute // 30 * 30, second=0, microsecond=0)
     timestamp = current_time.isoformat(timespec='minutes')
 
-    kvdb_url = st.secrets["kvdb_bucket_url"]  #from secrets.toml
+    try:
+        account_id = st.secrets["cloudflare_account_id"]
+        namespace_id = st.secrets["cloudflare_namespace_id"]
+        api_token = st.secrets["cloudflare_api_token"]
+    except KeyError:
+        print("Cloudflare secrets missing")
+        return
+
+    base_url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}"
+    headers = {"Authorization": f"Bearer {api_token}"}
 
     @st.cache_data(ttl=1800)
-    def store_wind_data_cached(kvdb_url,buoy,timestamp, wind_speed,direction):
+    def store_wind_data_cached(base_url, headers, buoy, timestamp, wind_speed, direction):
         try:
-            # Store wind data,         # Store buoy ID as a prefix
-            requests.put(f"{kvdb_url}/{buoy}_wind_{timestamp}", str(wind_speed))
-            requests.put(f"{kvdb_url}/{buoy}_direction_{timestamp}", direction)
+            # Store wind data
+            requests.put(f"{base_url}/values/{buoy}_wind_{timestamp}", headers=headers, data=str(wind_speed))
+            requests.put(f"{base_url}/values/{buoy}_direction_{timestamp}", headers=headers, data=direction)
         except Exception as e:
-            print(f"Error storing data in KVDB: {e}")
+            print(f"Error storing data in Cloudflare KV: {e}")
         return 0
 
-    store_wind_data_cached(kvdb_url,buoy,timestamp, wind_speed,direction)
+    store_wind_data_cached(base_url, headers, buoy, timestamp, wind_speed, direction)
     # Fetch and plot historical data
     plot_historical_wind_data(container, buoy)
 
