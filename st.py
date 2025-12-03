@@ -544,26 +544,29 @@ def refreshBuoy(buoy = '46146', title = 'Halibut Bank - 46146', container = None
     if (warning_wave):
         draw.badge("Wave warning", color="orange")
 
+    if data_wave_height == 'N/A':
+        draw.metric("Wind", data_wind )
 
-    col1, col2, col3 = draw.columns(3)
-    col1.metric("Wind", data_wind )
-    # Safe parsing of wind data
-    try:
-        parts = data_wind.strip().split() if data_wind and isinstance(data_wind, str) else []
-        wind_direction = parts[0] if len(parts) > 0 else "N/A"
-        wind_speed = parts[1] if len(parts) > 1 else "0"
-    except (AttributeError, IndexError) as e:
-        print(f"Error parsing wind data: {e}")
-        wind_direction = "N/A"
-        wind_speed = "0"
-    from fetch_forecast import create_arrow_html
-    col1.markdown(create_arrow_html(wind_direction, wind_speed), unsafe_allow_html=True)
+    else:
+        col1, col2, col3 = draw.columns(3)
+        col1.metric("Wind", data_wind )
+        # Safe parsing of wind data
+        try:
+            parts = data_wind.strip().split() if data_wind and isinstance(data_wind, str) else []
+            wind_direction = parts[0] if len(parts) > 0 else "N/A"
+            wind_speed = parts[1] if len(parts) > 1 else "0"
+        except (AttributeError, IndexError) as e:
+            print(f"Error parsing wind data: {e}")
+            wind_direction = "N/A"
+            wind_speed = "0"
+        from fetch_forecast import create_arrow_html
+        col1.markdown(create_arrow_html(wind_direction, wind_speed), unsafe_allow_html=True)
 
-    col2.metric("Wave Height", data_wave_height)
-    col3.metric("Air Temp", data_airtemp)
-    col1.metric("Water Temp", data_watertemp)
-    col2.metric("Wave Period", data_waveperiod)
-    col3.metric("Pressure", data_pressure)
+        col2.metric("Wave Height", data_wave_height)
+        col3.metric("Air Temp", data_airtemp)
+        col1.metric("Water Temp", data_watertemp)
+        col2.metric("Wave Period", data_waveperiod)
+        col3.metric("Pressure", data_pressure)
 
 
     direction, wind_speed = parse_wind_data(data_wind)
