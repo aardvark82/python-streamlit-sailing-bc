@@ -535,8 +535,6 @@ def record_buoy_data_history(buoy, container, wind_speed, direction, wave_height
         return 0
 
     store_buoy_data_cached(base_url, headers, buoy, timestamp, wind_speed, direction, wave_height)
-    # Fetch and plot historical data
-    plot_historical_buoy_data(container, buoy)
 
 
 def refreshBuoy(buoy = '46146', title = 'Halibut Bank - 46146', container = None):
@@ -678,6 +676,8 @@ def refreshBuoy(buoy = '46146', title = 'Halibut Bank - 46146', container = None
     wave_val_for_record = highest_wave if data_wave_height != 'N/A' and waves else None
     
     record_buoy_data_history(buoy, container, wind_speed, direction, wave_val_for_record)
+    # Fetch and plot historical data
+    plot_historical_buoy_data(container, buoy)
 
     # st.code(soup) # debug HTML
     drawMapWithBuoy(container=draw, buoy=buoy)
