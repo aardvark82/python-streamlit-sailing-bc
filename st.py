@@ -326,7 +326,7 @@ def get_resolved_namespace_id(account_id, api_token, name_or_id):
     return name_or_id # Fallback to original if resolution fails or error occurs
 
 @st.cache_data(ttl=600)
-def cached_list(_container, buoy_id, api_token, account_id, namespace_id):
+def cached_kv_list(_container, buoy_id, api_token, account_id, namespace_id):
     base_url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}"
     headers = {"Authorization": f"Bearer {api_token}"}
     try:
@@ -368,7 +368,7 @@ def plot_historical_buoy_data(container, buoy_id):
         # Get keys with prefix for this buoy
         # We use _wind_ keys to discover available timestamps
 
-        response = cached_list(container, buoy_id, api_token, account_id, namespace_id)
+        response = cached_kv_list(container, buoy_id, api_token, account_id, namespace_id)
         if response is None:
             container.error(f"Could not fetch cached list")
 
