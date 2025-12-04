@@ -281,22 +281,63 @@ def drawMapWithBuoy(container = None, buoy = None):
     container.map(latlong, zoom=10)
 
 
+from urllib.parse import quote
+
 @st.cache_data(ttl=144600)
-def get_wind_value_and_direction_from_cf(base_url, headers, key, buoy_id, timestamp_str):
-    r_speed = requests.get(f"{base_url}/values/{key}", headers=headers)
-    r_dir = requests.get(f"{base_url}/values/{buoy_id}_direction_{timestamp_str}", headers=headers)
-    return float(r_speed.text), r_dir.text
+def get_buoy_observation_from_cf(base_url, headers, buoy_id, timestamp_str):
+    # Cloudflare keys must be URL-encoded in the path
+    encoded_key_wind = quote(f"{buoy_id}_wind_{timestamp_str}", safe='')
+    encoded_key_dir = quote(f"{buoy_id}_direction_{timestamp_str}", safe='')
+    encoded_key_wave = quote(f"{buoy_id}_wave_{timestamp_str}", safe='')
+    
+    r_speed = requests.get(f"{base_url}/values/{encoded_key_wind}", headers=headers)
+    r_dir = requests.get(f"{base_url}/values/{encoded_key_dir}", headers=headers)
+    r_wave = requests.get(f"{base_url}/values/{encoded_key_wave}", headers=headers)
+    
+    speed = float(r_speed.text) if r_speed.status_code == 200 else 0.0
+    direction = r_dir.text if r_dir.status_code == 200 else "N/A"
+    try:
+        wave = float(r_wave.text) if r_wave.status_code == 200 else None
+    except ValueError:
+        wave = None
+
+    return speed, direction, wave
 
 
-def plot_historical_wind_data(container, buoy_id):
-    """Fetch and plot historical wind data from Cloudflare KV for a specific buoy"""
+def get_resolved_namespace_id(account_id, api_token, name_or_id):
+    # Check if the provided namespace_id is actually the name of a namespace
+    if "storage/kv/namespaces/" not in name_or_id:
+        # Attempt to resolve it as a namespace name
+        headers = {"Authorization": f"Bearer {api_token}"}
+        url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/storage/kv/namespaces"
+        try:
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
+            
+            namespaces = response.json().get("result", [])
+            
+            for ns in namespaces:
+                if ns.get("title") == name_or_id:
+                    return ns.get("id")
+        
+        except requests.exceptions.RequestException as e:
+            print(f"Error resolving namespace ID: {e}")
+            return name_or_id # Fallback to original if resolution fails or error occurs
+    return name_or_id # Fallback to original if resolution fails or error occurs
+
+
+def plot_historical_buoy_data(container, buoy_id):
+    """Fetch and plot historical wind and wave data from Cloudflare KV for a specific buoy"""
     try:
         account_id = st.secrets["cloudflare_account_id"]
-        namespace_id = st.secrets["cloudflare_namespace_id"]
+        namespace_id_raw = st.secrets["cloudflare_namespace_id"]
         api_token = st.secrets["cloudflare_api_token"]
     except KeyError:
         container.warning("Cloudflare secrets not configured (cloudflare_account_id, cloudflare_namespace_id, cloudflare_api_token)")
         return
+
+    # Resolve namespace ID if the secret contains the name
+    namespace_id = get_resolved_namespace_id(account_id, api_token, namespace_id_raw)
 
     base_url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}"
     headers = {"Authorization": f"Bearer {api_token}"}
@@ -304,6 +345,7 @@ def plot_historical_wind_data(container, buoy_id):
     # Fetch all keys from last 3 days
     try:
         # Get keys with prefix for this buoy
+        # We use _wind_ keys to discover available timestamps
         params = {
             'prefix': f"{buoy_id}_wind_",
             'limit': 1000
@@ -312,7 +354,7 @@ def plot_historical_wind_data(container, buoy_id):
         response = requests.get(f"{base_url}/keys", params=params, headers=headers)
         
         if response.status_code != 200:
-            container.error(f"Cloudflare API error: {response.status_code}")
+            container.error(f"Cloudflare API error: {response.status_code} - {response.text}")
             return
 
         try:
@@ -342,12 +384,13 @@ def plot_historical_wind_data(container, buoy_id):
                     timestamp = datetime.fromisoformat(timestamp_str)
                     if timestamp >= three_days_ago:
                         # Fetch all values
-                        wind_value, direction = get_wind_value_and_direction_from_cf(base_url, headers, key, buoy_id, timestamp_str)
+                        wind_value, direction, wave_height = get_buoy_observation_from_cf(base_url, headers, buoy_id, timestamp_str)
                         
                         data_points.append({
                             'timestamp': timestamp,
                             'wind_speed': wind_value,
-                            'direction': direction
+                            'direction': direction,
+                            'wave_height': wave_height
                         })
                 except Exception as e:
                     print(f"Error processing key {key}: {e}")
@@ -355,12 +398,12 @@ def plot_historical_wind_data(container, buoy_id):
         if data_points:
             # Create DataFrame
             df = pd.DataFrame(data_points)
+            df = df.sort_values('timestamp')
 
+            # --- Plot Wind ---
             min_wind = df['wind_speed'].min()
             max_wind = df['wind_speed'].max()
             container.info(f"Min wind speed: {min_wind} knots, Max wind speed: {max_wind} knots")
-
-            df = df.sort_values('timestamp')
 
             # Map directions to degrees for Plotly arrows
             direction_map = {
@@ -376,7 +419,7 @@ def plot_historical_wind_data(container, buoy_id):
             df['rotation'] = (180 - df['degree']) % 360
 
             import plotly.express as px
-            fig = px.scatter(df,
+            fig_wind = px.scatter(df,
                                 x='timestamp',
                                 y='wind_speed',
                                 title=f'Wind Speed and Direction Over Last 3 Days - Buoy {buoy_id}',
@@ -385,12 +428,12 @@ def plot_historical_wind_data(container, buoy_id):
 
             # Set x-axis range to show last 3 days even if data is sparse
             now_van = datetime.now(pytz.timezone('America/Vancouver'))
-            fig.update_xaxes(range=[three_days_ago, now_van])
-            fig.update_yaxes(range=[0, 40])
-            fig.add_hline(y=15, line_dash="dot", line_color="red")
+            fig_wind.update_xaxes(range=[three_days_ago, now_van])
+            fig_wind.update_yaxes(range=[0, 40])
+            fig_wind.add_hline(y=15, line_dash="dot", line_color="red")
 
             # Add direction information to hover text and use arrow markers
-            fig.update_traces(
+            fig_wind.update_traces(
                 marker=dict(
                     symbol='arrow-up',
                     size=14,
@@ -405,7 +448,27 @@ def plot_historical_wind_data(container, buoy_id):
                 customdata=df['direction']
             )
 
-            container.plotly_chart(fig, use_container_width=True)
+            container.plotly_chart(fig_wind, use_container_width=True)
+
+            # --- Plot Waves ---
+            # Filter out rows where wave_height is None for the plot
+            df_waves = df.dropna(subset=['wave_height']).copy()
+            if not df_waves.empty:
+                # Convert meters to cm
+                df_waves['wave_height_cm'] = df_waves['wave_height'] * 100
+                
+                fig_wave = px.line(df_waves,
+                                    x='timestamp',
+                                    y='wave_height_cm',
+                                    title=f'Wave Height Over Last 3 Days - Buoy {buoy_id}',
+                                    labels={'wave_height_cm': 'Wave Height (cm)',
+                                            'timestamp': 'Time'})
+                
+                fig_wave.update_xaxes(range=[three_days_ago, now_van])
+                fig_wave.update_yaxes(range=[0, 200])
+                
+                container.plotly_chart(fig_wave, use_container_width=True)
+
         else:
             container.warning(f"No data available for buoy {buoy_id} in the selected period")
 
@@ -414,7 +477,7 @@ def plot_historical_wind_data(container, buoy_id):
         container.error("Could not load historical data")
 
 
-def record_wind_data_history_for_buoy(buoy, container, wind_speed,direction):
+def record_buoy_data_history(buoy, container, wind_speed, direction, wave_height):
 
     # Store in Cloudflare KV
     current_time = datetime.now(pytz.timezone('America/Vancouver'))
@@ -424,28 +487,37 @@ def record_wind_data_history_for_buoy(buoy, container, wind_speed,direction):
 
     try:
         account_id = st.secrets["cloudflare_account_id"]
-        namespace_id = st.secrets["cloudflare_namespace_id"]
+        namespace_id_raw = st.secrets["cloudflare_namespace_id"]
         api_token = st.secrets["cloudflare_api_token"]
     except KeyError:
         print("Cloudflare secrets missing")
         return
 
+    # Resolve namespace ID if the secret contains the name
+    namespace_id = get_resolved_namespace_id(account_id, api_token, namespace_id_raw)
+
     base_url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}"
     headers = {"Authorization": f"Bearer {api_token}"}
 
     @st.cache_data(ttl=1800)
-    def store_wind_data_cached(base_url, headers, buoy, timestamp, wind_speed, direction):
+    def store_buoy_data_cached(base_url, headers, buoy, timestamp, wind_speed, direction, wave_height):
         try:
-            # Store wind data
-            requests.put(f"{base_url}/values/{buoy}_wind_{timestamp}", headers=headers, data=str(wind_speed))
-            requests.put(f"{base_url}/values/{buoy}_direction_{timestamp}", headers=headers, data=direction)
+            # Store wind data - keys must be URL encoded for the API endpoint
+            key_wind = f"{buoy}_wind_{timestamp}"
+            key_dir = f"{buoy}_direction_{timestamp}"
+            key_wave = f"{buoy}_wave_{timestamp}"
+            
+            requests.put(f"{base_url}/values/{quote(key_wind, safe='')}", headers=headers, data=str(wind_speed))
+            requests.put(f"{base_url}/values/{quote(key_dir, safe='')}", headers=headers, data=str(direction))
+            if wave_height is not None:
+                requests.put(f"{base_url}/values/{quote(key_wave, safe='')}", headers=headers, data=str(wave_height))
         except Exception as e:
             print(f"Error storing data in Cloudflare KV: {e}")
         return 0
 
-    store_wind_data_cached(base_url, headers, buoy, timestamp, wind_speed, direction)
+    store_buoy_data_cached(base_url, headers, buoy, timestamp, wind_speed, direction, wave_height)
     # Fetch and plot historical data
-    plot_historical_wind_data(container, buoy)
+    plot_historical_buoy_data(container, buoy)
 
 
 def refreshBuoy(buoy = '46146', title = 'Halibut Bank - 46146', container = None):
@@ -545,8 +617,9 @@ def refreshBuoy(buoy = '46146', title = 'Halibut Bank - 46146', container = None
 
     draw.text(data_wind )
 
-    waves = re.findall(r'\d+', data_wave_height)
-    highest_wave = 0
+    # Improved wave parsing
+    waves = re.findall(r"[-+]?\d*\.\d+|\d+", data_wave_height)
+    highest_wave = 0.0
     if waves:
         highest_wave = float(waves[0])
     warning_wave = (highest_wave>=1)
@@ -580,7 +653,12 @@ def refreshBuoy(buoy = '46146', title = 'Halibut Bank - 46146', container = None
 
 
     direction, wind_speed = parse_wind_data(data_wind)
-    record_wind_data_history_for_buoy(buoy, container, wind_speed, direction)
+    
+    # Parse wave height for recording (use highest_wave from above or None if N/A)
+    # data_wave_height string e.g. "0.6m" or "N/A"
+    wave_val_for_record = highest_wave if data_wave_height != 'N/A' and waves else None
+    
+    record_buoy_data_history(buoy, container, wind_speed, direction, wave_val_for_record)
 
     # st.code(soup) # debug HTML
     drawMapWithBuoy(container=draw, buoy=buoy)
