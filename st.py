@@ -2,7 +2,7 @@
 #  > python -m streamlit run st.py
 # http://localhost:8501/
 # http://python-app-sailing-bc-nckqtfynerhhf26ujtt5u6
-
+from http.client import responses
 
 import streamlit as st
 import requests
@@ -325,6 +325,27 @@ def get_resolved_namespace_id(account_id, api_token, name_or_id):
             return name_or_id # Fallback to original if resolution fails or error occurs
     return name_or_id # Fallback to original if resolution fails or error occurs
 
+@st.cache_data(ttl=600)
+def cached_list(_container, buoy_id, api_token, account_id, namespace_id):
+    base_url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}"
+    headers = {"Authorization": f"Bearer {api_token}"}
+    try:
+        # Get keys with prefix for this buoy
+        # We use _wind_ keys to discover available timestamps
+        params = {
+            'prefix': f"{buoy_id}_wind_",
+            'limit': 1000
+        }
+
+        response = requests.get(f"{base_url}/keys", params=params, headers=headers)
+        return response
+
+    except Exception as e:
+        print(f"Error fetching historical data: {e}")
+        _container.error("Could not load historical data")
+
+    return None
+
 
 def plot_historical_buoy_data(container, buoy_id):
     """Fetch and plot historical wind and wave data from Cloudflare KV for a specific buoy"""
@@ -346,13 +367,11 @@ def plot_historical_buoy_data(container, buoy_id):
     try:
         # Get keys with prefix for this buoy
         # We use _wind_ keys to discover available timestamps
-        params = {
-            'prefix': f"{buoy_id}_wind_",
-            'limit': 1000
-        }
 
-        response = requests.get(f"{base_url}/keys", params=params, headers=headers)
-        
+        response = cached_list(container, buoy_id, api_token, account_id, namespace_id)
+        if response is None:
+            container.error(f"Could not fetch cached list")
+
         if response.status_code != 200:
             container.error(f"Cloudflare API error: {response.status_code} - {response.text}")
             return
