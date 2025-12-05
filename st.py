@@ -485,7 +485,10 @@ def plot_historical_buoy_data(container, buoy_id):
                 
                 fig_wave.update_xaxes(range=[three_days_ago, now_van])
                 fig_wave.update_yaxes(range=[0, 200])
-                
+                fig_wave.add_hline(y=33, line_dash="dot", line_color="green")
+                fig_wave.add_hline(y=75, line_dash="dot", line_color="orange")
+                fig_wave.add_hline(y=100, line_dash="dot", line_color="red")
+
                 container.plotly_chart(fig_wave, use_container_width=True)
 
         else:
