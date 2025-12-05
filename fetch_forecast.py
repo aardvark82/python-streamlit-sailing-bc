@@ -805,6 +805,42 @@ def clean_wind_speed(x):
     return float(x)
 
 
+def drawChartOfForecast(draw, df, title):
+    import plotly.graph_objects as go
+
+    fig = go.Figure()
+
+    # Wind Speed Line
+    fig.add_trace(go.Scatter(
+        x=df['time'],
+        y=df['wind speed'],
+        mode='lines+markers',
+        name='Wind Speed',
+        line=dict(color='blue', width=3)
+    ))
+
+    # Max Wind Speed Line
+    fig.add_trace(go.Scatter(
+        x=df['time'],
+        y=df['max wind speed'],
+        mode='lines+markers',
+        name='Max Gust',
+        line=dict(color='lightblue', width=2, dash='dash')
+    ))
+
+    # Fixed Y Axis 0-40 and line at 15
+    fig.update_layout(
+        title=f"Wind Forecast: {title}",
+        yaxis_title="Knots",
+        yaxis=dict(range=[0, 40]),
+        hovermode="x unified"
+    )
+
+    fig.add_hline(y=15, line_dash="dot", line_color="red", annotation_text="15 knots")
+
+    draw.plotly_chart(fig, use_container_width=True)
+
+
 def display_marine_forecast_for_url(draw=None, url='', title=''):
     if draw is None:
         draw = st
@@ -864,12 +900,12 @@ def display_marine_forecast_for_url(draw=None, url='', title=''):
     else:
         df['wind speed'] = 0
 
-    # Convert max wind speed to string to avoid PyArrow conversion
+    # Clean max wind speed for plotting (ensure numeric)
     if 'max wind speed' in df.columns:
-        df['max wind speed'] = df['max wind speed'].astype(str)
+        df['max wind speed'] = df['max wind speed'].apply(clean_wind_speed)
     else:
-        df['max wind speed'] = '0'
-            
+        df['max wind speed'] = 0
+
     if 'time' not in df.columns:
         df['time'] = 'N/A'
 
@@ -894,6 +930,11 @@ def display_marine_forecast_for_url(draw=None, url='', title=''):
             wind_direction = df['wind direction'].iloc[1]
             col24.metric("Direction", wind_direction)
             col21.markdown(create_arrow_html(wind_direction, df['wind speed'].iloc[1]), unsafe_allow_html=True)
+
+
+    drawChartOfForecast(draw, df, title)
+
+    draw.badge("chatGPT forecast table")
 
     draw.dataframe(df)
     draw.badge("chatGPT forecast")
@@ -922,3 +963,5 @@ def display_marine_forecast_for_url(draw=None, url='', title=''):
         draw.badge("BeautifulSoup forecast")
 
         return None
+
+    return None
