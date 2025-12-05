@@ -20,6 +20,7 @@ def cached_fetch_url(url):
     response.raise_for_status()
     return response
 
+
 @st.cache_data(ttl=1800)
 def openAIFetchForecastForURL(url):
     res = ''
@@ -38,7 +39,10 @@ def openAIFetchForecastForURL(url):
                     "Parse this forecast from marine weather canada (the section called \"Marine Forecast\") and "
                     "extract a table with the following columns: time, wind speed, max wind speed, wind direction. "
                     "wind speed is the first number in the wind speed string. max wind speed is the second. "
-                    "for example if it says 5 to 15 knots, wind speed is 5 and max wind speed is 15"
+                    "for example "
+                    "- if it says 5 to 15 knots, wind speed is 5 and max wind speed is 15. "
+                    "- If it says light winds, use a value of 3. "
+                    "- Make sure the Max (can be called Gust or gusting in the forecast) wind speed if not mentioned is the value of the wind speed, never less."
                     "Make it a CSV."
                     "The first few words describe the current conditions with a time of now and should be the 1st entry in the table. "
                     "Here's the forecast HTML:")
