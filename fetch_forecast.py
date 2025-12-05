@@ -14,7 +14,7 @@ import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 
-
+@st.cache_data(ttl=1800)
 def cached_fetch_url(url):
     response = requests.get(url, timeout=25)
     response.raise_for_status()
@@ -133,8 +133,9 @@ def fetch_water_quality_for_url(_draw, url, title):
         #_draw.error(f"Failed to fetch or parse water quality data from {url}: {e}")
         return None, None
 
+
 @st.cache_data(ttl=1800)
-def fetch_marine_forecast_for_url(url, title):
+def fetch_beautifulsoup_marine_forecast_for_url(url, title):
     """
        Fetches marine forecast data from a given URL, parsing wind warnings and forecast details.
        Extracts issue date, wind conditions, and other weather information.
@@ -849,7 +850,13 @@ def display_marine_forecast_for_url(draw=None, url='', title=''):
     if draw is None:
         draw = st
 
-    result = fetch_marine_forecast_for_url(url, title)
+    import time
+    start_time = time.time()
+    result = fetch_beautifulsoup_marine_forecast_for_url(url, title)
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    draw.info(f"Forecast fetched in {elapsed_time:.2f} seconds")
+
     issue_date = result['issue_date']
     title = result['title']
     subtitle = result['subtitle']
@@ -861,15 +868,19 @@ def display_marine_forecast_for_url(draw=None, url='', title=''):
     draw.write(url)
 
     relative_date = timeago_format(issue_date, datetime.now(pytz.timezone('America/Vancouver')))
-    draw.header(f"Issued {relative_date}")
+    draw.subheader(f"Issued {relative_date}")
 
     if wind_warning:
         draw.badge("wind warning in effect", color="orange")
     if strong_wind_warning:
         draw.badge("wind warning in effect", color="red")
 
+    start_time = time.time()
     # Display the structured wind table
     chatgpt_forecast = openAIFetchForecastForURL(url=url)
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    draw.info(f"Forecast fetched in {elapsed_time:.2f} seconds")
 
     import io
     # Create StringIO
@@ -941,10 +952,10 @@ def display_marine_forecast_for_url(draw=None, url='', title=''):
     draw.badge("chatGPT forecast table")
 
     draw.dataframe(df)
-    draw.badge("chatGPT forecast")
+
 
     draw.divider()
-
+    draw.badge("chatGPT forecast")
     if issue_date:
         # Display relative and absolute dates
         draw.caption(f"({issue_date.strftime('%Y-%m-%d %H:%M %Z')})")
@@ -964,6 +975,7 @@ def display_marine_forecast_for_url(draw=None, url='', title=''):
                    """.format(bold_forecast), unsafe_allow_html=True)
         else:
             draw.error("Unable to fetch " + title + " marine forecast")
+
         draw.badge("BeautifulSoup forecast")
 
         return None
