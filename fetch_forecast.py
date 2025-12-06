@@ -456,14 +456,14 @@ def display_weather_info(container=None, lat=None, long=None, title=''):
             st.image(icon_url, width=64)  # Adjust width as needed
 
             wind_dir_now = get_wind_direction(weather_data.wind_direction_now)
-            st.metric("💨 Wind Now", f"{wind_dir_now} {wind_speed_now_kts:.1f}kts")
+            st.metric("💨 Wind Now", f"{wind_dir_now} {wind_speed_now_kts:.1f}kts", delta=round(wind_speed_3h_kts), delta_color="inverse")
 
         with col2:
             # Add sunset time as the first metric
             sunset_time = weather_data.sunset.astimezone(pytz.timezone('America/Vancouver')).strftime('%H:%M')
             st.metric("🪐 Sunset", sunset_time)
             
-            st.metric("🌧️ 3h Precipitation", f"{weather_data.next_3_hours_precipitation:.1f}mm")
+            st.metric("🌧️ 3h Precipitation", f"{weather_data.next_3_hours_precipitation:.1f}mm", delta=weather_data.next_24_hours_precipitation, delta_color="inverse")
 
             wind_dir_3h = get_wind_direction(weather_data.wind_direction_3h)
             st.metric("💨 Wind in 3h", f"{wind_dir_3h} {wind_speed_3h_kts:.1f}kts")
