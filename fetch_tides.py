@@ -1018,8 +1018,6 @@ def display_point_atkinson_tides(container=None, title="🌊Tides for Point Atki
         # response is a json
 
     if USE_SELENIUM:
-        draw.info('USE_SELENIUM')
-
         _csv = seleniumGetTidesFromURL('https://www.tides.gc.ca/en/stations/07795')
 
         # too much data, grab only every 10th line (10 minutes)
@@ -1031,6 +1029,7 @@ def display_point_atkinson_tides(container=None, title="🌊Tides for Point Atki
         csv_half_subsampled = '\n'.join(csv_lines2[:halfway_point])
 
         data = processCSVResponseToJSONSelenium(draw, csv_half_subsampled)
+        #draw.info('USE_SELENIUM')
 
     if USE_CHAT_GPT:
         draw.info('USE_CHAT_GPT')

@@ -57,7 +57,8 @@ def displayStreamlitDateTime(datetime, container=None):
 # Selector
 from fetch_forecast import display_marine_forecast_for_url
 from fetch_forecast import display_beach_quality_for_sandy_cove
-from fetch_forecast import display_humidity_for_lat_long
+from fetch_forecast import display_weather_info
+from fetch_forecast import display_summary_marine_forecast_for_url
 
 
 def headerbox():
@@ -78,7 +79,15 @@ def headerbox():
     VANCOUVER_LAT = 49.32
     VANCOUVER_LON = -123.16
 
-    display_humidity_for_lat_long(container=tab10, lat=VANCOUVER_LAT, long=VANCOUVER_LON, title="Weather")
+    URL_forecast_howesound = 'https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=06400'
+    URL_forecast_south_of_nanaimo = 'https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=14305'
+    URL_forecast_north_of_nanaimo = 'https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=14301'
+
+#Main tab
+    display_weather_info(container=tab10, lat=VANCOUVER_LAT, long=VANCOUVER_LON, title="Weather")
+    display_summary_marine_forecast_for_url(draw=tab10, url=URL_forecast_howesound , title="Howe Sound")
+    display_summary_marine_forecast_for_url(draw=tab10, url=URL_forecast_south_of_nanaimo , title="Howe Sound")
+    display_summary_marine_forecast_for_url(draw=tab10, url=URL_forecast_north_of_nanaimo , title="Howe Sound")
     display_beach_quality_for_sandy_cove(draw=tab10, title="🏖️ Beach water quality Sandy Cove")
     display_point_atkinson_tides(container=tab10)
 
@@ -87,9 +96,6 @@ def headerbox():
     refreshBuoy('WSB', 'Point Atkinson', container=tab4)
     refreshBuoy('WAS', 'Pam Rocks', container=tab5)
 
-    URL_forecast_howesound = 'https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=06400'
-    URL_forecast_south_of_nanaimo = 'https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=14305'
-    URL_forecast_north_of_nanaimo = 'https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=14301'
 
     display_marine_forecast_for_url(draw=tab6, url=URL_forecast_howesound, title="Howe Sound")
     display_marine_forecast_for_url(draw=tab7, url=URL_forecast_south_of_nanaimo, title="South of Nanaimo")

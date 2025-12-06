@@ -416,7 +416,7 @@ def create_arrow_html(direction, wind_speed = ''):
             return arrow_html
     
 
-def display_humidity_for_lat_long(container=None, lat=None, long=None, title=''):
+def display_weather_info(container=None, lat=None, long=None, title=''):
     if container is None:
         container = st
 
@@ -846,10 +846,8 @@ def drawChartOfForecast(draw, df, title):
     draw.plotly_chart(fig, use_container_width=True)
 
 
-def display_marine_forecast_for_url(draw=None, url='', title=''):
-    if draw is None:
-        draw = st
 
+def display_summary_marine_forecast_for_url(draw=None, url='', title=''):
     import time
     start_time = time.time()
     result = fetch_beautifulsoup_marine_forecast_for_url(url, title)
@@ -865,7 +863,7 @@ def display_marine_forecast_for_url(draw=None, url='', title=''):
     wind_warning = result['wind_warning']
     strong_wind_warning = result['strong_wind_warning']
 
-    #draw.subheader("Marine Forecast for "+title)
+    # draw.subheader("Marine Forecast for "+title)
     draw.write(url)
 
     relative_date = timeago_format(issue_date, datetime.now(pytz.timezone('America/Vancouver')))
@@ -926,7 +924,7 @@ def display_marine_forecast_for_url(draw=None, url='', title=''):
     if 'time' not in df.columns:
         df['time'] = 'N/A'
 
-    print(*df)
+    # print(*df)
 
     if not df.empty:
         draw.info(f" {df['time'].iloc[0]} - {title}")
@@ -950,16 +948,18 @@ def display_marine_forecast_for_url(draw=None, url='', title=''):
             col24.metric("Direction", wind_direction)
             col21.markdown(create_arrow_html(wind_direction, df['wind speed'].iloc[1]), unsafe_allow_html=True)
 
+    return df, issue_date, forecast, subtitle
 
-    drawChartOfForecast(draw, df, title)
 
+def display_table_marine_forecast_for_url(draw=None, url='', title='', df = None):
     draw.badge("chatGPT forecast table")
-
     draw.dataframe(df)
 
 
-    draw.divider()
+def display_text_marine_forecast_for_url(draw=None, url='', title='', forecast = None, issue_date = None, subtitle = None):
+    draw.write(forecast)
     draw.badge("chatGPT forecast")
+
     if issue_date:
         # Display relative and absolute dates
         draw.caption(f"({issue_date.strftime('%Y-%m-%d %H:%M %Z')})")
@@ -982,6 +982,21 @@ def display_marine_forecast_for_url(draw=None, url='', title=''):
 
         draw.badge("BeautifulSoup forecast")
 
-        return None
+    return None
+
+
+def display_marine_forecast_for_url(draw=None, url='', title=''):
+    if draw is None:
+        draw = st
+
+    df, issue_date, forecast, subtitle = display_summary_marine_forecast_for_url(draw, url, title)
+
+    drawChartOfForecast(draw, df, title)
+
+    display_table_marine_forecast_for_url(draw, url, title, df)
+
+    draw.divider()
+
+    display_text_marine_forecast_for_url(draw, url, title, forecast, issue_date, subtitle)
 
     return None
