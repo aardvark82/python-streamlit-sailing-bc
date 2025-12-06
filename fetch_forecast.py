@@ -430,7 +430,7 @@ def display_humidity_for_lat_long(container=None, lat=None, long=None, title='')
     vancouver_tz = pytz.timezone('America/Vancouver')
     weather_timestamp_van = weather_data.timestamp.astimezone(vancouver_tz)
     relative_date = timeago_format(weather_timestamp_van, datetime.now(pytz.timezone('America/Vancouver')))
-    container.header(f"Issued {relative_date}")
+    container.subheader(f"Issued {relative_date}")
     # container.caption(f"Last updated: {relative_date}")
 
 
@@ -756,7 +756,7 @@ def display_beach_quality_for_sandy_cove(draw=None, title=''):
 
     relative_date = timeago_format(time_measurement, datetime.now(pytz.timezone('America/Vancouver')))
 
-    draw.header(f"Issued {relative_date}")
+    draw.subheader(f"Issued {relative_date}")
     if not ecoli_sample1:
         ecoli_sample1 = 'not found'
     if not ecoli_sample2:
@@ -855,7 +855,8 @@ def display_marine_forecast_for_url(draw=None, url='', title=''):
     result = fetch_beautifulsoup_marine_forecast_for_url(url, title)
     end_time = time.time()
     elapsed_time = end_time - start_time
-    draw.info(f"Forecast fetched in {elapsed_time:.2f} seconds")
+    if elapsed_time > 0.1:
+        draw.info(f"Forecast fetched in {elapsed_time:.2f} seconds")
 
     issue_date = result['issue_date']
     title = result['title']
@@ -864,7 +865,7 @@ def display_marine_forecast_for_url(draw=None, url='', title=''):
     wind_warning = result['wind_warning']
     strong_wind_warning = result['strong_wind_warning']
 
-    draw.subheader("Marine Forecast for "+title)
+    #draw.subheader("Marine Forecast for "+title)
     draw.write(url)
 
     relative_date = timeago_format(issue_date, datetime.now(pytz.timezone('America/Vancouver')))
@@ -880,7 +881,8 @@ def display_marine_forecast_for_url(draw=None, url='', title=''):
     chatgpt_forecast = openAIFetchForecastForURL(url=url)
     end_time = time.time()
     elapsed_time = end_time - start_time
-    draw.info(f"Forecast fetched in {elapsed_time:.2f} seconds")
+    if elapsed_time > 0.1:
+        draw.info(f"Forecast fetched in {elapsed_time:.2f} seconds")
 
     import io
     # Create StringIO
@@ -927,8 +929,9 @@ def display_marine_forecast_for_url(draw=None, url='', title=''):
     print(*df)
 
     if not df.empty:
+        draw.info(f" {df['time'].iloc[0]} - {title}")
         col1, col2, col3, col4 = draw.columns(4)
-        col1.badge(df['time'].iloc[0], color='red')
+        col1.badge("direction")
         col2.metric("Wind Speed", df['wind speed'].iloc[0])
         col3.metric("Wind High", df['max wind speed'].iloc[0])
 
@@ -937,8 +940,9 @@ def display_marine_forecast_for_url(draw=None, url='', title=''):
         col1.markdown(create_arrow_html(wind_direction, df['wind speed'].iloc[0]), unsafe_allow_html=True)
 
         if len(df) > 1:
+            draw.info(f"{df['time'].iloc[1]} - {title}")
             col21, col22, col23, col24 = draw.columns(4)
-            col21.badge(df['time'].iloc[1], color='red')
+            col21.badge("direction")
             col22.metric("Wind Speed", df['wind speed'].iloc[1])
             col23.metric("Wind High", df['max wind speed'].iloc[1])
 
