@@ -416,6 +416,7 @@ def create_arrow_html(direction, wind_speed = ''):
             return arrow_html
     
 
+
 def display_weather_info(container=None, lat=None, long=None, title=''):
     if container is None:
         container = st
