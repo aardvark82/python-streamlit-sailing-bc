@@ -64,6 +64,7 @@ from fetch_forecast import display_summary_marine_forecast_for_url
 
 def headerbox():
 
+
     tab10, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab1, tab0, tab01 = st.tabs([
         "Weather",
         "Jericho",
@@ -78,13 +79,19 @@ def headerbox():
         "Squamish",
         "Lions Bay"
     ])
-    # Example coordinates for West Vancouver
-    VANCOUVER_LAT = 49.32
-    VANCOUVER_LON = -123.16
 
+    # Forecast Button to limit ChatGPT requests
     URL_forecast_howesound = 'https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=06400'
     URL_forecast_south_of_nanaimo = 'https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=14305'
     URL_forecast_north_of_nanaimo = 'https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=14301'
+    if st.button("Forecast"):
+        display_marine_forecast_for_url(draw=tab6, url=URL_forecast_howesound, title="Howe Sound")
+        display_marine_forecast_for_url(draw=tab7, url=URL_forecast_south_of_nanaimo, title="South of Nanaimo")
+        display_marine_forecast_for_url(draw=tab8, url=URL_forecast_north_of_nanaimo, title="North of Nanaimo")
+
+    # Example coordinates for West Vancouver
+    VANCOUVER_LAT = 49.32
+    VANCOUVER_LON = -123.16
 
 #Main tab
     display_weather_info(container=tab10, lat=VANCOUVER_LAT, long=VANCOUVER_LON, title="Weather")
@@ -99,11 +106,8 @@ def headerbox():
     refreshBuoy('WSB', 'Point Atkinson', container=tab4)
     refreshBuoy('WAS', 'Pam Rocks', container=tab5)
 
-
-    display_marine_forecast_for_url(draw=tab6, url=URL_forecast_howesound, title="Howe Sound")
-    display_marine_forecast_for_url(draw=tab7, url=URL_forecast_south_of_nanaimo, title="South of Nanaimo")
-    display_marine_forecast_for_url(draw=tab8, url=URL_forecast_north_of_nanaimo, title="North of Nanaimo")
-    display_beach_quality_for_sandy_cove(draw=tab9, title="🏖️ Beach water quality Sandy Cove")
+    if st.button("Beach water quality Sandy Cove"):
+        display_beach_quality_for_sandy_cove(draw=tab9, title="🏖️ Beach water quality Sandy Cove")
 
     SQUAMISH_LAT = 49.7
     SQUAMISH_LON = -123.16
