@@ -80,7 +80,7 @@ def openAIFetchForecastForURL(url):
         res = response.json()['choices'][0]['message']['content']
     else:
         print("Error:", response.status_code, response.text)
-        res=("Error:", response.status_code, response.text)
+        res=(f"Error: {response.status_code} {response.text}")
 
     return res
 
@@ -850,7 +850,10 @@ def drawChartOfForecast(draw, df, title):
 
 def display_summary_marine_forecast_for_url(draw=None, url='', title=''):
 
-    df, issue_date, forecast, subtitle = None
+    df= None
+    issue_date= None
+    forecast= None
+    subtitle = None
 
     import time
     start_time = time.time()
