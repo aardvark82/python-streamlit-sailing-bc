@@ -254,7 +254,18 @@ def parseJerichoWindHistory(container = None):
                   title="Jericho Wind History (Last 12 Hours)")
     fig.update_yaxes(range=[0, 30], title="Speed (knots)")
     fig.add_hline(y=15, line_dash="dot", line_color="red")
+    vancouver_tz = pytz.timezone('America/Vancouver')
+    current_time = datetime.now(vancouver_tz)
+    current_time_ts = current_time.timestamp() * 1000  # multiply by 1000 for milliseconds
 
+    fig.add_vline(
+        x=current_time_ts,
+        line_width=2,
+        line_dash="dash",
+        line_color="red",
+        annotation_text="Now",
+        annotation_position="top right"
+    )
     draw.plotly_chart(fig, use_container_width=True)
 
     draw.dataframe(df.tail(24))

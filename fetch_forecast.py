@@ -629,11 +629,27 @@ def add_wind_forecast_to_plotly_chart(weather_data, fig):
         fig.add_annotation(
             x=day_start,
             y=max(max(wind_speeds), max(wind_gusts)),
-            text=day_start.strftime('%A'),
+            text=day_start.strftime('%a'),
             showarrow=False,
-            yshift=10
+            yshift=10,
+            xanchor='left',
+            xshift=5,
+            font=dict(color="green", size=12, weight="bold")
+
         )
-        
+
+        vancouver_tz = pytz.timezone('America/Vancouver')
+        current_time = datetime.now(vancouver_tz)
+        current_time_ts = current_time.timestamp() * 1000  # multiply by 1000 for milliseconds
+
+        fig.add_vline(
+            x=current_time_ts,
+            line_width=2,
+            line_dash="dash",
+            line_color="red",
+            annotation_text="Now",
+            annotation_position="top right"
+        )
 
 
 from dataclasses import dataclass
