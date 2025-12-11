@@ -651,6 +651,14 @@ def add_wind_forecast_to_plotly_chart(weather_data, fig):
             annotation_position="top right"
         )
 
+def display_clear_skies_html(container, title="Clear Skies"):
+        if title:
+            container.subheader(title)
+        container.caption("From https://www.cleardarksky.com/c/Vancouverkey.html")
+        container.markdown("""<a href=https://www.cleardarksky.com/c/Vancouverkey.html>
+<img src="https://www.cleardarksky.com/c/Vancouvercs0.gif?1"></a>""", unsafe_allow_html=True)
+
+
 
 from dataclasses import dataclass
 from datetime import datetime
