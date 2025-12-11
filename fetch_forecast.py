@@ -879,106 +879,108 @@ def display_summary_marine_forecast_for_url(draw=None, url='', title=''):
     forecast= None
     subtitle = None
 
-    import time
-    start_time = time.time()
-    result = fetch_beautifulsoup_marine_forecast_for_url(url, title)
-    end_time = time.time()
-    elapsed_time = end_time - start_time
-    if elapsed_time > 0.1:
-        draw.info(f"Forecast fetched in {elapsed_time:.2f} seconds")
+    with st.container(border=True):
 
-    issue_date = result['issue_date']
-    title = result['title']
-    subtitle = result['subtitle']
-    forecast = result['forecast']
-    wind_warning = result['wind_warning']
-    strong_wind_warning = result['strong_wind_warning']
+        import time
+        start_time = time.time()
+        result = fetch_beautifulsoup_marine_forecast_for_url(url, title)
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        if elapsed_time > 0.1:
+            draw.info(f"Forecast fetched in {elapsed_time:.2f} seconds")
 
-    # draw.subheader("Marine Forecast for "+title)
-    draw.write(url)
+        issue_date = result['issue_date']
+        title = result['title']
+        subtitle = result['subtitle']
+        forecast = result['forecast']
+        wind_warning = result['wind_warning']
+        strong_wind_warning = result['strong_wind_warning']
 
-    relative_date = timeago_format(issue_date, datetime.now(pytz.timezone('America/Vancouver')))
-    draw.subheader(f"Issued {relative_date}")
+        # draw.subheader("Marine Forecast for "+title)
 
-    if wind_warning:
-        draw.badge("wind warning in effect", color="orange")
-    if strong_wind_warning:
-        draw.badge("wind warning in effect", color="red")
+        relative_date = timeago_format(issue_date, datetime.now(pytz.timezone('America/Vancouver')))
+        draw.subheader(f"{title} Issued {relative_date}")
+        draw.write(url)
 
-    start_time = time.time()
-    # Display the structured wind table
-    chatgpt_forecast = openAIFetchForecastForURL(url=url)
-    end_time = time.time()
-    elapsed_time = end_time - start_time
-    if elapsed_time > 0.1:
-        draw.info(f"Forecast fetched in {elapsed_time:.2f} seconds")
+        if wind_warning:
+            draw.badge("wind warning in effect", color="orange")
+        if strong_wind_warning:
+            draw.badge("wind warning in effect", color="red")
 
-    import io
-    # Create StringIO
+        start_time = time.time()
+        # Display the structured wind table
+        chatgpt_forecast = openAIFetchForecastForURL(url=url)
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        if elapsed_time > 0.1:
+            draw.info(f"Forecast fetched in {elapsed_time:.2f} seconds")
 
-    # Create StringIO object from the CSV string
-    if chatgpt_forecast:
-        chatgpt_forecast = chatgpt_forecast.replace('```csv', '')
-        chatgpt_forecast = chatgpt_forecast.replace('```', '')
-        # Read CSV from StringIO
-        csv_stringio = io.StringIO(chatgpt_forecast)
-        df = pd.read_csv(csv_stringio, sep=',', on_bad_lines='skip')
-        # Clean up the dataframe
-        df = df.dropna(how='all')  # Remove empty rows
-        df = df.reset_index(drop=True)  # Reset index after dropping rows
+        import io
+        # Create StringIO
 
-        # Normalize column names
-        df.columns = df.columns.str.strip().str.lower()
+        # Create StringIO object from the CSV string
+        if chatgpt_forecast:
+            chatgpt_forecast = chatgpt_forecast.replace('```csv', '')
+            chatgpt_forecast = chatgpt_forecast.replace('```', '')
+            # Read CSV from StringIO
+            csv_stringio = io.StringIO(chatgpt_forecast)
+            df = pd.read_csv(csv_stringio, sep=',', on_bad_lines='skip')
+            # Clean up the dataframe
+            df = df.dropna(how='all')  # Remove empty rows
+            df = df.reset_index(drop=True)  # Reset index after dropping rows
 
-        # Apply the standardization to the wind direction column
-        try:
-            if 'wind_direction' in df.columns:
-                df['wind direction'] = df['wind_direction'].str.lower().apply(standardize_wind_direction)
-            if 'wind direction' in df.columns:
-                df['wind direction'] = df['wind direction'].str.lower().apply(standardize_wind_direction)
+            # Normalize column names
+            df.columns = df.columns.str.strip().str.lower()
+
+            # Apply the standardization to the wind direction column
+            try:
+                if 'wind_direction' in df.columns:
+                    df['wind direction'] = df['wind_direction'].str.lower().apply(standardize_wind_direction)
+                if 'wind direction' in df.columns:
+                    df['wind direction'] = df['wind direction'].str.lower().apply(standardize_wind_direction)
+                else:
+                    df['wind direction'] = 'N/A'
+            except Exception as e:
+                print(f"Error applying standardization to wind direction column: {e}")
+                draw.warning(f"Error applying standardization to wind direction column: {e}")
+
+            if 'wind speed' in df.columns:
+                df['wind speed'] = df['wind speed'].apply(clean_wind_speed)
             else:
-                df['wind direction'] = 'N/A'
-        except Exception as e:
-            print(f"Error applying standardization to wind direction column: {e}")
-            draw.warning(f"Error applying standardization to wind direction column: {e}")
+                df['wind speed'] = 0
 
-        if 'wind speed' in df.columns:
-            df['wind speed'] = df['wind speed'].apply(clean_wind_speed)
-        else:
-            df['wind speed'] = 0
+            # Clean max wind speed for plotting (ensure numeric)
+            if 'max wind speed' in df.columns:
+                df['max wind speed'] = df['max wind speed'].apply(clean_wind_speed)
+            else:
+                df['max wind speed'] = 0
 
-        # Clean max wind speed for plotting (ensure numeric)
-        if 'max wind speed' in df.columns:
-            df['max wind speed'] = df['max wind speed'].apply(clean_wind_speed)
-        else:
-            df['max wind speed'] = 0
+            if 'time' not in df.columns:
+                df['time'] = 'N/A'
 
-        if 'time' not in df.columns:
-            df['time'] = 'N/A'
+            # print(*df)
 
-        # print(*df)
+            if not df.empty:
+                #draw.info(f" {df['time'].iloc[0]} - {title}")
+                col1, col2, col3, col4 = draw.columns(4)
+                col1.badge(f" {df['time'].iloc[0]}")
+                col2.metric("Wind Speed", df['wind speed'].iloc[0])
+                col3.metric("Wind High", df['max wind speed'].iloc[0])
 
-        if not df.empty:
-            draw.info(f" {df['time'].iloc[0]} - {title}")
-            col1, col2, col3, col4 = draw.columns(4)
-            col1.badge("direction")
-            col2.metric("Wind Speed", df['wind speed'].iloc[0])
-            col3.metric("Wind High", df['max wind speed'].iloc[0])
+                wind_direction = df['wind direction'].iloc[0]
+                col4.metric("Direction", wind_direction)
+                col1.markdown(create_arrow_html(wind_direction, df['wind speed'].iloc[0]), unsafe_allow_html=True)
 
-            wind_direction = df['wind direction'].iloc[0]
-            col4.metric("Direction", wind_direction)
-            col1.markdown(create_arrow_html(wind_direction, df['wind speed'].iloc[0]), unsafe_allow_html=True)
+                if len(df) > 1:
+                    #draw.info(f"{df['time'].iloc[1]} - {title}")
+                    col21, col22, col23, col24 = draw.columns(4)
+                    col21.badge(f"{df['time'].iloc[1]}")
+                    col22.metric("Wind Speed", df['wind speed'].iloc[1])
+                    col23.metric("Wind High", df['max wind speed'].iloc[1])
 
-            if len(df) > 1:
-                draw.info(f"{df['time'].iloc[1]} - {title}")
-                col21, col22, col23, col24 = draw.columns(4)
-                col21.badge("direction")
-                col22.metric("Wind Speed", df['wind speed'].iloc[1])
-                col23.metric("Wind High", df['max wind speed'].iloc[1])
-
-                wind_direction = df['wind direction'].iloc[1]
-                col24.metric("Direction", wind_direction)
-                col21.markdown(create_arrow_html(wind_direction, df['wind speed'].iloc[1]), unsafe_allow_html=True)
+                    wind_direction = df['wind direction'].iloc[1]
+                    col24.metric("Direction", wind_direction)
+                    col21.markdown(create_arrow_html(wind_direction, df['wind speed'].iloc[1]), unsafe_allow_html=True)
 
     return df, issue_date, forecast, subtitle
 
