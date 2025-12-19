@@ -656,7 +656,7 @@ def display_clear_skies_html(container, title="Clear Skies"):
             container.subheader(title)
         container.caption("From https://www.cleardarksky.com/c/Vancouverkey.html")
         container.markdown("""<a href=https://www.cleardarksky.com/c/Vancouverkey.html>
-<img src="https://www.cleardarksky.com/c/Vancouvercs0.gif?1"></a>""", unsafe_allow_html=True)
+<img src="https://www.cleardarksky.com/c/Vancouvercsk.gif?c=986410"></a>""", unsafe_allow_html=True)
 
 
 
