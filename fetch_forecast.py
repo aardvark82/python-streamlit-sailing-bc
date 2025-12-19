@@ -131,7 +131,7 @@ def fetch_water_quality_for_url(_draw, url, title):
 
     except Exception as e:
         #_draw.error(f"Failed to fetch or parse water quality data from {url}: {e}")
-        return None, None
+        return None, None, None
 
 
 @st.cache_data(ttl=1800)
@@ -778,6 +778,9 @@ def display_beach_quality_for_sandy_cove(draw=None, title=''):
     draw.subheader(title)
 
     ecoli_sample1, ecoli_sample2, time_measurement = fetch_water_quality_for_url(_draw = draw, url='https://www.vch.ca/en/Documents/VCH-beach-route3.pdf', title=title)
+    if not ecoli_sample1:
+            st.info('Could not load URL')
+            return
 
     relative_date = timeago_format(time_measurement, datetime.now(pytz.timezone('America/Vancouver')))
 
