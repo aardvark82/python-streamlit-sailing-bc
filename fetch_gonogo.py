@@ -20,9 +20,9 @@ from fetch_tides import beautifulSoupFetchTidesForURL, process_tide_data, parse_
 # --- Thresholds ---
 WIND_GO = 10        # knots — ideal
 WIND_CAUTION = 15   # knots — manageable but exposed in a 14ft RIB
-WAVE_GO = 0.5       # meters
-WAVE_CAUTION = 1.0  # meters
-PRECIP_GO = 0.0     # mm in next 24h
+WAVE_GO = 0.51      # meters (51 cm)
+WAVE_CAUTION = 0.75 # meters
+PRECIP_GO = 0.5     # mm in next 24h — light drizzle OK
 PRECIP_CAUTION = 2.0
 TIDE_NOGO = 1.5     # meters — very low, tough to launch at Horseshoe Bay
 TIDE_CAUTION = 2.5  # meters
@@ -230,9 +230,10 @@ def display_gonogo_sidebar():
                 'label': f"Halibut Bank: {buoy_wind}kts",
             }
         if buoy_wave is not None:
+            wave_cm = buoy_wave * 100
             factors['waves'] = {
                 'status': _status(buoy_wave, WAVE_GO, WAVE_CAUTION),
-                'label': f"Waves: {buoy_wave:.1f}m",
+                'label': f"Waves: {wave_cm:.0f}cm",
             }
     except Exception as e:
         print(f"Go/NoGo buoy error: {e}")
@@ -262,21 +263,42 @@ def display_gonogo_sidebar():
     else:
         overall, overall_label = 'go', 'GO'
 
+    # Compact summary — always visible
+    nogo_count = statuses.count('nogo')
+    caution_count = statuses.count('caution')
+    summary_parts = []
+    if nogo_count:
+        summary_parts.append(f"{nogo_count} red")
+    if caution_count:
+        summary_parts.append(f"{caution_count} amber")
+    summary_note = f"  ({', '.join(summary_parts)})" if summary_parts else ""
+
     st.sidebar.badge(overall_label, color=_BADGE[overall])
+    st.sidebar.caption(f"{len(factors)} factors checked{summary_note}")
 
-    for f in factors.values():
-        st.sidebar.caption(f"{_ICON[f['status']]} {f['label']}")
+    # Expandable details — current conditions
+    with st.sidebar.expander("Current Conditions"):
+        for f in factors.values():
+            st.caption(f"{_ICON[f['status']]} {f['label']}")
 
-    # --- 5-day boating windows ---
+        st.markdown(
+            "**Thresholds:** "
+            f"Wind GO < {WIND_GO}kts, CAUTION < {WIND_CAUTION}kts | "
+            f"Waves GO < {int(WAVE_GO * 100)}cm | "
+            f"Rain GO < {PRECIP_GO}mm/24h | "
+            f"Tide NO-GO < {TIDE_NOGO}m"
+        )
+
+    # Expandable details — 5-day windows
     if weather:
         try:
             windows = _analyze_5day_windows(weather)
             if windows:
-                st.sidebar.markdown("**5-Day Windows**")
-                for w in windows:
-                    detail = f"{w['wind']:.0f}kts"
-                    if w['rain'] > 0:
-                        detail += f", {w['rain']:.1f}mm"
-                    st.sidebar.caption(f"{_ICON[w['status']]} {w['label']} ({detail})")
+                with st.sidebar.expander("5-Day Windows"):
+                    for w in windows:
+                        detail = f"{w['wind']:.0f}kts"
+                        if w['rain'] > 0:
+                            detail += f", {w['rain']:.1f}mm"
+                        st.caption(f"{_ICON[w['status']]} {w['label']} ({detail})")
         except Exception as e:
             print(f"Go/NoGo 5-day error: {e}")
