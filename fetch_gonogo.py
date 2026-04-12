@@ -84,13 +84,14 @@ def _fetch_buoy_wind_wave(buoy_id='46146'):
         return None, None
 
 
-def _get_tide_interpolator():
-    """Build tide interpolation arrays from BeautifulSoup extremes.
-    Returns (x_timestamps, y_heights) numpy arrays, or (None, None)."""
+def _get_tide_data():
+    """Fetch tide extremes and build interpolation arrays.
+    Returns (extremes_df, x_timestamps, y_heights) or (None, None, None).
+    extremes_df has columns: datetime, Height, type (high/low)."""
     try:
         data = beautifulSoupFetchTidesForURL("https://www.tides.gc.ca/en/stations/07795")
         if not data or not data.get('data'):
-            return None, None
+            return None, None, None
 
         tide_df = process_tide_data(data)
         tide_df = tide_df.rename(columns={'Time (PDT)& Date': 'datetime'})
@@ -99,14 +100,53 @@ def _get_tide_interpolator():
         tide_df = tide_df.dropna(subset=['Height', 'datetime'])
 
         if len(tide_df) < 2:
-            return None, None
+            return None, None, None
 
         x_ts = tide_df['datetime'].apply(lambda dt: dt.timestamp()).values
         y_h = tide_df['Height'].values
-        return x_ts, y_h
+        return tide_df, x_ts, y_h
     except Exception as e:
-        print(f"Go/NoGo tide interpolator error: {e}")
-        return None, None
+        print(f"Go/NoGo tide data error: {e}")
+        return None, None, None
+
+
+def _fmt_tide_time(dt):
+    """Format tide time as e.g. '8am', '12pm', '3pm' (cross-platform)."""
+    hour = dt.hour % 12 or 12
+    ampm = 'am' if dt.hour < 12 else 'pm'
+    minute = dt.minute
+    if minute:
+        return f"{hour}:{minute:02d}{ampm}"
+    return f"{hour}{ampm}"
+
+
+def _nearest_tides_in_window(tide_df, window_start, window_end):
+    """Find low and high tide times within a time window.
+    Returns dict with 'low' and 'high' keys, each (time_str, height) or None."""
+    if tide_df is None or tide_df.empty:
+        return {'low': None, 'high': None}
+
+    mask = (tide_df['datetime'] >= window_start) & (tide_df['datetime'] <= window_end)
+    window_tides = tide_df[mask]
+
+    result = {'low': None, 'high': None}
+    if window_tides.empty:
+        return result
+
+    low_row = window_tides.loc[window_tides['Height'].idxmin()]
+    high_row = window_tides.loc[window_tides['Height'].idxmax()]
+
+    # Only label as low/high if there's meaningful difference
+    if low_row.name != high_row.name:
+        result['low'] = (_fmt_tide_time(low_row['datetime']), low_row['Height'])
+        result['high'] = (_fmt_tide_time(high_row['datetime']), high_row['Height'])
+    else:
+        # Single tide point in window
+        row = low_row
+        label = 'low' if row['Height'] < 2.5 else 'high'
+        result[label] = (_fmt_tide_time(row['datetime']), row['Height'])
+
+    return result
 
 
 def _tide_at(x_ts, y_h, target_dt):
@@ -121,7 +161,7 @@ def _tide_at(x_ts, y_h, target_dt):
 
 def _get_current_tide_height():
     """Estimate current tide height from BeautifulSoup extremes."""
-    x_ts, y_h = _get_tide_interpolator()
+    _, x_ts, y_h = _get_tide_data()
     if x_ts is None:
         return None, None
 
@@ -240,8 +280,8 @@ def _analyze_5day_windows(weather_data):
     vancouver_tz = pytz.timezone('America/Vancouver')
     today = datetime.now(vancouver_tz).replace(hour=0, minute=0, second=0, microsecond=0)
 
-    # Pre-fetch tide interpolation data once
-    tide_x, tide_y = _get_tide_interpolator()
+    # Pre-fetch tide extremes once
+    tide_df, _, _ = _get_tide_data()
 
     windows = []
 
@@ -268,18 +308,15 @@ def _analyze_5day_windows(weather_data):
             )
             total_rain = sum(item.get('rain', {}).get('3h', 0) for item in items)
 
-            # Tide at this time slot
-            tide_h = _tide_at(tide_x, tide_y, target)
-            tide_status = None
-            if tide_h is not None:
-                tide_status = _status(tide_h, TIDE_NOGO, TIDE_CAUTION, higher_is_worse=False)
+            # Tide info for display only (not affecting go/nogo decision)
+            window_start = target - timedelta(hours=2)
+            window_end = target + timedelta(hours=2)
+            tides = _nearest_tides_in_window(tide_df, window_start, window_end)
 
-            # Overall status for this window
+            # Go/nogo based on wind + rain only
             if max_wind > WIND_CAUTION or total_rain > PRECIP_CAUTION:
                 status = 'nogo'
-            elif tide_status == 'nogo':
-                status = 'nogo'
-            elif max_wind > WIND_GO or total_rain > PRECIP_GO or tide_status == 'caution':
+            elif max_wind > WIND_GO or total_rain > PRECIP_GO:
                 status = 'caution'
             else:
                 status = 'go'
@@ -291,8 +328,7 @@ def _analyze_5day_windows(weather_data):
                 'status': status,
                 'wind': max_wind,
                 'rain': total_rain,
-                'tide': tide_h,
-                'tide_status': tide_status,
+                'tides': tides,
             })
 
     return windows
@@ -373,8 +409,11 @@ def display_gonogo_page(container=None):
                     detail = f"{w['wind']:.0f}kts"
                     if w['rain'] > 0:
                         detail += f", {w['rain']:.1f}mm rain"
-                    if w.get('tide') is not None:
-                        detail += f", tide {w['tide']:.1f}m"
+                    tides = w.get('tides', {})
+                    if tides.get('high'):
+                        detail += f", High {tides['high'][0]} ({tides['high'][1]:.1f}m)"
+                    if tides.get('low'):
+                        detail += f", Low {tides['low'][0]} ({tides['low'][1]:.1f}m)"
                     draw.caption(f"{_ICON[w['status']]} {w['day']} {w['period']} — {detail}")
 
 
@@ -405,8 +444,11 @@ def _draw_weekly_chart(draw, windows):
                 parts = [f"{match['wind']:.0f}kts"]
                 if match['rain'] > 0:
                     parts.append(f"{match['rain']:.1f}mm")
-                if match.get('tide') is not None:
-                    parts.append(f"{match['tide']:.1f}m")
+                tides = match.get('tides', {})
+                if tides.get('high'):
+                    parts.append(f"H {tides['high'][0]} {tides['high'][1]:.1f}m")
+                if tides.get('low'):
+                    parts.append(f"L {tides['low'][0]} {tides['low'][1]:.1f}m")
                 row_text.append("<br>".join(parts))
             else:
                 row_z.append(None)
@@ -454,8 +496,14 @@ def _draw_weekly_chart(draw, windows):
             match = next((w for w in windows if w['day'] == day and w['period'] == period), None)
             if match:
                 label = f"<b>{match['wind']:.0f}</b>kts"
-                if match.get('tide') is not None:
-                    label += f"<br>{match['tide']:.1f}m"
+                tides = match.get('tides', {})
+                tide_parts = []
+                if tides.get('high'):
+                    tide_parts.append(f"H{tides['high'][0]}")
+                if tides.get('low'):
+                    tide_parts.append(f"L{tides['low'][0]}")
+                if tide_parts:
+                    label += f"<br><sub>{' '.join(tide_parts)}</sub>"
                 fig.add_annotation(
                     x=day, y=period,
                     text=label,
