@@ -194,7 +194,7 @@ def display_precipitation_forecast(weather_data, container):
         )
 
     add_wind_forecast_to_plotly_chart(weather_data, fig)
-    container.plotly_chart(fig, use_container_width=True)
+    container.plotly_chart(fig, width='stretch')
 
 
 def add_wind_forecast_to_plotly_chart(weather_data, fig):

@@ -260,7 +260,7 @@ def parseJerichoWindHistory(container=None):
         line_width=2, line_dash="dash", line_color="red",
         annotation_text="Now", annotation_position="top right"
     )
-    draw.plotly_chart(fig, use_container_width=True)
+    draw.plotly_chart(fig, width='stretch')
     with draw.expander("Raw Data (Last 12 Hours)"):
         st.dataframe(df.tail(24))
 
@@ -421,7 +421,7 @@ def plot_historical_buoy_data(container, buoy_id):
                 ]),
                 customdata=df['direction']
             )
-            container.plotly_chart(fig_wind, use_container_width=True)
+            container.plotly_chart(fig_wind, width='stretch')
 
             df_waves = df.dropna(subset=['wave_height']).copy()
             if not df_waves.empty:
@@ -435,7 +435,7 @@ def plot_historical_buoy_data(container, buoy_id):
                 fig_wave.add_hline(y=33, line_dash="dot", line_color="green")
                 fig_wave.add_hline(y=75, line_dash="dot", line_color="orange")
                 fig_wave.add_hline(y=100, line_dash="dot", line_color="red")
-                container.plotly_chart(fig_wave, use_container_width=True)
+                container.plotly_chart(fig_wave, width='stretch')
         else:
             container.warning(f"No data available for buoy {buoy_id} in the selected period")
 

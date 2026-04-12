@@ -285,7 +285,7 @@ def drawChartOfForecast(draw, df, title):
     )
     fig.add_hline(y=15, line_dash="dot", line_color="red", annotation_text="15 knots")
 
-    draw.plotly_chart(fig, use_container_width=True)
+    draw.plotly_chart(fig, width='stretch')
 
 
 def display_summary_marine_forecast_for_url(draw=None, url='', title=''):

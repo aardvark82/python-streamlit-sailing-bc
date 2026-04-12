@@ -421,4 +421,4 @@ def _draw_weekly_chart(draw, windows):
     # Remove default text template since we're using annotations
     fig.update_traces(texttemplate=None)
 
-    draw.plotly_chart(fig, use_container_width=True)
+    draw.plotly_chart(fig, width='stretch')

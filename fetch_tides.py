@@ -324,7 +324,7 @@ def display_tide_table_text(tide_df, container=None):
             'border-color': '#e1e4e8'
         }).hide(axis='index')
 
-        draw.dataframe(styled_df, use_container_width=True)
+        draw.dataframe(styled_df, width='stretch')
         draw.markdown("---")
 
 
@@ -470,7 +470,7 @@ def create_natural_tide_chart(tide_df, container=None):
         annotation_text="Current Time", annotation_position="top right"
     )
 
-    draw.plotly_chart(fig, use_container_width=True)
+    draw.plotly_chart(fig, width='stretch')
 
     col1, col2, col3 = draw.columns(3)
 
