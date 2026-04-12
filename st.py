@@ -49,103 +49,127 @@ def displayWindWarningIfNeeded(wind_speed, container=None):
 
 
 def headerbox():
-    tab10, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab1, tab0, tab01 = st.tabs([
-        "Weather", "Jericho", "Halibut Bank", "Pt Atkinson", "Pam Rocks",
-        "Howe Sound", "S Nanaimo", "N Nanaimo", "Beach",
-        'Tides', "Squamish", "Lions Bay"
-    ])
+    from fetch_weather import display_clear_skies_html
 
     URL_forecast_howesound = 'https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=06400'
     URL_forecast_south_of_nanaimo = 'https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=14305'
     URL_forecast_north_of_nanaimo = 'https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=14301'
 
-    if st.button("Forecast"):
-        try:
-            display_marine_forecast_for_url(draw=tab6, url=URL_forecast_howesound, title="Howe Sound")
-        except Exception as e:
-            tab6.error(f"Failed to load Howe Sound forecast: {e}")
-        try:
-            display_marine_forecast_for_url(draw=tab7, url=URL_forecast_south_of_nanaimo, title="South of Nanaimo")
-        except Exception as e:
-            tab7.error(f"Failed to load S Nanaimo forecast: {e}")
-        try:
-            display_marine_forecast_for_url(draw=tab8, url=URL_forecast_north_of_nanaimo, title="North of Nanaimo")
-        except Exception as e:
-            tab8.error(f"Failed to load N Nanaimo forecast: {e}")
-
     VANCOUVER_LAT = 49.32
     VANCOUVER_LON = -123.16
-
-    # Main Weather tab
-    try:
-        display_weather_info(container=tab10, lat=VANCOUVER_LAT, long=VANCOUVER_LON, title="Weather")
-    except Exception as e:
-        tab10.error(f"Failed to load weather: {e}")
-
-    try:
-        display_summary_marine_forecast_for_url(draw=tab10, url=URL_forecast_howesound, title="Howe Sound")
-        display_summary_marine_forecast_for_url(draw=tab10, url=URL_forecast_south_of_nanaimo, title="Howe Sound")
-        display_summary_marine_forecast_for_url(draw=tab10, url=URL_forecast_north_of_nanaimo, title="Howe Sound")
-    except Exception as e:
-        tab10.error(f"Failed to load marine forecast summary: {e}")
-
-    try:
-        display_beach_quality_for_sandy_cove(draw=tab10, title="🏖️ Beach water quality Sandy Cove")
-    except Exception as e:
-        tab10.error(f"Failed to load beach quality: {e}")
-
-    try:
-        display_point_atkinson_tides(container=tab10)
-    except Exception as e:
-        tab10.error(f"Failed to load tides: {e}")
-
-    try:
-        parseJerichoWindHistory(container=tab2)
-    except Exception as e:
-        tab2.error(f"Failed to load Jericho wind data: {e}")
-
-    try:
-        refreshBuoy('46146', 'Halibut Bank', container=tab3)
-    except Exception as e:
-        tab3.error(f"Failed to load Halibut Bank buoy: {e}")
-
-    try:
-        refreshBuoy('WSB', 'Point Atkinson', container=tab4)
-    except Exception as e:
-        tab4.error(f"Failed to load Point Atkinson buoy: {e}")
-
-    try:
-        refreshBuoy('WAS', 'Pam Rocks', container=tab5)
-    except Exception as e:
-        tab5.error(f"Failed to load Pam Rocks buoy: {e}")
-
-    if st.button("Beach water quality Sandy Cove"):
-        try:
-            display_beach_quality_for_sandy_cove(draw=tab9, title="🏖️ Beach water quality Sandy Cove")
-        except Exception as e:
-            tab9.error(f"Failed to load beach quality: {e}")
-
     SQUAMISH_LAT = 49.7
     SQUAMISH_LON = -123.16
-    try:
-        display_weather_info(container=tab0, lat=SQUAMISH_LAT, long=SQUAMISH_LON, title="Squamish")
-    except Exception as e:
-        tab0.error(f"Failed to load Squamish weather: {e}")
-
     LIONSBAY_LAT = 49.45
     LIONSBAY_LON = -123.16
-    try:
-        display_weather_info(container=tab01, lat=LIONSBAY_LAT, long=LIONSBAY_LON, title="Lions Bay")
-    except Exception as e:
-        tab01.error(f"Failed to load Lions Bay weather: {e}")
 
-    try:
-        display_point_atkinson_tides(container=tab1)
-    except Exception as e:
-        tab1.error(f"Failed to load tides: {e}")
+    # Sidebar navigation
+    with st.sidebar:
+        st.title("Sailing BC")
+        page = st.radio("Navigate", [
+            "Dashboard",
+            "Jericho Wind",
+            "Halibut Bank",
+            "Pt Atkinson",
+            "Pam Rocks",
+            "Forecast",
+            "Beach",
+            "Tides",
+            "Squamish",
+            "Lions Bay",
+        ], label_visibility="collapsed")
+        st.divider()
+        st.badge("v21", color="blue")
+        st.caption("Auto-refresh every 5 minutes")
 
-    st.badge("v20", color="blue")
-    st.write("This application will auto-refresh every 15 minutes.")
+    draw = st
+
+    if page == "Dashboard":
+        try:
+            display_weather_info(container=draw, lat=VANCOUVER_LAT, long=VANCOUVER_LON, title="Weather")
+        except Exception as e:
+            draw.error(f"Failed to load weather: {e}")
+
+        try:
+            display_clear_skies_html(container=draw, title="Clear Skies")
+        except Exception as e:
+            draw.error(f"Failed to load clear skies: {e}")
+
+        try:
+            display_summary_marine_forecast_for_url(draw=draw, url=URL_forecast_howesound, title="Howe Sound")
+            display_summary_marine_forecast_for_url(draw=draw, url=URL_forecast_south_of_nanaimo, title="South of Nanaimo")
+            display_summary_marine_forecast_for_url(draw=draw, url=URL_forecast_north_of_nanaimo, title="North of Nanaimo")
+        except Exception as e:
+            draw.error(f"Failed to load marine forecast summary: {e}")
+
+        try:
+            display_beach_quality_for_sandy_cove(draw=draw, title="Beach water quality Sandy Cove")
+        except Exception as e:
+            draw.error(f"Failed to load beach quality: {e}")
+
+        try:
+            display_point_atkinson_tides(container=draw)
+        except Exception as e:
+            draw.error(f"Failed to load tides: {e}")
+
+    elif page == "Jericho Wind":
+        try:
+            parseJerichoWindHistory(container=draw)
+        except Exception as e:
+            draw.error(f"Failed to load Jericho wind data: {e}")
+
+    elif page == "Halibut Bank":
+        try:
+            refreshBuoy('46146', 'Halibut Bank', container=draw)
+        except Exception as e:
+            draw.error(f"Failed to load Halibut Bank buoy: {e}")
+
+    elif page == "Pt Atkinson":
+        try:
+            refreshBuoy('WSB', 'Point Atkinson', container=draw)
+        except Exception as e:
+            draw.error(f"Failed to load Point Atkinson buoy: {e}")
+
+    elif page == "Pam Rocks":
+        try:
+            refreshBuoy('WAS', 'Pam Rocks', container=draw)
+        except Exception as e:
+            draw.error(f"Failed to load Pam Rocks buoy: {e}")
+
+    elif page == "Forecast":
+        region = st.selectbox("Region", ["Howe Sound", "South of Nanaimo", "North of Nanaimo"])
+        url_map = {
+            "Howe Sound": URL_forecast_howesound,
+            "South of Nanaimo": URL_forecast_south_of_nanaimo,
+            "North of Nanaimo": URL_forecast_north_of_nanaimo,
+        }
+        try:
+            display_marine_forecast_for_url(draw=draw, url=url_map[region], title=region)
+        except Exception as e:
+            draw.error(f"Failed to load {region} forecast: {e}")
+
+    elif page == "Beach":
+        try:
+            display_beach_quality_for_sandy_cove(draw=draw, title="Beach water quality Sandy Cove")
+        except Exception as e:
+            draw.error(f"Failed to load beach quality: {e}")
+
+    elif page == "Tides":
+        try:
+            display_point_atkinson_tides(container=draw)
+        except Exception as e:
+            draw.error(f"Failed to load tides: {e}")
+
+    elif page == "Squamish":
+        try:
+            display_weather_info(container=draw, lat=SQUAMISH_LAT, long=SQUAMISH_LON, title="Squamish")
+        except Exception as e:
+            draw.error(f"Failed to load Squamish weather: {e}")
+
+    elif page == "Lions Bay":
+        try:
+            display_weather_info(container=draw, lat=LIONSBAY_LAT, long=LIONSBAY_LON, title="Lions Bay")
+        except Exception as e:
+            draw.error(f"Failed to load Lions Bay weather: {e}")
 
 
 def parseJerichoWindHistory(container=None):
