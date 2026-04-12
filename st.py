@@ -24,7 +24,7 @@ from fetch_beach import display_beach_quality_for_sandy_cove
 from fetch_weather import display_weather_info
 from fetch_tides import display_point_atkinson_tides
 from wind_utils import create_arrow_html
-from fetch_gonogo import display_gonogo_sidebar
+from fetch_gonogo import display_gonogo_sidebar, display_gonogo_page
 from pathlib import Path
 
 # Read version from VERSION file
@@ -72,6 +72,7 @@ def headerbox():
     with st.sidebar:
         st.title("Sailing BC")
         page = st.radio("Navigate", [
+            "Go / No-Go",
             "Dashboard",
             "Jericho Wind",
             "Halibut Bank",
@@ -91,7 +92,13 @@ def headerbox():
 
     draw = st
 
-    if page == "Dashboard":
+    if page == "Go / No-Go":
+        try:
+            display_gonogo_page(container=draw)
+        except Exception as e:
+            draw.error(f"Failed to load Go/No-Go: {e}")
+
+    elif page == "Dashboard":
         try:
             display_weather_info(container=draw, lat=VANCOUVER_LAT, long=VANCOUVER_LON, title="Weather")
         except Exception as e:

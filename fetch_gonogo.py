@@ -5,6 +5,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import pytz
+import plotly.graph_objects as go
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 
@@ -22,7 +23,7 @@ WIND_GO = 10        # knots — ideal
 WIND_CAUTION = 15   # knots — manageable but exposed in a 14ft RIB
 WAVE_GO = 0.51      # meters (51 cm)
 WAVE_CAUTION = 0.75 # meters
-PRECIP_GO = 0.5     # mm in next 24h — light drizzle OK
+PRECIP_GO = 0.5     # mm — light drizzle OK
 PRECIP_CAUTION = 2.0
 TIDE_NOGO = 1.5     # meters — very low, tough to launch at Horseshoe Bay
 TIDE_CAUTION = 2.5  # meters
@@ -49,6 +50,8 @@ def _status(value, go_threshold, caution_threshold, higher_is_worse=True):
 
 _BADGE = {'go': 'green', 'caution': 'orange', 'nogo': 'red'}
 _ICON = {'go': '✅', 'caution': '⚠️', 'nogo': '🔴'}
+_COLOR_MAP = {'go': '#2ecc71', 'caution': '#f39c12', 'nogo': '#e74c3c'}
+_NUMERIC = {'go': 1, 'caution': 0.5, 'nogo': 0}
 
 
 def _fetch_buoy_wind_wave(buoy_id='46146'):
@@ -116,8 +119,100 @@ def _get_current_tide_height():
         return None, None
 
 
+def _gather_current_factors():
+    """Gather all current condition factors. Returns (factors dict, weather_data)."""
+    factors = {}
+    weather = None
+
+    # 1. Current weather (wind + precipitation)
+    try:
+        api_key = st.secrets["openweather_api_key"]
+        weather = fetch_from_open_weather(VANCOUVER_LAT, VANCOUVER_LON, api_key)
+        if weather:
+            wind_kts = weather.wind_speed_now * 1.94384
+            factors['wind_now'] = {
+                'status': _status(wind_kts, WIND_GO, WIND_CAUTION),
+                'label': f"Wind Now: {wind_kts:.0f}kts",
+                'value': wind_kts,
+            }
+            factors['precip'] = {
+                'status': _status(weather.next_24_hours_precipitation, PRECIP_GO, PRECIP_CAUTION),
+                'label': f"Rain 24h: {weather.next_24_hours_precipitation:.1f}mm",
+                'value': weather.next_24_hours_precipitation,
+            }
+    except Exception as e:
+        print(f"Go/NoGo weather error: {e}")
+
+    # 2. Marine forecast — Howe Sound warnings + parsed wind
+    try:
+        forecast = fetch_beautifulsoup_marine_forecast_for_url(URL_HOWE_SOUND, "Howe Sound")
+        if forecast and not forecast.get('error'):
+            if forecast.get('strong_wind_warning'):
+                factors['warnings'] = {'status': 'nogo', 'label': 'Strong Wind Warning!'}
+            elif forecast.get('wind_warning'):
+                factors['warnings'] = {'status': 'caution', 'label': 'Wind Warning'}
+            else:
+                factors['warnings'] = {'status': 'go', 'label': 'No Warnings'}
+
+            try:
+                csv_text = openAIFetchForecastForURL(url=URL_HOWE_SOUND)
+                if csv_text:
+                    csv_clean = csv_text.replace('```csv', '').replace('```', '')
+                    df = pd.read_csv(io.StringIO(csv_clean), sep=',', on_bad_lines='skip')
+                    df = df.dropna(how='all').reset_index(drop=True)
+                    df.columns = df.columns.str.strip().str.lower()
+
+                    if 'max wind speed' in df.columns:
+                        df['max wind speed'] = df['max wind speed'].apply(clean_wind_speed)
+                        current_wind = df['max wind speed'].iloc[:2].max() if len(df) >= 2 else df['max wind speed'].iloc[0]
+                        time_label = df['time'].iloc[0] if 'time' in df.columns else "now"
+                        factors['howe_wind'] = {
+                            'status': _status(current_wind, WIND_GO, WIND_CAUTION),
+                            'label': f"Howe Sound: {current_wind:.0f}kts ({time_label})",
+                            'value': current_wind,
+                        }
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"Go/NoGo forecast error: {e}")
+
+    # 3. Halibut Bank buoy — wind + waves
+    try:
+        buoy_wind, buoy_wave = _fetch_buoy_wind_wave('46146')
+        if buoy_wind is not None:
+            factors['buoy_wind'] = {
+                'status': _status(buoy_wind, WIND_GO, WIND_CAUTION),
+                'label': f"Halibut Bank: {buoy_wind}kts",
+                'value': buoy_wind,
+            }
+        if buoy_wave is not None:
+            wave_cm = buoy_wave * 100
+            factors['waves'] = {
+                'status': _status(buoy_wave, WAVE_GO, WAVE_CAUTION),
+                'label': f"Waves: {wave_cm:.0f}cm",
+                'value': buoy_wave,
+            }
+    except Exception as e:
+        print(f"Go/NoGo buoy error: {e}")
+
+    # 4. Tide — launch feasibility at Horseshoe Bay
+    try:
+        tide_h, tide_dir = _get_current_tide_height()
+        if tide_h is not None:
+            suffix = f" ({tide_dir})" if tide_dir else ""
+            factors['tide'] = {
+                'status': _status(tide_h, TIDE_NOGO, TIDE_CAUTION, higher_is_worse=False),
+                'label': f"Tide: {tide_h:.1f}m{suffix}",
+                'value': tide_h,
+            }
+    except Exception as e:
+        print(f"Go/NoGo tide error: {e}")
+
+    return factors, weather
+
+
 def _analyze_5day_windows(weather_data):
-    """Find boating windows in the hourly forecast (wind + rain per half-day)."""
+    """Find boating windows at 8AM, Noon, 4PM for each day."""
     if not weather_data or not weather_data.hourly_forecast:
         return []
 
@@ -125,13 +220,16 @@ def _analyze_5day_windows(weather_data):
     today = datetime.now(vancouver_tz).replace(hour=0, minute=0, second=0, microsecond=0)
     windows = []
 
-    for day_offset in range(1, 6):
+    for day_offset in range(0, 6):
         day = today + timedelta(days=day_offset)
-        day_name = day.strftime('%a %b %d')
 
         for period_name, center_h in [('8AM', 8), ('Noon', 12), ('4PM', 16)]:
-            # Find the forecast entry closest to this hour (within +/- 1.5h)
             target = day.replace(hour=center_h)
+
+            # Skip past times
+            if target < datetime.now(vancouver_tz) - timedelta(hours=1):
+                continue
+
             items = [
                 item for item in weather_data.hourly_forecast
                 if abs((datetime.fromtimestamp(item['dt']).astimezone(vancouver_tz) - target).total_seconds()) <= 5400
@@ -153,7 +251,9 @@ def _analyze_5day_windows(weather_data):
                 status = 'go'
 
             windows.append({
-                'label': f"{day_name} {period_name}",
+                'day': day.strftime('%a %b %d'),
+                'period': period_name,
+                'datetime': target,
                 'status': status,
                 'wind': max_wind,
                 'rain': total_rain,
@@ -162,144 +262,163 @@ def _analyze_5day_windows(weather_data):
     return windows
 
 
-def display_gonogo_sidebar():
-    """Render the Go/No-Go assessment in st.sidebar."""
-
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("Go / No-Go")
-
-    factors = {}
-    weather = None
-
-    # 1. Current weather (wind + precipitation)
-    try:
-        api_key = st.secrets["openweather_api_key"]
-        weather = fetch_from_open_weather(VANCOUVER_LAT, VANCOUVER_LON, api_key)
-        if weather:
-            wind_kts = weather.wind_speed_now * 1.94384
-            factors['wind_now'] = {
-                'status': _status(wind_kts, WIND_GO, WIND_CAUTION),
-                'label': f"Wind Now: {wind_kts:.0f}kts",
-            }
-            factors['precip'] = {
-                'status': _status(weather.next_24_hours_precipitation, PRECIP_GO, PRECIP_CAUTION),
-                'label': f"Rain 24h: {weather.next_24_hours_precipitation:.1f}mm",
-            }
-    except Exception as e:
-        print(f"Go/NoGo weather error: {e}")
-
-    # 2. Marine forecast — Howe Sound warnings + parsed wind
-    try:
-        forecast = fetch_beautifulsoup_marine_forecast_for_url(URL_HOWE_SOUND, "Howe Sound")
-        if forecast and not forecast.get('error'):
-            if forecast.get('strong_wind_warning'):
-                factors['warnings'] = {'status': 'nogo', 'label': 'Strong Wind Warning!'}
-            elif forecast.get('wind_warning'):
-                factors['warnings'] = {'status': 'caution', 'label': 'Wind Warning'}
-            else:
-                factors['warnings'] = {'status': 'go', 'label': 'No Warnings'}
-
-            # GPT-parsed Howe Sound wind forecast — use first 2 rows (now + next period)
-            try:
-                csv_text = openAIFetchForecastForURL(url=URL_HOWE_SOUND)
-                if csv_text:
-                    csv_clean = csv_text.replace('```csv', '').replace('```', '')
-                    df = pd.read_csv(io.StringIO(csv_clean), sep=',', on_bad_lines='skip')
-                    df = df.dropna(how='all').reset_index(drop=True)
-                    df.columns = df.columns.str.strip().str.lower()
-
-                    if 'max wind speed' in df.columns:
-                        df['max wind speed'] = df['max wind speed'].apply(clean_wind_speed)
-                        # Only consider current + next period for go/nogo (not the whole forecast)
-                        current_wind = df['max wind speed'].iloc[:2].max() if len(df) >= 2 else df['max wind speed'].iloc[0]
-                        time_label = df['time'].iloc[0] if 'time' in df.columns else "now"
-                        factors['howe_wind'] = {
-                            'status': _status(current_wind, WIND_GO, WIND_CAUTION),
-                            'label': f"Howe Sound: {current_wind:.0f}kts ({time_label})",
-                        }
-            except Exception:
-                pass
-    except Exception as e:
-        print(f"Go/NoGo forecast error: {e}")
-
-    # 3. Halibut Bank buoy — wind + waves
-    try:
-        buoy_wind, buoy_wave = _fetch_buoy_wind_wave('46146')
-        if buoy_wind is not None:
-            factors['buoy_wind'] = {
-                'status': _status(buoy_wind, WIND_GO, WIND_CAUTION),
-                'label': f"Halibut Bank: {buoy_wind}kts",
-            }
-        if buoy_wave is not None:
-            wave_cm = buoy_wave * 100
-            factors['waves'] = {
-                'status': _status(buoy_wave, WAVE_GO, WAVE_CAUTION),
-                'label': f"Waves: {wave_cm:.0f}cm",
-            }
-    except Exception as e:
-        print(f"Go/NoGo buoy error: {e}")
-
-    # 4. Tide — launch feasibility at Horseshoe Bay
-    try:
-        tide_h, tide_dir = _get_current_tide_height()
-        if tide_h is not None:
-            suffix = f" ({tide_dir})" if tide_dir else ""
-            factors['tide'] = {
-                'status': _status(tide_h, TIDE_NOGO, TIDE_CAUTION, higher_is_worse=False),
-                'label': f"Tide: {tide_h:.1f}m{suffix}",
-            }
-    except Exception as e:
-        print(f"Go/NoGo tide error: {e}")
-
-    # --- Overall verdict ---
+def _get_overall(factors):
+    """Compute overall status from factors dict."""
     if not factors:
-        st.sidebar.warning("Unable to assess conditions")
-        return
-
+        return 'caution', 'N/A'
     statuses = [f['status'] for f in factors.values()]
     if 'nogo' in statuses:
-        overall, overall_label = 'nogo', 'NO-GO'
-    elif 'caution' in statuses:
-        overall, overall_label = 'caution', 'CAUTION'
-    else:
-        overall, overall_label = 'go', 'GO'
+        return 'nogo', 'NO-GO'
+    if 'caution' in statuses:
+        return 'caution', 'CAUTION'
+    return 'go', 'GO'
 
-    # Compact summary — always visible
-    nogo_count = statuses.count('nogo')
-    caution_count = statuses.count('caution')
-    summary_parts = []
-    if nogo_count:
-        summary_parts.append(f"{nogo_count} red")
-    if caution_count:
-        summary_parts.append(f"{caution_count} amber")
-    summary_note = f"  ({', '.join(summary_parts)})" if summary_parts else ""
+
+# ──────────────────────────────────────────────
+# Sidebar: compact badge only
+# ──────────────────────────────────────────────
+
+def display_gonogo_sidebar():
+    """Compact Go/No-Go badge in the sidebar."""
+    st.sidebar.markdown("---")
+
+    factors, _ = _gather_current_factors()
+    overall, overall_label = _get_overall(factors)
 
     st.sidebar.badge(overall_label, color=_BADGE[overall])
-    st.sidebar.caption(f"{len(factors)} factors checked{summary_note}")
 
-    # Expandable details — current conditions
-    with st.sidebar.expander("Current Conditions"):
-        for f in factors.values():
-            st.caption(f"{_ICON[f['status']]} {f['label']}")
+    # One-line summary of worst factors
+    bad = [f['label'] for f in factors.values() if f['status'] != 'go']
+    if bad:
+        st.sidebar.caption(", ".join(bad))
+    else:
+        st.sidebar.caption("All clear")
 
-        st.markdown(
-            "**Thresholds:** "
-            f"Wind GO < {WIND_GO}kts, CAUTION < {WIND_CAUTION}kts | "
-            f"Waves GO < {int(WAVE_GO * 100)}cm | "
-            f"Rain GO < {PRECIP_GO}mm/24h | "
-            f"Tide NO-GO < {TIDE_NOGO}m"
-        )
 
-    # Expandable details — 5-day windows
+# ──────────────────────────────────────────────
+# Full page: detailed view with chart
+# ──────────────────────────────────────────────
+
+def display_gonogo_page(container=None):
+    """Full Go/No-Go page with heatmap chart and current conditions."""
+    draw = container or st
+
+    draw.subheader("Go / No-Go — Boating Conditions")
+    draw.caption("Horseshoe Bay launch | Howe Sound / Pt Atkinson / English Bay")
+
+    factors, weather = _gather_current_factors()
+    overall, overall_label = _get_overall(factors)
+
+    # Overall verdict
+    draw.badge(overall_label, color=_BADGE[overall])
+
+    # Current conditions table
+    draw.markdown("**Current Conditions**")
+    for f in factors.values():
+        draw.caption(f"{_ICON[f['status']]} {f['label']}")
+
+    draw.markdown(
+        f"*Thresholds: Wind GO < {WIND_GO}kts, CAUTION < {WIND_CAUTION}kts  |  "
+        f"Waves GO < {int(WAVE_GO * 100)}cm  |  "
+        f"Rain GO < {PRECIP_GO}mm  |  "
+        f"Tide NO-GO < {TIDE_NOGO}m*"
+    )
+
+    # 5-day heatmap chart
     if weather:
-        try:
-            windows = _analyze_5day_windows(weather)
-            if windows:
-                with st.sidebar.expander("5-Day Windows"):
-                    for w in windows:
-                        detail = f"{w['wind']:.0f}kts"
-                        if w['rain'] > 0:
-                            detail += f", {w['rain']:.1f}mm"
-                        st.caption(f"{_ICON[w['status']]} {w['label']} ({detail})")
-        except Exception as e:
-            print(f"Go/NoGo 5-day error: {e}")
+        windows = _analyze_5day_windows(weather)
+        if windows:
+            draw.markdown("---")
+            draw.markdown("**Weekly Outlook**")
+            _draw_weekly_chart(draw, windows)
+
+            with draw.expander("Details"):
+                for w in windows:
+                    detail = f"{w['wind']:.0f}kts"
+                    if w['rain'] > 0:
+                        detail += f", {w['rain']:.1f}mm rain"
+                    draw.caption(f"{_ICON[w['status']]} {w['day']} {w['period']} — {detail}")
+
+
+def _draw_weekly_chart(draw, windows):
+    """Draw a heatmap-style chart: days x time slots, colored green/orange/red."""
+    # Build grid: rows = time slots (8AM, Noon, 4PM), columns = days
+    days = []
+    seen = set()
+    for w in windows:
+        if w['day'] not in seen:
+            days.append(w['day'])
+            seen.add(w['day'])
+
+    periods = ['8AM', 'Noon', '4PM']
+
+    # Build matrices for the heatmap
+    z = []          # numeric values for color
+    text = []       # hover text
+    annotations = []
+
+    for period in periods:
+        row_z = []
+        row_text = []
+        for day in days:
+            match = next((w for w in windows if w['day'] == day and w['period'] == period), None)
+            if match:
+                row_z.append(_NUMERIC[match['status']])
+                rain_str = f", {match['rain']:.1f}mm rain" if match['rain'] > 0 else ""
+                row_text.append(f"{match['wind']:.0f}kts{rain_str}")
+            else:
+                row_z.append(None)
+                row_text.append("")
+        z.append(row_z)
+        text.append(row_text)
+
+    # Custom colorscale: red(0) → orange(0.5) → green(1)
+    colorscale = [
+        [0, '#e74c3c'],
+        [0.25, '#e74c3c'],
+        [0.25, '#f39c12'],
+        [0.75, '#f39c12'],
+        [0.75, '#2ecc71'],
+        [1, '#2ecc71'],
+    ]
+
+    fig = go.Figure(data=go.Heatmap(
+        z=z,
+        x=days,
+        y=periods,
+        text=text,
+        texttemplate="%{text}",
+        textfont=dict(size=13, color='white'),
+        colorscale=colorscale,
+        zmin=0,
+        zmax=1,
+        showscale=False,
+        hovertemplate="<b>%{x} %{y}</b><br>%{text}<extra></extra>",
+        xgap=3,
+        ygap=3,
+    ))
+
+    fig.update_layout(
+        height=200,
+        margin=dict(l=60, r=20, t=10, b=40),
+        yaxis=dict(autorange='reversed'),
+        xaxis=dict(side='top'),
+        plot_bgcolor='white',
+    )
+
+    # Add annotations for status labels
+    for i, period in enumerate(periods):
+        for j, day in enumerate(days):
+            match = next((w for w in windows if w['day'] == day and w['period'] == period), None)
+            if match:
+                fig.add_annotation(
+                    x=day, y=period,
+                    text=f"<b>{match['wind']:.0f}</b>kts",
+                    showarrow=False,
+                    font=dict(color='white', size=14),
+                )
+
+    # Remove default text template since we're using annotations
+    fig.update_traces(texttemplate=None)
+
+    draw.plotly_chart(fig, use_container_width=True)
