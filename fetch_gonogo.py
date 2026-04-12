@@ -129,13 +129,12 @@ def _analyze_5day_windows(weather_data):
         day = today + timedelta(days=day_offset)
         day_name = day.strftime('%a %b %d')
 
-        for period_name, start_h, end_h in [('AM', 6, 12), ('PM', 12, 18)]:
-            period_start = day.replace(hour=start_h)
-            period_end = day.replace(hour=end_h)
-
+        for period_name, center_h in [('8AM', 8), ('Noon', 12), ('4PM', 16)]:
+            # Find the forecast entry closest to this hour (within +/- 1.5h)
+            target = day.replace(hour=center_h)
             items = [
                 item for item in weather_data.hourly_forecast
-                if period_start <= datetime.fromtimestamp(item['dt']).astimezone(vancouver_tz) < period_end
+                if abs((datetime.fromtimestamp(item['dt']).astimezone(vancouver_tz) - target).total_seconds()) <= 5400
             ]
             if not items:
                 continue
