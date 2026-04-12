@@ -24,6 +24,7 @@ from fetch_beach import display_beach_quality_for_sandy_cove
 from fetch_weather import display_weather_info
 from fetch_tides import display_point_atkinson_tides
 from wind_utils import create_arrow_html
+from fetch_gonogo import display_gonogo_sidebar
 from pathlib import Path
 
 # Read version from VERSION file
@@ -76,7 +77,7 @@ def headerbox():
             "Halibut Bank",
             "Pt Atkinson",
             "Pam Rocks",
-            "Forecast",
+            "Marine Forecast",
             "Beach",
             "Tides",
             "Squamish W",
@@ -85,6 +86,8 @@ def headerbox():
         st.divider()
         st.badge(f"v{APP_VERSION}", color="blue")
         st.caption("Auto-refresh every 5 minutes")
+
+    display_gonogo_sidebar()
 
     draw = st
 
@@ -140,7 +143,7 @@ def headerbox():
         except Exception as e:
             draw.error(f"Failed to load Pam Rocks buoy: {e}")
 
-    elif page == "Forecast":
+    elif page == "Marine Forecast":
         region = st.selectbox("Region", ["Howe Sound", "South of Nanaimo", "North of Nanaimo"])
         url_map = {
             "Howe Sound": URL_forecast_howesound,
