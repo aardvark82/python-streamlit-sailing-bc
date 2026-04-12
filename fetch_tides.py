@@ -480,7 +480,19 @@ def create_natural_tide_chart(tide_df, container=None):
         tide_interpolated['Height']
     )
 
-    col1.metric("Current Tide Level", f"{current_height:.2f}m")
+    # Determine rising or falling by checking the next tide point
+    tide_direction = ""
+    if 'datetime' in tide_df.columns:
+        try:
+            next_tide = tide_df[tide_df['datetime'] > current_time].iloc[0]
+            if next_tide['Height'] > current_height:
+                tide_direction = "Rising"
+            else:
+                tide_direction = "Falling"
+        except (IndexError, KeyError):
+            pass
+
+    col1.metric("Current Tide Level", f"{current_height:.2f}m", delta=tide_direction, delta_color="off")
 
     if 'datetime' in tide_df.columns:
         try:
@@ -502,7 +514,8 @@ def create_natural_tide_chart(tide_df, container=None):
     else:
         col3.metric("Daily Tide Range", "No data available")
 
-    display_tide_table_text(tide_df=tide_df, container=draw)
+    with draw.expander("Tide Table"):
+        display_tide_table_text(tide_df=tide_df, container=st)
 
 
 def displayErrorWithResponseIfNeeded(container=None, response=None):

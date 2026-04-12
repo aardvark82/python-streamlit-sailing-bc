@@ -48,6 +48,19 @@ def fetch_water_quality_for_url(_draw, url, title):
         return None, None, None
 
 
+def _ecoli_color(value_str):
+    """Return badge color based on E.coli MPN level."""
+    try:
+        val = int(value_str.replace("<", ""))
+    except (ValueError, TypeError):
+        return "gray"
+    if val > 400:
+        return "red"
+    if val > 200:
+        return "orange"
+    return "green"
+
+
 def display_beach_quality_for_sandy_cove(draw=None, title=''):
     if draw is None:
         draw = st
@@ -63,29 +76,28 @@ def display_beach_quality_for_sandy_cove(draw=None, title=''):
         st.warning('Beach water quality data unavailable — the VCH PDF may be slow or temporarily down. Will retry on next refresh.')
         return
 
+    # Prominent measurement date
     relative_date = timeago_format(time_measurement, datetime.now(pytz.timezone('America/Vancouver')))
-    draw.subheader(f"Issued {relative_date}")
+    draw.subheader(f"Sampled {relative_date}")
+    draw.caption(time_measurement.strftime('%A, %B %d %Y at %I:%M %p'))
+
+    # Legend
+    draw.markdown(
+        "**E.coli MPN/100mL:**  "
+        ":green[< 200 Safe]  &nbsp;  "
+        ":orange[200-400 Caution]  &nbsp;  "
+        ":red[> 400 Unsafe]"
+    )
 
     if not ecoli_sample1:
         ecoli_sample1 = 'not found'
     if not ecoli_sample2:
         ecoli_sample2 = 'not found'
 
-    col1, col2, col3, col4 = draw.columns(4)
-    col1.text('Sandy cove station 1 BWV-04-01')
-    col2.badge(ecoli_sample1, color='green')
+    col1, col2 = draw.columns(2)
 
-    ecoli_sample1 = ecoli_sample1.replace("<", '')
-    ecoli_sample2 = ecoli_sample2.replace("<", '')
+    col1.metric("Station 1 (BWV-04-01)", ecoli_sample1)
+    col1.badge(ecoli_sample1, color=_ecoli_color(ecoli_sample1))
 
-    if int(ecoli_sample1) > 200:
-        col2.badge(ecoli_sample1, color='orange')
-    if int(ecoli_sample1) > 400:
-        col2.badge(ecoli_sample1, color='red')
-
-    col3.text('Sandy cove station 2 BWV-04-02')
-    col4.badge(ecoli_sample2, color='green')
-    if int(ecoli_sample2) > 200:
-        col4.badge(ecoli_sample2, color='orange')
-    if int(ecoli_sample2) > 400:
-        col4.badge(ecoli_sample2, color='red')
+    col2.metric("Station 2 (BWV-04-02)", ecoli_sample2)
+    col2.badge(ecoli_sample2, color=_ecoli_color(ecoli_sample2))

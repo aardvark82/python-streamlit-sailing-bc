@@ -413,6 +413,7 @@ def display_marine_forecast_for_url(draw=None, url='', title=''):
 
     df, issue_date, forecast, subtitle = display_summary_marine_forecast_for_url(draw, url, title)
     drawChartOfForecast(draw, df, title)
-    display_table_marine_forecast_for_url(draw, url, title, df)
-    draw.divider()
-    display_text_marine_forecast_for_url(draw, url, title, forecast, issue_date, subtitle)
+    with draw.expander("Forecast Table"):
+        display_table_marine_forecast_for_url(draw=st, url=url, title=title, df=df)
+    with draw.expander("Forecast Raw Text"):
+        display_text_marine_forecast_for_url(draw=st, url=url, title=title, forecast=forecast, issue_date=issue_date, subtitle=subtitle)

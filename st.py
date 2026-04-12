@@ -79,8 +79,8 @@ def headerbox():
             "Forecast",
             "Beach",
             "Tides",
-            "Squamish",
-            "Lions Bay",
+            "Squamish W",
+            "Lions Bay W",
         ], label_visibility="collapsed")
         st.divider()
         st.badge(f"v{APP_VERSION}", color="blue")
@@ -164,13 +164,13 @@ def headerbox():
         except Exception as e:
             draw.error(f"Failed to load tides: {e}")
 
-    elif page == "Squamish":
+    elif page == "Squamish W":
         try:
             display_weather_info(container=draw, lat=SQUAMISH_LAT, long=SQUAMISH_LON, title="Squamish")
         except Exception as e:
             draw.error(f"Failed to load Squamish weather: {e}")
 
-    elif page == "Lions Bay":
+    elif page == "Lions Bay W":
         try:
             display_weather_info(container=draw, lat=LIONSBAY_LAT, long=LIONSBAY_LON, title="Lions Bay")
         except Exception as e:
@@ -208,12 +208,22 @@ def parseJerichoWindHistory(container=None):
     df = df[['datetime'] + cols[:-1]]
 
     last_row = df.iloc[-1]
+    prev_row = df.iloc[-2] if len(df) > 1 else last_row
+
+    # Wind trend: compare current speed to previous reading
+    try:
+        current_speed = float(last_row['Wind Speed'])
+        prev_speed = float(prev_row['Wind Speed'])
+        wind_delta = current_speed - prev_speed
+        wind_trend = f"{wind_delta:+.0f}" if wind_delta != 0 else None
+    except (ValueError, TypeError):
+        wind_trend = None
 
     displayWindWarningIfNeeded(last_row['Wind Hi Speed'], container=draw)
     displayStreamlitDateTime(last_row['datetime'], draw)
 
     col1, col2, col3 = draw.columns(3)
-    col1.metric(label="Wind Speed", value=last_row['Wind Speed'])
+    col1.metric(label="Wind Speed", value=last_row['Wind Speed'], delta=wind_trend, delta_color="inverse")
     col2.metric(label="Wind High", value=last_row['Wind Hi Speed'])
     col3.metric(label="Wind Direction", value=last_row['Wind Dir'])
     col2.markdown(create_arrow_html(last_row['Wind Dir'], last_row['Wind Hi Speed']), unsafe_allow_html=True)
@@ -241,7 +251,8 @@ def parseJerichoWindHistory(container=None):
         annotation_text="Now", annotation_position="top right"
     )
     draw.plotly_chart(fig, use_container_width=True)
-    draw.dataframe(df.tail(24))
+    with draw.expander("Raw Data (Last 12 Hours)"):
+        st.dataframe(df.tail(24))
 
 
 def drawMapWithBuoy(container=None, buoy=None):
@@ -525,7 +536,8 @@ def refreshBuoy(buoy='46146', title='Halibut Bank - 46146', container=None):
 
     record_buoy_data_history(buoy, container, wind_speed, direction, wave_val_for_record)
     plot_historical_buoy_data(container, buoy)
-    drawMapWithBuoy(container=draw, buoy=buoy)
+    with draw.expander("Map"):
+        drawMapWithBuoy(container=st, buoy=buoy)
 
 
 # Initialize application
