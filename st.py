@@ -24,6 +24,11 @@ from fetch_beach import display_beach_quality_for_sandy_cove
 from fetch_weather import display_weather_info
 from fetch_tides import display_point_atkinson_tides
 from wind_utils import create_arrow_html
+from pathlib import Path
+
+# Read version from VERSION file
+_version_file = Path(__file__).parent / "VERSION"
+APP_VERSION = int(_version_file.read_text().strip()) if _version_file.exists() else 0
 
 # Auto-refresh every 5 minutes
 st_autorefresh(interval=300000, key="data_refresher")
@@ -78,7 +83,7 @@ def headerbox():
             "Lions Bay",
         ], label_visibility="collapsed")
         st.divider()
-        st.badge("v21", color="blue")
+        st.badge(f"v{APP_VERSION}", color="blue")
         st.caption("Auto-refresh every 5 minutes")
 
     draw = st
