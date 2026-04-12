@@ -84,8 +84,9 @@ def _fetch_buoy_wind_wave(buoy_id='46146'):
         return None, None
 
 
-def _get_current_tide_height():
-    """Estimate current tide height from BeautifulSoup extremes."""
+def _get_tide_interpolator():
+    """Build tide interpolation arrays from BeautifulSoup extremes.
+    Returns (x_timestamps, y_heights) numpy arrays, or (None, None)."""
     try:
         data = beautifulSoupFetchTidesForURL("https://www.tides.gc.ca/en/stations/07795")
         if not data or not data.get('data'):
@@ -100,23 +101,43 @@ def _get_current_tide_height():
         if len(tide_df) < 2:
             return None, None
 
-        vancouver_tz = pytz.timezone('America/Vancouver')
-        now = datetime.now(vancouver_tz)
-
         x_ts = tide_df['datetime'].apply(lambda dt: dt.timestamp()).values
-        current_h = float(np.interp(now.timestamp(), x_ts, tide_df['Height'].values))
-
-        direction = ""
-        try:
-            nxt = tide_df[tide_df['datetime'] > now].iloc[0]
-            direction = "Rising" if nxt['Height'] > current_h else "Falling"
-        except (IndexError, KeyError):
-            pass
-
-        return current_h, direction
+        y_h = tide_df['Height'].values
+        return x_ts, y_h
     except Exception as e:
-        print(f"Go/NoGo tide error: {e}")
+        print(f"Go/NoGo tide interpolator error: {e}")
         return None, None
+
+
+def _tide_at(x_ts, y_h, target_dt):
+    """Interpolate tide height at a specific datetime. Returns float or None."""
+    if x_ts is None or y_h is None:
+        return None
+    ts = target_dt.timestamp()
+    if ts < x_ts[0] or ts > x_ts[-1]:
+        return None  # outside data range
+    return float(np.interp(ts, x_ts, y_h))
+
+
+def _get_current_tide_height():
+    """Estimate current tide height from BeautifulSoup extremes."""
+    x_ts, y_h = _get_tide_interpolator()
+    if x_ts is None:
+        return None, None
+
+    vancouver_tz = pytz.timezone('America/Vancouver')
+    now = datetime.now(vancouver_tz)
+    current_h = _tide_at(x_ts, y_h, now)
+    if current_h is None:
+        return None, None
+
+    # Determine rising/falling by checking height 30 min from now
+    future_h = _tide_at(x_ts, y_h, now + timedelta(minutes=30))
+    direction = ""
+    if future_h is not None:
+        direction = "Rising" if future_h > current_h else "Falling"
+
+    return current_h, direction
 
 
 def _gather_current_factors():
@@ -212,12 +233,16 @@ def _gather_current_factors():
 
 
 def _analyze_5day_windows(weather_data):
-    """Find boating windows at 8AM, Noon, 4PM for each day."""
+    """Find boating windows at 8AM, Noon, 4PM for each day, including tide."""
     if not weather_data or not weather_data.hourly_forecast:
         return []
 
     vancouver_tz = pytz.timezone('America/Vancouver')
     today = datetime.now(vancouver_tz).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # Pre-fetch tide interpolation data once
+    tide_x, tide_y = _get_tide_interpolator()
+
     windows = []
 
     for day_offset in range(0, 6):
@@ -243,9 +268,18 @@ def _analyze_5day_windows(weather_data):
             )
             total_rain = sum(item.get('rain', {}).get('3h', 0) for item in items)
 
+            # Tide at this time slot
+            tide_h = _tide_at(tide_x, tide_y, target)
+            tide_status = None
+            if tide_h is not None:
+                tide_status = _status(tide_h, TIDE_NOGO, TIDE_CAUTION, higher_is_worse=False)
+
+            # Overall status for this window
             if max_wind > WIND_CAUTION or total_rain > PRECIP_CAUTION:
                 status = 'nogo'
-            elif max_wind > WIND_GO or total_rain > PRECIP_GO:
+            elif tide_status == 'nogo':
+                status = 'nogo'
+            elif max_wind > WIND_GO or total_rain > PRECIP_GO or tide_status == 'caution':
                 status = 'caution'
             else:
                 status = 'go'
@@ -257,6 +291,8 @@ def _analyze_5day_windows(weather_data):
                 'status': status,
                 'wind': max_wind,
                 'rain': total_rain,
+                'tide': tide_h,
+                'tide_status': tide_status,
             })
 
     return windows
@@ -337,6 +373,8 @@ def display_gonogo_page(container=None):
                     detail = f"{w['wind']:.0f}kts"
                     if w['rain'] > 0:
                         detail += f", {w['rain']:.1f}mm rain"
+                    if w.get('tide') is not None:
+                        detail += f", tide {w['tide']:.1f}m"
                     draw.caption(f"{_ICON[w['status']]} {w['day']} {w['period']} — {detail}")
 
 
@@ -364,8 +402,12 @@ def _draw_weekly_chart(draw, windows):
             match = next((w for w in windows if w['day'] == day and w['period'] == period), None)
             if match:
                 row_z.append(_NUMERIC[match['status']])
-                rain_str = f", {match['rain']:.1f}mm rain" if match['rain'] > 0 else ""
-                row_text.append(f"{match['wind']:.0f}kts{rain_str}")
+                parts = [f"{match['wind']:.0f}kts"]
+                if match['rain'] > 0:
+                    parts.append(f"{match['rain']:.1f}mm")
+                if match.get('tide') is not None:
+                    parts.append(f"{match['tide']:.1f}m")
+                row_text.append("<br>".join(parts))
             else:
                 row_z.append(None)
                 row_text.append("")
@@ -399,7 +441,7 @@ def _draw_weekly_chart(draw, windows):
     ))
 
     fig.update_layout(
-        height=200,
+        height=250,
         margin=dict(l=60, r=20, t=10, b=40),
         yaxis=dict(autorange='reversed'),
         xaxis=dict(side='top'),
@@ -411,11 +453,14 @@ def _draw_weekly_chart(draw, windows):
         for j, day in enumerate(days):
             match = next((w for w in windows if w['day'] == day and w['period'] == period), None)
             if match:
+                label = f"<b>{match['wind']:.0f}</b>kts"
+                if match.get('tide') is not None:
+                    label += f"<br>{match['tide']:.1f}m"
                 fig.add_annotation(
                     x=day, y=period,
-                    text=f"<b>{match['wind']:.0f}</b>kts",
+                    text=label,
                     showarrow=False,
-                    font=dict(color='white', size=14),
+                    font=dict(color='white', size=12),
                 )
 
     # Remove default text template since we're using annotations
