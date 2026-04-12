@@ -12,7 +12,7 @@ from timeago import format as timeago_format
 @st.cache_data(ttl=18800)
 def fetch_water_quality_for_url(_draw, url, title):
     try:
-        response = requests.get(url)
+        response = requests.get(url, timeout=30)
         response.raise_for_status()
 
         ecoli_sample1 = None
@@ -44,6 +44,7 @@ def fetch_water_quality_for_url(_draw, url, title):
         return ecoli_sample1, ecoli_sample2, time_measurement
 
     except Exception as e:
+        print(f"Beach water quality fetch failed: {e}")
         return None, None, None
 
 
@@ -59,7 +60,7 @@ def display_beach_quality_for_sandy_cove(draw=None, title=''):
         title=title
     )
     if not ecoli_sample1:
-        st.info('Could not load URL')
+        st.warning('Beach water quality data unavailable — the VCH PDF may be slow or temporarily down. Will retry on next refresh.')
         return
 
     relative_date = timeago_format(time_measurement, datetime.now(pytz.timezone('America/Vancouver')))
