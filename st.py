@@ -21,7 +21,7 @@ from utils import cached_fetch_url, prettydate, displayStreamlitDateTime
 from fetch_forecast import display_marine_forecast_for_url
 from fetch_forecast import display_summary_marine_forecast_for_url
 from fetch_beach import display_beach_quality_for_sandy_cove
-from fetch_weather import display_weather_info
+from fetch_weather import display_weather_info, display_clear_skies_html
 from fetch_tides import display_point_atkinson_tides
 from wind_utils import create_arrow_html
 from fetch_gonogo import display_gonogo_sidebar, display_gonogo_page
@@ -33,6 +33,20 @@ APP_VERSION = int(_version_file.read_text().strip()) if _version_file.exists() e
 
 # Auto-refresh every 5 minutes
 st_autorefresh(interval=300000, key="data_refresher")
+
+# --- Constants ---
+URL_FORECAST_HOWESOUND = 'https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=06400'
+URL_FORECAST_SOUTH_NANAIMO = 'https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=14305'
+URL_FORECAST_NORTH_NANAIMO = 'https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=14301'
+VANCOUVER_LAT, VANCOUVER_LON = 49.32, -123.16
+SQUAMISH_LAT, SQUAMISH_LON = 49.7, -123.16
+LIONSBAY_LAT, LIONSBAY_LON = 49.45, -123.16
+
+URL_MAP = {
+    "Howe Sound": URL_FORECAST_HOWESOUND,
+    "South of Nanaimo": URL_FORECAST_SOUTH_NANAIMO,
+    "North of Nanaimo": URL_FORECAST_NORTH_NANAIMO,
+}
 
 
 def displayWindWarningIfNeeded(wind_speed, container=None):
@@ -54,137 +68,108 @@ def displayWindWarningIfNeeded(wind_speed, container=None):
         print(f"Error processing wind speed: {e}")
 
 
-def headerbox():
-    from fetch_weather import display_clear_skies_html
+# ──────────────────────────────────────────────
+# Page functions (one per nav item)
+# ──────────────────────────────────────────────
 
-    URL_forecast_howesound = 'https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=06400'
-    URL_forecast_south_of_nanaimo = 'https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=14305'
-    URL_forecast_north_of_nanaimo = 'https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=14301'
+def page_gonogo():
+    try:
+        display_gonogo_page(container=st)
+    except Exception as e:
+        st.error(f"Failed to load Go/No-Go: {e}")
 
-    VANCOUVER_LAT = 49.32
-    VANCOUVER_LON = -123.16
-    SQUAMISH_LAT = 49.7
-    SQUAMISH_LON = -123.16
-    LIONSBAY_LAT = 49.45
-    LIONSBAY_LON = -123.16
 
-    # Sidebar navigation
-    with st.sidebar:
-        st.title("Sailing BC")
-        page = st.radio("Navigate", [
-            "Go / No-Go",
-            "Dashboard",
-            "Jericho Wind",
-            "Halibut Bank",
-            "Pt Atkinson",
-            "Pam Rocks",
-            "Marine Forecast",
-            "Beach",
-            "Tides",
-            "Squamish W",
-            "Lions Bay W",
-        ], label_visibility="collapsed")
-        st.divider()
-        st.badge(f"v{APP_VERSION}", color="blue")
-        st.caption("Auto-refresh every 5 minutes")
+def page_dashboard():
+    try:
+        display_weather_info(container=st, lat=VANCOUVER_LAT, long=VANCOUVER_LON, title="Weather")
+    except Exception as e:
+        st.error(f"Failed to load weather: {e}")
 
-    display_gonogo_sidebar()
+    try:
+        display_clear_skies_html(container=st, title="Clear Skies")
+    except Exception as e:
+        st.error(f"Failed to load clear skies: {e}")
 
-    draw = st
+    try:
+        display_summary_marine_forecast_for_url(draw=st, url=URL_FORECAST_HOWESOUND, title="Howe Sound")
+        display_summary_marine_forecast_for_url(draw=st, url=URL_FORECAST_SOUTH_NANAIMO, title="South of Nanaimo")
+        display_summary_marine_forecast_for_url(draw=st, url=URL_FORECAST_NORTH_NANAIMO, title="North of Nanaimo")
+    except Exception as e:
+        st.error(f"Failed to load marine forecast summary: {e}")
 
-    if page == "Go / No-Go":
-        try:
-            display_gonogo_page(container=draw)
-        except Exception as e:
-            draw.error(f"Failed to load Go/No-Go: {e}")
+    try:
+        display_beach_quality_for_sandy_cove(draw=st, title="Beach water quality Sandy Cove")
+    except Exception as e:
+        st.error(f"Failed to load beach quality: {e}")
 
-    elif page == "Dashboard":
-        try:
-            display_weather_info(container=draw, lat=VANCOUVER_LAT, long=VANCOUVER_LON, title="Weather")
-        except Exception as e:
-            draw.error(f"Failed to load weather: {e}")
+    try:
+        display_point_atkinson_tides(container=st)
+    except Exception as e:
+        st.error(f"Failed to load tides: {e}")
 
-        try:
-            display_clear_skies_html(container=draw, title="Clear Skies")
-        except Exception as e:
-            draw.error(f"Failed to load clear skies: {e}")
 
-        try:
-            display_summary_marine_forecast_for_url(draw=draw, url=URL_forecast_howesound, title="Howe Sound")
-            display_summary_marine_forecast_for_url(draw=draw, url=URL_forecast_south_of_nanaimo, title="South of Nanaimo")
-            display_summary_marine_forecast_for_url(draw=draw, url=URL_forecast_north_of_nanaimo, title="North of Nanaimo")
-        except Exception as e:
-            draw.error(f"Failed to load marine forecast summary: {e}")
+def page_jericho():
+    try:
+        parseJerichoWindHistory(container=st)
+    except Exception as e:
+        st.error(f"Failed to load Jericho wind data: {e}")
 
-        try:
-            display_beach_quality_for_sandy_cove(draw=draw, title="Beach water quality Sandy Cove")
-        except Exception as e:
-            draw.error(f"Failed to load beach quality: {e}")
 
-        try:
-            display_point_atkinson_tides(container=draw)
-        except Exception as e:
-            draw.error(f"Failed to load tides: {e}")
+def page_halibut():
+    try:
+        refreshBuoy('46146', 'Halibut Bank', container=st)
+    except Exception as e:
+        st.error(f"Failed to load Halibut Bank buoy: {e}")
 
-    elif page == "Jericho Wind":
-        try:
-            parseJerichoWindHistory(container=draw)
-        except Exception as e:
-            draw.error(f"Failed to load Jericho wind data: {e}")
 
-    elif page == "Halibut Bank":
-        try:
-            refreshBuoy('46146', 'Halibut Bank', container=draw)
-        except Exception as e:
-            draw.error(f"Failed to load Halibut Bank buoy: {e}")
+def page_atkinson():
+    try:
+        refreshBuoy('WSB', 'Point Atkinson', container=st)
+    except Exception as e:
+        st.error(f"Failed to load Point Atkinson buoy: {e}")
 
-    elif page == "Pt Atkinson":
-        try:
-            refreshBuoy('WSB', 'Point Atkinson', container=draw)
-        except Exception as e:
-            draw.error(f"Failed to load Point Atkinson buoy: {e}")
 
-    elif page == "Pam Rocks":
-        try:
-            refreshBuoy('WAS', 'Pam Rocks', container=draw)
-        except Exception as e:
-            draw.error(f"Failed to load Pam Rocks buoy: {e}")
+def page_pamrocks():
+    try:
+        refreshBuoy('WAS', 'Pam Rocks', container=st)
+    except Exception as e:
+        st.error(f"Failed to load Pam Rocks buoy: {e}")
 
-    elif page == "Marine Forecast":
-        region = st.selectbox("Region", ["Howe Sound", "South of Nanaimo", "North of Nanaimo"])
-        url_map = {
-            "Howe Sound": URL_forecast_howesound,
-            "South of Nanaimo": URL_forecast_south_of_nanaimo,
-            "North of Nanaimo": URL_forecast_north_of_nanaimo,
-        }
-        try:
-            display_marine_forecast_for_url(draw=draw, url=url_map[region], title=region)
-        except Exception as e:
-            draw.error(f"Failed to load {region} forecast: {e}")
 
-    elif page == "Beach":
-        try:
-            display_beach_quality_for_sandy_cove(draw=draw, title="Beach water quality Sandy Cove")
-        except Exception as e:
-            draw.error(f"Failed to load beach quality: {e}")
+def page_forecast():
+    region = st.selectbox("Region", ["Howe Sound", "South of Nanaimo", "North of Nanaimo"])
+    try:
+        display_marine_forecast_for_url(draw=st, url=URL_MAP[region], title=region)
+    except Exception as e:
+        st.error(f"Failed to load {region} forecast: {e}")
 
-    elif page == "Tides":
-        try:
-            display_point_atkinson_tides(container=draw)
-        except Exception as e:
-            draw.error(f"Failed to load tides: {e}")
 
-    elif page == "Squamish W":
-        try:
-            display_weather_info(container=draw, lat=SQUAMISH_LAT, long=SQUAMISH_LON, title="Squamish")
-        except Exception as e:
-            draw.error(f"Failed to load Squamish weather: {e}")
+def page_beach():
+    try:
+        display_beach_quality_for_sandy_cove(draw=st, title="Beach water quality Sandy Cove")
+    except Exception as e:
+        st.error(f"Failed to load beach quality: {e}")
 
-    elif page == "Lions Bay W":
-        try:
-            display_weather_info(container=draw, lat=LIONSBAY_LAT, long=LIONSBAY_LON, title="Lions Bay")
-        except Exception as e:
-            draw.error(f"Failed to load Lions Bay weather: {e}")
+
+def page_tides():
+    try:
+        display_point_atkinson_tides(container=st)
+    except Exception as e:
+        st.error(f"Failed to load tides: {e}")
+
+
+def page_squamish():
+    try:
+        display_weather_info(container=st, lat=SQUAMISH_LAT, long=SQUAMISH_LON, title="Squamish")
+    except Exception as e:
+        st.error(f"Failed to load Squamish weather: {e}")
+
+
+def page_lionsbay():
+    try:
+        display_weather_info(container=st, lat=LIONSBAY_LAT, long=LIONSBAY_LON, title="Lions Bay")
+    except Exception as e:
+        st.error(f"Failed to load Lions Bay weather: {e}")
 
 
 def parseJerichoWindHistory(container=None):
@@ -550,5 +535,37 @@ def refreshBuoy(buoy='46146', title='Halibut Bank - 46146', container=None):
         drawMapWithBuoy(container=st, buoy=buoy)
 
 
-# Initialize application
-headerbox()
+# ──────────────────────────────────────────────
+# Shared sidebar + st.navigation entrypoint
+# ──────────────────────────────────────────────
+
+with st.sidebar:
+    st.badge(f"v{APP_VERSION}", color="blue")
+    st.caption("Auto-refresh every 5 minutes")
+
+display_gonogo_sidebar()
+
+pages = {
+    "Conditions": [
+        st.Page(page_gonogo, title="Go / No-Go", icon="🚤", default=True),
+        st.Page(page_dashboard, title="Dashboard", icon="📊"),
+    ],
+    "Live Data": [
+        st.Page(page_jericho, title="Jericho Wind", icon="💨"),
+        st.Page(page_halibut, title="Halibut Bank", icon="🔵"),
+        st.Page(page_atkinson, title="Pt Atkinson", icon="🔵"),
+        st.Page(page_pamrocks, title="Pam Rocks", icon="🔵"),
+    ],
+    "Forecast & Tides": [
+        st.Page(page_forecast, title="Marine Forecast", icon="🌊"),
+        st.Page(page_tides, title="Tides", icon="🌊"),
+        st.Page(page_beach, title="Beach", icon="🏖️"),
+    ],
+    "Regional Weather": [
+        st.Page(page_squamish, title="Squamish W", icon="⛰️"),
+        st.Page(page_lionsbay, title="Lions Bay W", icon="⛰️"),
+    ],
+}
+
+pg = st.navigation(pages)
+pg.run()
