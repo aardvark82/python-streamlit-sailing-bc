@@ -200,7 +200,7 @@ def display_gonogo_sidebar():
             else:
                 factors['warnings'] = {'status': 'go', 'label': 'No Warnings'}
 
-            # GPT-parsed Howe Sound wind forecast
+            # GPT-parsed Howe Sound wind forecast — use first 2 rows (now + next period)
             try:
                 csv_text = openAIFetchForecastForURL(url=URL_HOWE_SOUND)
                 if csv_text:
@@ -211,10 +211,12 @@ def display_gonogo_sidebar():
 
                     if 'max wind speed' in df.columns:
                         df['max wind speed'] = df['max wind speed'].apply(clean_wind_speed)
-                        max_fw = df['max wind speed'].max()
+                        # Only consider current + next period for go/nogo (not the whole forecast)
+                        current_wind = df['max wind speed'].iloc[:2].max() if len(df) >= 2 else df['max wind speed'].iloc[0]
+                        time_label = df['time'].iloc[0] if 'time' in df.columns else "now"
                         factors['howe_wind'] = {
-                            'status': _status(max_fw, WIND_GO, WIND_CAUTION),
-                            'label': f"Howe Sound: {max_fw:.0f}kts max",
+                            'status': _status(current_wind, WIND_GO, WIND_CAUTION),
+                            'label': f"Howe Sound: {current_wind:.0f}kts ({time_label})",
                         }
             except Exception:
                 pass
