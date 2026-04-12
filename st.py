@@ -58,6 +58,7 @@ def displayStreamlitDateTime(datetime, container=None):
 from fetch_forecast import display_marine_forecast_for_url
 from fetch_forecast import display_beach_quality_for_sandy_cove
 from fetch_forecast import display_weather_info
+from fetch_forecast import display_clear_skies_html
 from fetch_forecast import display_summary_marine_forecast_for_url
 
 
@@ -95,9 +96,12 @@ def headerbox():
 
 #Main tab
     display_weather_info(container=tab10, lat=VANCOUVER_LAT, long=VANCOUVER_LON, title="Weather")
+
+    display_clear_skies_html(container=tab10, title="Clear Skies")
+
     display_summary_marine_forecast_for_url(draw=tab10, url=URL_forecast_howesound , title="Howe Sound")
-    display_summary_marine_forecast_for_url(draw=tab10, url=URL_forecast_south_of_nanaimo , title="Howe Sound")
-    display_summary_marine_forecast_for_url(draw=tab10, url=URL_forecast_north_of_nanaimo , title="Howe Sound")
+    display_summary_marine_forecast_for_url(draw=tab10, url=URL_forecast_south_of_nanaimo , title="South of Nanaimo")
+    display_summary_marine_forecast_for_url(draw=tab10, url=URL_forecast_north_of_nanaimo , title="North of Nanaimo")
     display_beach_quality_for_sandy_cove(draw=tab10, title="🏖️ Beach water quality Sandy Cove")
     display_point_atkinson_tides(container=tab10)
 
