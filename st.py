@@ -74,13 +74,7 @@ def displayWindWarningIfNeeded(wind_speed, container=None):
 
 def page_gonogo():
     try:
-        page_links = {
-            'Dashboard': page_dashboard,
-            'Marine_Forecast': page_forecast,
-            'Halibut_Bank': page_halibut,
-            'Tides': page_tides,
-        }
-        display_gonogo_page(container=st, page_links=page_links)
+        display_gonogo_page(container=st, page_links=PAGE_LINKS)
     except Exception as e:
         st.error(f"Failed to load Go/No-Go: {e}")
 
@@ -558,29 +552,34 @@ with st.sidebar:
 
 display_gonogo_sidebar()
 
+# Build st.Page objects — keep references for page_link usage
+_pg_gonogo = st.Page(page_gonogo, title="Go / No-Go", icon="🚤", default=True)
+_pg_dashboard = st.Page(page_dashboard, title="Dashboard", icon="📊")
+_pg_jericho = st.Page(page_jericho, title="Jericho Wind", icon="💨")
+_pg_halibut = st.Page(page_halibut, title="Halibut Bank", icon="🔵")
+_pg_atkinson = st.Page(page_atkinson, title="Pt Atkinson", icon="🔵")
+_pg_pamrocks = st.Page(page_pamrocks, title="Pam Rocks", icon="🔵")
+_pg_forecast = st.Page(page_forecast, title="Marine Forecast", icon="🌊")
+_pg_tides = st.Page(page_tides, title="Tides", icon="🌊")
+_pg_beach = st.Page(page_beach, title="Beach", icon="🏖️")
+_pg_squamish = st.Page(page_squamish, title="Squamish W", icon="⛰️")
+_pg_lionsbay = st.Page(page_lionsbay, title="Lions Bay W", icon="⛰️")
+_pg_kiosk = st.Page(page_kiosk, title="Kiosk Mode", icon="📺")
+
+# Store page_link targets so page_gonogo can reference them
+PAGE_LINKS = {
+    'Dashboard': _pg_dashboard,
+    'Marine_Forecast': _pg_forecast,
+    'Halibut_Bank': _pg_halibut,
+    'Tides': _pg_tides,
+}
+
 pages = {
-    "Conditions": [
-        st.Page(page_gonogo, title="Go / No-Go", icon="🚤", default=True),
-        st.Page(page_dashboard, title="Dashboard", icon="📊"),
-    ],
-    "Live Data": [
-        st.Page(page_jericho, title="Jericho Wind", icon="💨"),
-        st.Page(page_halibut, title="Halibut Bank", icon="🔵"),
-        st.Page(page_atkinson, title="Pt Atkinson", icon="🔵"),
-        st.Page(page_pamrocks, title="Pam Rocks", icon="🔵"),
-    ],
-    "Forecast & Tides": [
-        st.Page(page_forecast, title="Marine Forecast", icon="🌊"),
-        st.Page(page_tides, title="Tides", icon="🌊"),
-        st.Page(page_beach, title="Beach", icon="🏖️"),
-    ],
-    "Regional Weather": [
-        st.Page(page_squamish, title="Squamish W", icon="⛰️"),
-        st.Page(page_lionsbay, title="Lions Bay W", icon="⛰️"),
-    ],
-    "Display": [
-        st.Page(page_kiosk, title="Kiosk Mode", icon="📺"),
-    ],
+    "Conditions": [_pg_gonogo, _pg_dashboard],
+    "Live Data": [_pg_jericho, _pg_halibut, _pg_atkinson, _pg_pamrocks],
+    "Forecast & Tides": [_pg_forecast, _pg_tides, _pg_beach],
+    "Regional Weather": [_pg_squamish, _pg_lionsbay],
+    "Display": [_pg_kiosk],
 }
 
 pg = st.navigation(pages)
