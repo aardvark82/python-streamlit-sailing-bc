@@ -195,11 +195,13 @@ def _gather_current_factors():
                 'status': _status(wind_kts, WIND_GO, WIND_CAUTION),
                 'label': f"Wind Now: {wind_kts:.0f}kts",
                 'value': wind_kts,
+                'page': '/Dashboard',
             }
             factors['precip'] = {
                 'status': _status(weather.next_24_hours_precipitation, PRECIP_GO, PRECIP_CAUTION),
                 'label': f"Rain 24h: {weather.next_24_hours_precipitation:.1f}mm",
                 'value': weather.next_24_hours_precipitation,
+                'page': '/Dashboard',
             }
     except Exception as e:
         print(f"Go/NoGo weather error: {e}")
@@ -209,11 +211,11 @@ def _gather_current_factors():
         forecast = fetch_beautifulsoup_marine_forecast_for_url(URL_HOWE_SOUND, "Howe Sound")
         if forecast and not forecast.get('error'):
             if forecast.get('strong_wind_warning'):
-                factors['warnings'] = {'status': 'nogo', 'label': 'Strong Wind Warning!'}
+                factors['warnings'] = {'status': 'nogo', 'label': 'Strong Wind Warning!', 'page': '/Marine_Forecast'}
             elif forecast.get('wind_warning'):
-                factors['warnings'] = {'status': 'caution', 'label': 'Wind Warning'}
+                factors['warnings'] = {'status': 'caution', 'label': 'Wind Warning', 'page': '/Marine_Forecast'}
             else:
-                factors['warnings'] = {'status': 'go', 'label': 'No Warnings'}
+                factors['warnings'] = {'status': 'go', 'label': 'No Warnings', 'page': '/Marine_Forecast'}
 
             try:
                 csv_text = openAIFetchForecastForURL(url=URL_HOWE_SOUND)
@@ -231,6 +233,7 @@ def _gather_current_factors():
                             'status': _status(current_wind, WIND_GO, WIND_CAUTION),
                             'label': f"Howe Sound: {current_wind:.0f}kts ({time_label})",
                             'value': current_wind,
+                            'page': '/Marine_Forecast',
                         }
             except Exception:
                 pass
@@ -245,6 +248,7 @@ def _gather_current_factors():
                 'status': _status(buoy_wind, WIND_GO, WIND_CAUTION),
                 'label': f"Halibut Bank: {buoy_wind}kts",
                 'value': buoy_wind,
+                'page': '/Halibut_Bank',
             }
         if buoy_wave is not None:
             wave_cm = buoy_wave * 100
@@ -252,6 +256,7 @@ def _gather_current_factors():
                 'status': _status(buoy_wave, WAVE_GO, WAVE_CAUTION),
                 'label': f"Waves: {wave_cm:.0f}cm",
                 'value': buoy_wave,
+                'page': '/Halibut_Bank',
             }
     except Exception as e:
         print(f"Go/NoGo buoy error: {e}")
@@ -265,6 +270,7 @@ def _gather_current_factors():
                 'status': _status(tide_h, TIDE_NOGO, TIDE_CAUTION, higher_is_worse=False),
                 'label': f"Tide: {tide_h:.1f}m{suffix}",
                 'value': tide_h,
+                'page': '/Tides',
             }
     except Exception as e:
         print(f"Go/NoGo tide error: {e}")
@@ -387,7 +393,11 @@ def display_gonogo_page(container=None):
     # Current conditions table
     draw.markdown("**Current Conditions**")
     for f in factors.values():
-        draw.caption(f"{_ICON[f['status']]} {f['label']}")
+        page = f.get('page', '')
+        if page:
+            draw.caption(f"{_ICON[f['status']]} {f['label']}  [🔗]({page})")
+        else:
+            draw.caption(f"{_ICON[f['status']]} {f['label']}")
 
     draw.markdown(
         f"*Thresholds: Wind GO < {WIND_GO}kts, CAUTION < {WIND_CAUTION}kts  |  "
