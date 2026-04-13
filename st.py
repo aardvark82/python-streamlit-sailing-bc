@@ -24,7 +24,7 @@ from fetch_beach import display_beach_quality_for_sandy_cove
 from fetch_weather import display_weather_info, display_clear_skies_html
 from fetch_tides import display_point_atkinson_tides
 from wind_utils import create_arrow_html
-from fetch_gonogo import display_gonogo_sidebar, display_gonogo_page
+from fetch_gonogo import display_gonogo_sidebar, display_gonogo_page, display_kiosk_page
 from pathlib import Path
 
 # Read version from VERSION file
@@ -170,6 +170,13 @@ def page_lionsbay():
         display_weather_info(container=st, lat=LIONSBAY_LAT, long=LIONSBAY_LON, title="Lions Bay")
     except Exception as e:
         st.error(f"Failed to load Lions Bay weather: {e}")
+
+
+def page_kiosk():
+    try:
+        display_kiosk_page()
+    except Exception as e:
+        st.error(f"Failed to load kiosk mode: {e}")
 
 
 def parseJerichoWindHistory(container=None):
@@ -564,6 +571,9 @@ pages = {
     "Regional Weather": [
         st.Page(page_squamish, title="Squamish W", icon="⛰️"),
         st.Page(page_lionsbay, title="Lions Bay W", icon="⛰️"),
+    ],
+    "Display": [
+        st.Page(page_kiosk, title="Kiosk Mode", icon="📺"),
     ],
 }
 

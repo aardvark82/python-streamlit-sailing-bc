@@ -515,3 +515,158 @@ def _draw_weekly_chart(draw, windows):
     fig.update_traces(texttemplate=None)
 
     draw.plotly_chart(fig, width='stretch')
+
+
+# ──────────────────────────────────────────────
+# Kiosk / screensaver mode — dark, large fonts
+# ──────────────────────────────────────────────
+
+_KIOSK_CSS = """
+<style>
+    /* Hide Streamlit chrome for kiosk mode */
+    [data-testid="stSidebar"] { display: none !important; }
+    [data-testid="stHeader"] { display: none !important; }
+    [data-testid="stToolbar"] { display: none !important; }
+    footer { display: none !important; }
+    .block-container { padding-top: 1rem !important; max-width: 100% !important; }
+
+    /* Dark background */
+    .stApp { background-color: #0a0a0a !important; }
+    .stApp * { color: #e0e0e0 !important; }
+
+    /* Large verdict badge */
+    .kiosk-verdict {
+        font-size: 4rem;
+        font-weight: 900;
+        text-align: center;
+        padding: 0.5rem;
+        border-radius: 16px;
+        margin-bottom: 0.5rem;
+    }
+    .kiosk-go { background: #2ecc71; color: #000 !important; }
+    .kiosk-caution { background: #f39c12; color: #000 !important; }
+    .kiosk-nogo { background: #e74c3c; color: #fff !important; }
+
+    .kiosk-factor {
+        font-size: 1.3rem;
+        padding: 0.15rem 0;
+    }
+    .kiosk-time {
+        font-size: 1rem;
+        color: #888 !important;
+        text-align: center;
+    }
+</style>
+"""
+
+
+def display_kiosk_page():
+    """Full-screen dark kiosk mode for TV / Nvidia Shield screensaver."""
+    st.markdown(_KIOSK_CSS, unsafe_allow_html=True)
+
+    factors, weather = _gather_current_factors()
+    overall, overall_label = _get_overall(factors)
+
+    vancouver_tz = pytz.timezone('America/Vancouver')
+    now = datetime.now(vancouver_tz)
+
+    # Large verdict
+    css_class = f"kiosk-{overall}"
+    st.markdown(
+        f'<div class="kiosk-verdict {css_class}">{overall_label}</div>',
+        unsafe_allow_html=True,
+    )
+
+    # Current time
+    st.markdown(
+        f'<div class="kiosk-time">{now.strftime("%A %B %d, %I:%M %p")}</div>',
+        unsafe_allow_html=True,
+    )
+
+    # Current conditions — large text
+    for f in factors.values():
+        icon = _ICON[f['status']]
+        st.markdown(
+            f'<div class="kiosk-factor">{icon} {f["label"]}</div>',
+            unsafe_allow_html=True,
+        )
+
+    # Weekly heatmap — dark themed
+    if weather:
+        windows = _analyze_5day_windows(weather)
+        if windows:
+            _draw_kiosk_chart(windows)
+
+
+def _draw_kiosk_chart(windows):
+    """Dark-themed heatmap for kiosk display."""
+    days = []
+    seen = set()
+    for w in windows:
+        if w['day'] not in seen:
+            days.append(w['day'])
+            seen.add(w['day'])
+
+    periods = ['8AM', 'Noon', '4PM']
+
+    z = []
+    for period in periods:
+        row_z = []
+        for day in days:
+            match = next((w for w in windows if w['day'] == day and w['period'] == period), None)
+            row_z.append(_NUMERIC[match['status']] if match else None)
+        z.append(row_z)
+
+    colorscale = [
+        [0, '#e74c3c'],
+        [0.25, '#e74c3c'],
+        [0.25, '#f39c12'],
+        [0.75, '#f39c12'],
+        [0.75, '#2ecc71'],
+        [1, '#2ecc71'],
+    ]
+
+    fig = go.Figure(data=go.Heatmap(
+        z=z,
+        x=days,
+        y=periods,
+        colorscale=colorscale,
+        zmin=0, zmax=1,
+        showscale=False,
+        xgap=4, ygap=4,
+        hoverinfo='skip',
+    ))
+
+    fig.update_layout(
+        height=300,
+        margin=dict(l=70, r=20, t=10, b=10),
+        yaxis=dict(autorange='reversed'),
+        xaxis=dict(side='top'),
+        plot_bgcolor='#0a0a0a',
+        paper_bgcolor='#0a0a0a',
+        font=dict(color='#e0e0e0', size=16),
+    )
+
+    # Annotations — wind + tide times, large
+    for i, period in enumerate(periods):
+        for j, day in enumerate(days):
+            match = next((w for w in windows if w['day'] == day and w['period'] == period), None)
+            if match:
+                label = f"<b>{match['wind']:.0f}</b>kts"
+                tides = match.get('tides', {})
+                tide_parts = []
+                if tides.get('high'):
+                    tide_parts.append(f"H{tides['high'][0]}")
+                if tides.get('low'):
+                    tide_parts.append(f"L{tides['low'][0]}")
+                if tide_parts:
+                    label += f"<br>{' '.join(tide_parts)}"
+                fig.add_annotation(
+                    x=day, y=period,
+                    text=label,
+                    showarrow=False,
+                    font=dict(color='white', size=16),
+                )
+
+    fig.update_traces(texttemplate=None)
+    st.plotly_chart(fig, width='stretch')
