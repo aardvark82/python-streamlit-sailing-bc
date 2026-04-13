@@ -195,13 +195,13 @@ def _gather_current_factors():
                 'status': _status(wind_kts, WIND_GO, WIND_CAUTION),
                 'label': f"Wind Now: {wind_kts:.0f}kts",
                 'value': wind_kts,
-                'page': '/Dashboard',
+                'page': 'Dashboard',
             }
             factors['precip'] = {
                 'status': _status(weather.next_24_hours_precipitation, PRECIP_GO, PRECIP_CAUTION),
                 'label': f"Rain 24h: {weather.next_24_hours_precipitation:.1f}mm",
                 'value': weather.next_24_hours_precipitation,
-                'page': '/Dashboard',
+                'page': 'Dashboard',
             }
     except Exception as e:
         print(f"Go/NoGo weather error: {e}")
@@ -211,11 +211,11 @@ def _gather_current_factors():
         forecast = fetch_beautifulsoup_marine_forecast_for_url(URL_HOWE_SOUND, "Howe Sound")
         if forecast and not forecast.get('error'):
             if forecast.get('strong_wind_warning'):
-                factors['warnings'] = {'status': 'nogo', 'label': 'Strong Wind Warning!', 'page': '/Marine_Forecast'}
+                factors['warnings'] = {'status': 'nogo', 'label': 'Strong Wind Warning!', 'page': 'Marine_Forecast'}
             elif forecast.get('wind_warning'):
-                factors['warnings'] = {'status': 'caution', 'label': 'Wind Warning', 'page': '/Marine_Forecast'}
+                factors['warnings'] = {'status': 'caution', 'label': 'Wind Warning', 'page': 'Marine_Forecast'}
             else:
-                factors['warnings'] = {'status': 'go', 'label': 'No Warnings', 'page': '/Marine_Forecast'}
+                factors['warnings'] = {'status': 'go', 'label': 'No Warnings', 'page': 'Marine_Forecast'}
 
             try:
                 csv_text = openAIFetchForecastForURL(url=URL_HOWE_SOUND)
@@ -233,7 +233,7 @@ def _gather_current_factors():
                             'status': _status(current_wind, WIND_GO, WIND_CAUTION),
                             'label': f"Howe Sound: {current_wind:.0f}kts ({time_label})",
                             'value': current_wind,
-                            'page': '/Marine_Forecast',
+                            'page': 'Marine_Forecast',
                         }
             except Exception:
                 pass
@@ -248,7 +248,7 @@ def _gather_current_factors():
                 'status': _status(buoy_wind, WIND_GO, WIND_CAUTION),
                 'label': f"Halibut Bank: {buoy_wind}kts",
                 'value': buoy_wind,
-                'page': '/Halibut_Bank',
+                'page': 'Halibut_Bank',
             }
         if buoy_wave is not None:
             wave_cm = buoy_wave * 100
@@ -256,7 +256,7 @@ def _gather_current_factors():
                 'status': _status(buoy_wave, WAVE_GO, WAVE_CAUTION),
                 'label': f"Waves: {wave_cm:.0f}cm",
                 'value': buoy_wave,
-                'page': '/Halibut_Bank',
+                'page': 'Halibut_Bank',
             }
     except Exception as e:
         print(f"Go/NoGo buoy error: {e}")
@@ -270,7 +270,7 @@ def _gather_current_factors():
                 'status': _status(tide_h, TIDE_NOGO, TIDE_CAUTION, higher_is_worse=False),
                 'label': f"Tide: {tide_h:.1f}m{suffix}",
                 'value': tide_h,
-                'page': '/Tides',
+                'page': 'Tides',
             }
     except Exception as e:
         print(f"Go/NoGo tide error: {e}")
@@ -471,9 +471,10 @@ def _draw_snapshot(draw, weather):
         col3.metric("💨 Next", "N/A")
 
 
-def display_gonogo_page(container=None):
+def display_gonogo_page(container=None, page_links=None):
     """Full Go/No-Go page with heatmap chart and current conditions."""
     draw = container or st
+    page_links = page_links or {}
 
     draw.subheader("Go / No-Go — Boating Conditions")
     draw.caption("Horseshoe Bay launch | Howe Sound / Pt Atkinson / English Bay")
@@ -492,9 +493,12 @@ def display_gonogo_page(container=None):
     # Current conditions table
     draw.markdown("**Current Conditions**")
     for f in factors.values():
-        page = f.get('page', '')
-        if page:
-            draw.caption(f"{_ICON[f['status']]} {f['label']}  [🔗]({page})")
+        page_key = f.get('page')
+        page_func = page_links.get(page_key) if page_key else None
+        if page_func:
+            cols = draw.columns([0.9, 0.1])
+            cols[0].caption(f"{_ICON[f['status']]} {f['label']}")
+            cols[1].page_link(page_func, label="🔗")
         else:
             draw.caption(f"{_ICON[f['status']]} {f['label']}")
 

@@ -74,7 +74,13 @@ def displayWindWarningIfNeeded(wind_speed, container=None):
 
 def page_gonogo():
     try:
-        display_gonogo_page(container=st)
+        page_links = {
+            'Dashboard': page_dashboard,
+            'Marine_Forecast': page_forecast,
+            'Halibut_Bank': page_halibut,
+            'Tides': page_tides,
+        }
+        display_gonogo_page(container=st, page_links=page_links)
     except Exception as e:
         st.error(f"Failed to load Go/No-Go: {e}")
 
