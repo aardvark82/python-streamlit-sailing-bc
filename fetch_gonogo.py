@@ -647,14 +647,14 @@ _KIOSK_CSS = """
     .stApp { background-color: #0a0a0a !important; }
     .stApp * { color: #e0e0e0 !important; }
 
-    /* Large verdict badge */
+    /* Compact verdict banner */
     .kiosk-verdict {
-        font-size: 4rem;
+        font-size: 2.2rem;
         font-weight: 900;
         text-align: center;
-        padding: 0.5rem;
-        border-radius: 16px;
-        margin-bottom: 0.5rem;
+        padding: 0.25rem 0.5rem;
+        border-radius: 12px;
+        margin-bottom: 0.3rem;
     }
     .kiosk-go { background: #2ecc71; color: #000 !important; }
     .kiosk-caution { background: #f39c12; color: #000 !important; }
@@ -668,6 +668,29 @@ _KIOSK_CSS = """
         font-size: 1rem;
         color: #888 !important;
         text-align: center;
+    }
+
+    /* Kiosk metric cards */
+    .kiosk-metrics {
+        display: flex;
+        justify-content: space-around;
+        flex-wrap: wrap;
+        gap: 0.3rem;
+        margin: 0.4rem 0;
+    }
+    .kiosk-metric {
+        text-align: center;
+        flex: 1;
+        min-width: 120px;
+    }
+    .kiosk-metric-value {
+        font-size: 1.6rem;
+        font-weight: 700;
+        color: #fff !important;
+    }
+    .kiosk-metric-label {
+        font-size: 0.85rem;
+        color: #888 !important;
     }
 </style>
 """
@@ -696,6 +719,9 @@ def display_kiosk_page():
         unsafe_allow_html=True,
     )
 
+    # ── Snapshot metrics row (dark-styled) ──
+    _draw_kiosk_snapshot(weather)
+
     # Current conditions — large text
     for f in factors.values():
         icon = _ICON[f['status']]
@@ -709,6 +735,67 @@ def display_kiosk_page():
         windows = _analyze_5day_windows(weather)
         if windows:
             _draw_kiosk_chart(windows)
+
+
+def _draw_kiosk_snapshot(weather):
+    """Render snapshot metrics as dark-styled HTML for kiosk mode."""
+    metrics = []
+
+    # Temperature
+    if weather:
+        metrics.append(("🌡️ Temp", f"{weather.temperature:.0f}°C"))
+        metrics.append(("🌧️ Rain 3h", f"{weather.next_3_hours_precipitation:.1f}mm"))
+    else:
+        metrics.append(("🌡️ Temp", "N/A"))
+        metrics.append(("🌧️ Rain 3h", "N/A"))
+
+    # Tide
+    try:
+        tide_h, tide_dir = _get_current_tide_height()
+        if tide_h is not None:
+            suffix = f" {tide_dir}" if tide_dir else ""
+            metrics.append(("🌊 Tide", f"{tide_h:.1f}m{suffix}"))
+        else:
+            metrics.append(("🌊 Tide", "N/A"))
+    except Exception:
+        metrics.append(("🌊 Tide", "N/A"))
+
+    # Pam Rocks wind
+    try:
+        pam_wind, _ = _fetch_buoy_wind_wave('WAS')
+        if pam_wind is not None:
+            metrics.append(("💨 Pam Rocks", f"{pam_wind}kts"))
+        else:
+            metrics.append(("💨 Pam Rocks", "N/A"))
+    except Exception:
+        metrics.append(("💨 Pam Rocks", "N/A"))
+
+    # Howe Sound forecast
+    try:
+        rows = _get_howe_sound_forecast_rows()
+        if rows:
+            r = rows[0]
+            speed = f"{r['wind_speed']:.0f}" if r.get('wind_speed') is not None else "?"
+            gust = f"{r['max_wind_speed']:.0f}" if r.get('max_wind_speed') is not None else "?"
+            metrics.append((f"💨 Howe ({r['time']})", f"{speed}-{gust}kts"))
+            if len(rows) > 1:
+                r2 = rows[1]
+                s2 = f"{r2['wind_speed']:.0f}" if r2.get('wind_speed') is not None else "?"
+                g2 = f"{r2['max_wind_speed']:.0f}" if r2.get('max_wind_speed') is not None else "?"
+                metrics.append((f"💨 Next ({r2['time']})", f"{s2}-{g2}kts"))
+    except Exception:
+        pass
+
+    cards = ""
+    for label, value in metrics:
+        cards += (
+            f'<div class="kiosk-metric">'
+            f'<div class="kiosk-metric-value">{value}</div>'
+            f'<div class="kiosk-metric-label">{label}</div>'
+            f'</div>'
+        )
+
+    st.markdown(f'<div class="kiosk-metrics">{cards}</div>', unsafe_allow_html=True)
 
 
 def _draw_kiosk_chart(windows):
