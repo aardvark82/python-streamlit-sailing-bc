@@ -377,6 +377,100 @@ def display_gonogo_sidebar():
 # Full page: detailed view with chart
 # ──────────────────────────────────────────────
 
+def _get_howe_sound_forecast_rows():
+    """Get the first 2 rows of the GPT-parsed Howe Sound forecast.
+    Returns list of dicts with 'time', 'wind_speed', 'max_wind_speed' or empty list."""
+    try:
+        csv_text = openAIFetchForecastForURL(url=URL_HOWE_SOUND)
+        if not csv_text:
+            return []
+        csv_clean = csv_text.replace('```csv', '').replace('```', '')
+        df = pd.read_csv(io.StringIO(csv_clean), sep=',', on_bad_lines='skip')
+        df = df.dropna(how='all').reset_index(drop=True)
+        df.columns = df.columns.str.strip().str.lower()
+        rows = []
+        for _, row in df.head(2).iterrows():
+            r = {}
+            r['time'] = str(row.get('time', ''))
+            if 'wind_speed' in df.columns:
+                r['wind_speed'] = clean_wind_speed(row['wind_speed'])
+            elif 'wind speed' in df.columns:
+                r['wind_speed'] = clean_wind_speed(row['wind speed'])
+            else:
+                r['wind_speed'] = None
+            if 'max_wind_speed' in df.columns:
+                r['max_wind_speed'] = clean_wind_speed(row['max_wind_speed'])
+            elif 'max wind speed' in df.columns:
+                r['max_wind_speed'] = clean_wind_speed(row['max wind speed'])
+            else:
+                r['max_wind_speed'] = None
+            rows.append(r)
+        return rows
+    except Exception:
+        return []
+
+
+def _draw_snapshot(draw, weather):
+    """Draw the quick-glance metrics row at the top of Go/No-Go."""
+
+    # Row 1: Temp, Rain 3h, Tide
+    col1, col2, col3 = draw.columns(3)
+
+    # Outside temperature
+    if weather:
+        col1.metric("🌡️ Temperature", f"{weather.temperature:.0f}°C")
+        col2.metric("🌧️ Rain (3h)", f"{weather.next_3_hours_precipitation:.1f}mm")
+    else:
+        col1.metric("🌡️ Temperature", "N/A")
+        col2.metric("🌧️ Rain (3h)", "N/A")
+
+    # Tide
+    try:
+        tide_h, tide_dir = _get_current_tide_height()
+        if tide_h is not None:
+            col3.metric("🌊 Tide", f"{tide_h:.1f}m", delta=tide_dir, delta_color="off")
+        else:
+            col3.metric("🌊 Tide", "N/A")
+    except Exception:
+        col3.metric("🌊 Tide", "N/A")
+
+    # Row 2: Current wind (Pam Rocks = Howe Sound area), Forecast wind now, Forecast wind next
+    col1, col2, col3 = draw.columns(3)
+
+    # Pam Rocks buoy — closest to Howe Sound entrance
+    try:
+        pam_wind, _ = _fetch_buoy_wind_wave('WAS')
+        if pam_wind is not None:
+            col1.metric("💨 Pam Rocks Now", f"{pam_wind}kts")
+        else:
+            col1.metric("💨 Pam Rocks Now", "N/A")
+    except Exception:
+        col1.metric("💨 Pam Rocks Now", "N/A")
+
+    # Howe Sound marine forecast — current period + next period
+    try:
+        rows = _get_howe_sound_forecast_rows()
+        if rows:
+            r = rows[0]
+            speed = f"{r['wind_speed']:.0f}" if r.get('wind_speed') is not None else "?"
+            gust = f"{r['max_wind_speed']:.0f}" if r.get('max_wind_speed') is not None else "?"
+            col2.metric(f"💨 Howe Sound ({r['time']})", f"{speed}-{gust}kts")
+
+            if len(rows) > 1:
+                r2 = rows[1]
+                speed2 = f"{r2['wind_speed']:.0f}" if r2.get('wind_speed') is not None else "?"
+                gust2 = f"{r2['max_wind_speed']:.0f}" if r2.get('max_wind_speed') is not None else "?"
+                col3.metric(f"💨 Next ({r2['time']})", f"{speed2}-{gust2}kts")
+            else:
+                col3.metric("💨 Next", "N/A")
+        else:
+            col2.metric("💨 Howe Sound", "N/A")
+            col3.metric("💨 Next", "N/A")
+    except Exception:
+        col2.metric("💨 Howe Sound", "N/A")
+        col3.metric("💨 Next", "N/A")
+
+
 def display_gonogo_page(container=None):
     """Full Go/No-Go page with heatmap chart and current conditions."""
     draw = container or st
@@ -389,6 +483,11 @@ def display_gonogo_page(container=None):
 
     # Overall verdict
     draw.badge(overall_label, color=_BADGE[overall])
+
+    # ── Snapshot metrics at the top ──
+    _draw_snapshot(draw, weather)
+
+    draw.markdown("---")
 
     # Current conditions table
     draw.markdown("**Current Conditions**")
