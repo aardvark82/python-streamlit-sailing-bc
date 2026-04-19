@@ -587,7 +587,7 @@ PAGE_LINKS = {
 
 pages = {
     "Conditions": [_pg_gonogo, _pg_dashboard],
-    "Live Data": [_pg_jericho, _pg_halibut, _pg_english_bay, _pg_atkinson, _pg_pamrocks],
+    "Live Data": [_pg_jericho, _pg_english_bay, _pg_atkinson, _pg_pamrocks, _pg_halibut],
     "Forecast & Tides": [_pg_forecast, _pg_tides, _pg_beach],
     "Regional Weather": [_pg_squamish, _pg_lionsbay],
     "Display": [_pg_kiosk],
