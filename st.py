@@ -269,7 +269,7 @@ def drawMapWithBuoy(container=None, buoy=None):
     if buoy == '46146':
         latlong = pd.DataFrame({'latitude': [49.34], 'longitude': [-123.72]})
     if buoy == '46304':
-        latlong = pd.DataFrame({'latitude': [49.3426], 'longitude': [-123.2609]})
+        latlong = pd.DataFrame({'latitude': [49.300], 'longitude': [-123.360]})
     if buoy == 'WSB':
         latlong = pd.DataFrame({'latitude': [49.330], 'longitude': [-123.2646]})
     if buoy == 'WAS':
@@ -581,6 +581,7 @@ PAGE_LINKS = {
     'Dashboard': _pg_dashboard,
     'Marine_Forecast': _pg_forecast,
     'Halibut_Bank': _pg_halibut,
+    'English_Bay': _pg_english_bay,
     'Tides': _pg_tides,
 }
 

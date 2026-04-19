@@ -54,8 +54,8 @@ _COLOR_MAP = {'go': '#2ecc71', 'caution': '#f39c12', 'nogo': '#e74c3c'}
 _NUMERIC = {'go': 1, 'caution': 0.5, 'nogo': 0}
 
 
-def _fetch_buoy_wind_wave(buoy_id='46146'):
-    """Lightweight scrape of Halibut Bank buoy for wind & wave."""
+def _fetch_buoy_wind_wave(buoy_id='46304'):
+    """Lightweight scrape of Environment Canada offshore buoy for wind & wave."""
     url = (
         'https://www.weather.gc.ca/marine/weatherConditions-currentConditions_e.html'
         f'?mapID=02&siteID=14305&stationID={buoy_id}'
@@ -73,7 +73,7 @@ def _fetch_buoy_wind_wave(buoy_id='46146'):
         max_wind = max(int(w) for w in winds) if winds else None
 
         wave_height = None
-        if buoy_id == '46146' and len(rows) > 1:
+        if buoy_id in ('46146', '46304') and len(rows) > 1:
             wave_text = rows[1].find_all('td')[0].text.strip()
             wave_nums = re.findall(r'[-+]?\d*\.\d+|\d+', wave_text)
             wave_height = float(wave_nums[0]) if wave_nums else None
@@ -240,15 +240,15 @@ def _gather_current_factors():
     except Exception as e:
         print(f"Go/NoGo forecast error: {e}")
 
-    # 3. Halibut Bank buoy — wind + waves
+    # 3. English Bay buoy (46304) — wind + waves, closer to Horseshoe Bay launch
     try:
-        buoy_wind, buoy_wave = _fetch_buoy_wind_wave('46146')
+        buoy_wind, buoy_wave = _fetch_buoy_wind_wave('46304')
         if buoy_wind is not None:
             factors['buoy_wind'] = {
                 'status': _status(buoy_wind, WIND_GO, WIND_CAUTION),
-                'label': f"Halibut Bank: {buoy_wind}kts",
+                'label': f"English Bay: {buoy_wind}kts",
                 'value': buoy_wind,
-                'page': 'Halibut_Bank',
+                'page': 'English_Bay',
             }
         if buoy_wave is not None:
             wave_cm = buoy_wave * 100
@@ -256,7 +256,7 @@ def _gather_current_factors():
                 'status': _status(buoy_wave, WAVE_GO, WAVE_CAUTION),
                 'label': f"Waves: {wave_cm:.0f}cm",
                 'value': buoy_wave,
-                'page': 'Halibut_Bank',
+                'page': 'English_Bay',
             }
     except Exception as e:
         print(f"Go/NoGo buoy error: {e}")
