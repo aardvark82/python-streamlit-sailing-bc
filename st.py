@@ -17,7 +17,7 @@ from urllib.parse import quote
 
 from streamlit_autorefresh import st_autorefresh
 
-from utils import cached_fetch_url, prettydate, displayStreamlitDateTime
+from utils import cached_fetch_url, cached_fetch_url_live, prettydate, displayStreamlitDateTime
 from fetch_forecast import display_marine_forecast_for_url
 from fetch_forecast import display_summary_marine_forecast_for_url
 from fetch_beach import display_beach_quality_for_sandy_cove
@@ -484,7 +484,8 @@ def refreshBuoy(buoy='46146', title='Halibut Bank - 46146', container=None):
     draw = container or st
     url = f'https://www.weather.gc.ca/marine/weatherConditions-currentConditions_e.html?mapID=02&siteID=14305&stationID={buoy}'
 
-    res = cached_fetch_url(url)
+    # Live data — short 3-min cache so new observations surface quickly
+    res = cached_fetch_url_live(url)
     soup = BeautifulSoup(res.content, 'html.parser')
     table = soup.find('table', class_='table')
     time = soup.find('span', class_='issuedTime').string
