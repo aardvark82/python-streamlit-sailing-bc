@@ -25,8 +25,8 @@ WAVE_GO = 0.51      # meters (51 cm)
 WAVE_CAUTION = 0.75 # meters
 PRECIP_GO = 0.5     # mm — light drizzle OK
 PRECIP_CAUTION = 2.0
-TIDE_NOGO = 1.5     # meters — very low, tough to launch at Horseshoe Bay
-TIDE_CAUTION = 2.5  # meters
+TIDE_NOGO = 2.0     # meters — below this, can't launch at Horseshoe Bay (learned the hard way at 80cm)
+TIDE_CAUTION = 2.5  # meters — marginal; doable but tight
 
 VANCOUVER_LAT = 49.32
 VANCOUVER_LON = -123.16
@@ -278,12 +278,18 @@ def _gather_current_factors():
     try:
         tide_h, tide_dir = _get_current_tide_height()
         if tide_h is not None:
-            suffix = f" ({tide_dir})" if tide_dir else ""
+            arrow = ""
+            if tide_dir == "Rising":
+                arrow = " ↑"
+            elif tide_dir == "Falling":
+                arrow = " ↓"
+            dir_text = f" {tide_dir}" if tide_dir else ""
             factors['tide'] = {
                 'status': _status(tide_h, TIDE_NOGO, TIDE_CAUTION, higher_is_worse=False),
-                'label': f"Tide: {tide_h:.1f}m{suffix}",
+                'label': f"Tide: {tide_h:.2f}m{arrow}{dir_text}",
                 'value': tide_h,
                 'page': 'Tides',
+                'badge': {'text': '2m minimum', 'color': 'gray'},
             }
     except Exception as e:
         print(f"Go/NoGo tide error: {e}")
@@ -530,7 +536,7 @@ def display_gonogo_page(container=None, page_links=None):
         f"*Thresholds: Wind GO < {WIND_GO}kts, CAUTION < {WIND_CAUTION}kts  |  "
         f"Waves GO < {int(WAVE_GO * 100)}cm  |  "
         f"Rain GO < {PRECIP_GO}mm  |  "
-        f"Tide NO-GO < {TIDE_NOGO}m*"
+        f"Tide NO-GO < {TIDE_NOGO:.1f}m (Horseshoe Bay minimum)*"
     )
 
     # 5-day heatmap chart
