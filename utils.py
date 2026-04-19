@@ -14,6 +14,14 @@ def cached_fetch_url(url):
     return response
 
 
+@st.cache_data(ttl=180)
+def cached_fetch_url_live(url):
+    """Short-TTL fetch for live data like buoy observations (3-minute cache)."""
+    response = requests.get(url, timeout=25)
+    response.raise_for_status()
+    return response
+
+
 def prettydate(d):
     now_vancouver = datetime.now(pytz.timezone('America/Vancouver'))
     return timeago_format(d, now_vancouver)

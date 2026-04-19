@@ -9,7 +9,7 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 
-from utils import cached_fetch_url
+from utils import cached_fetch_url, cached_fetch_url_live
 from fetch_weather import fetch_from_open_weather
 from fetch_forecast import (
     fetch_beautifulsoup_marine_forecast_for_url,
@@ -61,7 +61,7 @@ def _fetch_buoy_wind_wave(buoy_id='46304'):
         f'?mapID=02&siteID=14305&stationID={buoy_id}'
     )
     try:
-        res = cached_fetch_url(url)
+        res = cached_fetch_url_live(url)
         soup = BeautifulSoup(res.content, 'html.parser')
         table = soup.find('table', class_='table')
         if not table or not table.tbody:
@@ -206,7 +206,8 @@ def _gather_current_factors():
     except Exception as e:
         print(f"Go/NoGo weather error: {e}")
 
-    # 2. Marine forecast — Howe Sound warnings + parsed wind
+    # 2. Marine forecast — Howe Sound warnings + parsed wind (used as a badge)
+    forecast_badge = None
     try:
         forecast = fetch_beautifulsoup_marine_forecast_for_url(URL_HOWE_SOUND, "Howe Sound")
         if forecast and not forecast.get('error'):
@@ -229,18 +230,30 @@ def _gather_current_factors():
                         df['max wind speed'] = df['max wind speed'].apply(clean_wind_speed)
                         current_wind = df['max wind speed'].iloc[:2].max() if len(df) >= 2 else df['max wind speed'].iloc[0]
                         time_label = df['time'].iloc[0] if 'time' in df.columns else "now"
-                        factors['howe_wind'] = {
-                            'status': _status(current_wind, WIND_GO, WIND_CAUTION),
-                            'label': f"Howe Sound: {current_wind:.0f}kts ({time_label})",
-                            'value': current_wind,
-                            'page': 'Marine_Forecast',
+                        forecast_badge = {
+                            'text': f"Forecast {current_wind:.0f}kts ({time_label})",
+                            'color': _BADGE[_status(current_wind, WIND_GO, WIND_CAUTION)],
                         }
             except Exception:
                 pass
     except Exception as e:
         print(f"Go/NoGo forecast error: {e}")
 
-    # 3. English Bay buoy (46304) — wind + waves, closer to Horseshoe Bay launch
+    # 3. Pam Rocks buoy (WAS) — real wind observed at Howe Sound entrance
+    try:
+        pam_wind, _ = _fetch_buoy_wind_wave('WAS')
+        if pam_wind is not None:
+            factors['pam_wind'] = {
+                'status': _status(pam_wind, WIND_GO, WIND_CAUTION),
+                'label': f"Pam Rocks: {pam_wind}kts",
+                'value': pam_wind,
+                'page': 'Marine_Forecast',
+                'badge': forecast_badge,
+            }
+    except Exception as e:
+        print(f"Go/NoGo Pam Rocks error: {e}")
+
+    # 4. English Bay buoy (46304) — wind + waves, closer to Horseshoe Bay launch
     try:
         buoy_wind, buoy_wave = _fetch_buoy_wind_wave('46304')
         if buoy_wind is not None:
@@ -495,7 +508,18 @@ def display_gonogo_page(container=None, page_links=None):
     for f in factors.values():
         page_key = f.get('page')
         page_func = page_links.get(page_key) if page_key else None
-        if page_func:
+        badge = f.get('badge')
+
+        if badge and page_func:
+            cols = draw.columns([0.55, 0.35, 0.1])
+            cols[0].caption(f"{_ICON[f['status']]} {f['label']}")
+            cols[1].badge(badge['text'], color=badge['color'])
+            cols[2].page_link(page_func, label="🔗")
+        elif badge:
+            cols = draw.columns([0.6, 0.4])
+            cols[0].caption(f"{_ICON[f['status']]} {f['label']}")
+            cols[1].badge(badge['text'], color=badge['color'])
+        elif page_func:
             cols = draw.columns([0.9, 0.1])
             cols[0].caption(f"{_ICON[f['status']]} {f['label']}")
             cols[1].page_link(page_func, label="🔗")
