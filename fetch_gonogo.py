@@ -185,6 +185,38 @@ def _gather_current_factors():
     factors = {}
     weather = None
 
+    # 0. Tide — collected first so it displays at the top (mission-critical for launch)
+    try:
+        tide_h, tide_dir = _get_current_tide_height()
+        if tide_h is not None:
+            arrow = ""
+            if tide_dir == "Rising":
+                arrow = " ↑"
+            elif tide_dir == "Falling":
+                arrow = " ↓"
+            dir_text = f" {tide_dir}" if tide_dir else ""
+            factors['tide'] = {
+                'status': _status(tide_h, TIDE_NOGO, TIDE_CAUTION, higher_is_worse=False),
+                'label': f"Tide: {tide_h:.2f}m{arrow}{dir_text}",
+                'value': tide_h,
+                'page': 'Tides',
+                'badge': {'text': '2m minimum', 'color': 'gray'},
+            }
+        else:
+            factors['tide'] = {
+                'status': 'caution',
+                'label': "Tide: data unavailable",
+                'page': 'Tides',
+                'badge': {'text': '2m minimum', 'color': 'gray'},
+            }
+    except Exception as e:
+        print(f"Go/NoGo tide error: {e}")
+        factors['tide'] = {
+            'status': 'caution',
+            'label': f"Tide: error ({e})",
+            'page': 'Tides',
+        }
+
     # 1. Current weather (wind + precipitation)
     try:
         api_key = st.secrets["openweather_api_key"]
@@ -273,26 +305,6 @@ def _gather_current_factors():
             }
     except Exception as e:
         print(f"Go/NoGo buoy error: {e}")
-
-    # 4. Tide — launch feasibility at Horseshoe Bay
-    try:
-        tide_h, tide_dir = _get_current_tide_height()
-        if tide_h is not None:
-            arrow = ""
-            if tide_dir == "Rising":
-                arrow = " ↑"
-            elif tide_dir == "Falling":
-                arrow = " ↓"
-            dir_text = f" {tide_dir}" if tide_dir else ""
-            factors['tide'] = {
-                'status': _status(tide_h, TIDE_NOGO, TIDE_CAUTION, higher_is_worse=False),
-                'label': f"Tide: {tide_h:.2f}m{arrow}{dir_text}",
-                'value': tide_h,
-                'page': 'Tides',
-                'badge': {'text': '2m minimum', 'color': 'gray'},
-            }
-    except Exception as e:
-        print(f"Go/NoGo tide error: {e}")
 
     return factors, weather
 
