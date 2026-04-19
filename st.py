@@ -122,6 +122,13 @@ def page_halibut():
         st.error(f"Failed to load Halibut Bank buoy: {e}")
 
 
+def page_english_bay():
+    try:
+        refreshBuoy('46304', 'English Bay', container=st)
+    except Exception as e:
+        st.error(f"Failed to load English Bay buoy: {e}")
+
+
 def page_atkinson():
     try:
         refreshBuoy('WSB', 'Point Atkinson', container=st)
@@ -261,6 +268,8 @@ def drawMapWithBuoy(container=None, buoy=None):
     latlong = None
     if buoy == '46146':
         latlong = pd.DataFrame({'latitude': [49.34], 'longitude': [-123.72]})
+    if buoy == '46304':
+        latlong = pd.DataFrame({'latitude': [49.3426], 'longitude': [-123.2609]})
     if buoy == 'WSB':
         latlong = pd.DataFrame({'latitude': [49.330], 'longitude': [-123.2646]})
     if buoy == 'WAS':
@@ -496,7 +505,7 @@ def refreshBuoy(buoy='46146', title='Halibut Bank - 46146', container=None):
         highest_speed = max(numbers) if numbers else 0
         return direction, highest_speed
 
-    if buoy == '46146':
+    if buoy in ('46146', '46304'):
         data_wave_height = rows[1].find_all('td')[0].text.strip() + 'm'
         data_airtemp = rows[1].find_all('td')[1].text.strip() + '°C'
         data_waveperiod = rows[2].find_all('td')[0].text.strip() + 's'
@@ -557,6 +566,7 @@ _pg_gonogo = st.Page(page_gonogo, title="Go / No-Go", icon="🚤", default=True)
 _pg_dashboard = st.Page(page_dashboard, title="Dashboard", icon="📊")
 _pg_jericho = st.Page(page_jericho, title="Jericho Wind", icon="💨")
 _pg_halibut = st.Page(page_halibut, title="Halibut Bank", icon="🔵")
+_pg_english_bay = st.Page(page_english_bay, title="English Bay", icon="🔵")
 _pg_atkinson = st.Page(page_atkinson, title="Pt Atkinson", icon="🔵")
 _pg_pamrocks = st.Page(page_pamrocks, title="Pam Rocks", icon="🔵")
 _pg_forecast = st.Page(page_forecast, title="Marine Forecast", icon="🌊")
@@ -576,7 +586,7 @@ PAGE_LINKS = {
 
 pages = {
     "Conditions": [_pg_gonogo, _pg_dashboard],
-    "Live Data": [_pg_jericho, _pg_halibut, _pg_atkinson, _pg_pamrocks],
+    "Live Data": [_pg_jericho, _pg_halibut, _pg_english_bay, _pg_atkinson, _pg_pamrocks],
     "Forecast & Tides": [_pg_forecast, _pg_tides, _pg_beach],
     "Regional Weather": [_pg_squamish, _pg_lionsbay],
     "Display": [_pg_kiosk],
