@@ -224,12 +224,23 @@ def _gather_current_factors():
             elif tide_dir == "Falling":
                 arrow = " ↓"
             dir_text = f" {tide_dir}" if tide_dir else ""
+
+            # Warning badge takes priority over the "2m minimum" reminder:
+            # - Below 2m and falling = will only get worse, can't launch
+            # - Below 1m and rising = currently way too shallow, even though improving
+            if tide_h < TIDE_NOGO and tide_dir == "Falling":
+                tide_badge = {'text': '⚠️ Low & falling', 'color': 'red'}
+            elif tide_h < 1.0 and tide_dir == "Rising":
+                tide_badge = {'text': '⚠️ Very low', 'color': 'red'}
+            else:
+                tide_badge = {'text': '2m minimum', 'color': 'gray'}
+
             factors['tide'] = {
                 'status': _status(tide_h, TIDE_NOGO, TIDE_CAUTION, higher_is_worse=False),
                 'label': f"Tide: {tide_h:.2f}m{arrow}{dir_text}",
                 'value': tide_h,
                 'page': 'Tides',
-                'badge': {'text': '2m minimum', 'color': 'gray'},
+                'badge': tide_badge,
             }
         else:
             factors['tide'] = {
