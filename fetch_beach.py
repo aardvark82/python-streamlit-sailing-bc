@@ -9,10 +9,21 @@ from datetime import datetime
 from timeago import format as timeago_format
 
 
-@st.cache_data(ttl=18800)
+@st.cache_data(ttl=3600)  # Cap at 1 fetch / hour — VCH is rate-sensitive
 def fetch_water_quality_for_url(_draw, url, title):
     try:
-        response = requests.get(url, timeout=30)
+        # VCH blocks the default python-requests User-Agent with 403.
+        # Send a browser-like UA + Accept headers to match what browsers do.
+        headers = {
+            'User-Agent': (
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                'AppleWebKit/537.36 (KHTML, like Gecko) '
+                'Chrome/120.0.0.0 Safari/537.36'
+            ),
+            'Accept': 'application/pdf,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+        }
+        response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
 
         ecoli_sample1 = None
