@@ -481,8 +481,49 @@ def _get_howe_sound_forecast_rows():
         return []
 
 
+def _temp_badge(temp_c):
+    """Badge for outside temperature (comfort in a 14ft RIB)."""
+    if temp_c is None:
+        return None
+    if temp_c < 5:
+        return {'text': f'Cold {temp_c:.0f}°C', 'color': 'red'}
+    if temp_c < 10:
+        return {'text': f'Chilly {temp_c:.0f}°C', 'color': 'orange'}
+    return {'text': f'OK {temp_c:.0f}°C', 'color': 'green'}
+
+
+def _wind_badge(kts):
+    """Badge for wind based on WIND_GO / WIND_CAUTION thresholds."""
+    if kts is None:
+        return None
+    status = _status(kts, WIND_GO, WIND_CAUTION)
+    return {'text': f'{kts:.0f}kts', 'color': _BADGE[status]}
+
+
+def _precip_badge(mm):
+    """Badge for precipitation based on PRECIP_GO / PRECIP_CAUTION thresholds."""
+    if mm is None:
+        return None
+    status = _status(mm, PRECIP_GO, PRECIP_CAUTION)
+    return {'text': f'{mm:.1f}mm', 'color': _BADGE[status]}
+
+
+def _tide_badge(tide_h):
+    """Badge for tide against TIDE_NOGO / TIDE_CAUTION (higher is better)."""
+    if tide_h is None:
+        return None
+    status = _status(tide_h, TIDE_NOGO, TIDE_CAUTION, higher_is_worse=False)
+    return {'text': f'{tide_h:.2f}m', 'color': _BADGE[status]}
+
+
+def _render_badge(col, badge):
+    if badge:
+        col.badge(badge['text'], color=badge['color'])
+
+
 def _draw_snapshot(draw, weather):
-    """Draw the quick-glance metrics row at the top of Go/No-Go."""
+    """Draw the quick-glance metrics row at the top of Go/No-Go,
+    with a threshold-based badge under each metric."""
 
     # Row 1: Temp, Rain 3h, Tide
     col1, col2, col3 = draw.columns(3)
@@ -490,7 +531,9 @@ def _draw_snapshot(draw, weather):
     # Outside temperature
     if weather:
         col1.metric("🌡️ Temperature", f"{weather.temperature:.0f}°C")
+        _render_badge(col1, _temp_badge(weather.temperature))
         col2.metric("🌧️ Rain (3h)", f"{weather.next_3_hours_precipitation:.1f}mm")
+        _render_badge(col2, _precip_badge(weather.next_3_hours_precipitation))
     else:
         col1.metric("🌡️ Temperature", "N/A")
         col2.metric("🌧️ Rain (3h)", "N/A")
@@ -500,6 +543,7 @@ def _draw_snapshot(draw, weather):
         tide_h, tide_dir = _get_current_tide_height()
         if tide_h is not None:
             col3.metric("🌊 Tide", f"{tide_h:.1f}m", delta=tide_dir, delta_color="off")
+            _render_badge(col3, _tide_badge(tide_h))
         else:
             col3.metric("🌊 Tide", "N/A")
     except Exception:
@@ -513,12 +557,14 @@ def _draw_snapshot(draw, weather):
         pam_wind, _ = _fetch_buoy_wind_wave('WAS')
         if pam_wind is not None:
             col1.metric("💨 Pam Rocks Now", f"{pam_wind}kts")
+            _render_badge(col1, _wind_badge(pam_wind))
         else:
             col1.metric("💨 Pam Rocks Now", "N/A")
     except Exception:
         col1.metric("💨 Pam Rocks Now", "N/A")
 
     # Howe Sound marine forecast — current period + next period
+    # Use the max_wind_speed (gust) for the badge — worst case drives the decision
     try:
         rows = _get_howe_sound_forecast_rows()
         if rows:
@@ -526,12 +572,14 @@ def _draw_snapshot(draw, weather):
             speed = f"{r['wind_speed']:.0f}" if r.get('wind_speed') is not None else "?"
             gust = f"{r['max_wind_speed']:.0f}" if r.get('max_wind_speed') is not None else "?"
             col2.metric(f"💨 Howe Sound ({r['time']})", f"{speed}-{gust}kts")
+            _render_badge(col2, _wind_badge(r.get('max_wind_speed')))
 
             if len(rows) > 1:
                 r2 = rows[1]
                 speed2 = f"{r2['wind_speed']:.0f}" if r2.get('wind_speed') is not None else "?"
                 gust2 = f"{r2['max_wind_speed']:.0f}" if r2.get('max_wind_speed') is not None else "?"
                 col3.metric(f"💨 Next ({r2['time']})", f"{speed2}-{gust2}kts")
+                _render_badge(col3, _wind_badge(r2.get('max_wind_speed')))
             else:
                 col3.metric("💨 Next", "N/A")
         else:
