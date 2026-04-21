@@ -251,6 +251,34 @@ def openAIFetchTidesForURL(url):
 
 
 @st.cache_data(ttl=14400)
+def fetch_tide_extremes_selenium():
+    """Fetch tide extremes via Selenium and return list of dicts with Height/Time/type.
+    Cached for 4 hours since tide predictions are precomputed and don't change often.
+    Returns None on failure."""
+    try:
+        csv_text = seleniumGetTidesFromURL('https://www.tides.gc.ca/en/stations/07795')
+        if not csv_text:
+            return None
+
+        # Same subsampling as display_point_atkinson_tides to keep extrema detection tractable
+        csv_lines = csv_text.splitlines()
+        csv_subsampled = '\n'.join(csv_lines[::20])
+        csv_lines2 = csv_subsampled.splitlines()
+        halfway_point = len(csv_lines2) // 3
+        csv_half_subsampled = '\n'.join(csv_lines2[:halfway_point])
+
+        # processCSVResponseToJSONSelenium requires a container for error reporting.
+        # Use a silent no-op container so gonogo callers don't get unexpected UI output.
+        class _Silent:
+            def error(self, *a, **kw):
+                pass
+        return processCSVResponseToJSONSelenium(_Silent(), csv_half_subsampled)
+    except Exception as e:
+        print(f"fetch_tide_extremes_selenium error: {e}")
+        return None
+
+
+@st.cache_data(ttl=14400)
 def stormglassFetchTidesPointAtkinson():
     """Fetch tide extremes from Stormglass API for Point Atkinson."""
     try:

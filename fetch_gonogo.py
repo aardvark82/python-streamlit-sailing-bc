@@ -16,7 +16,13 @@ from fetch_forecast import (
     openAIFetchForecastForURL,
     clean_wind_speed,
 )
-from fetch_tides import beautifulSoupFetchTidesForURL, process_tide_data, parse_tide_datetime, extract_meters
+from fetch_tides import (
+    beautifulSoupFetchTidesForURL,
+    fetch_tide_extremes_selenium,
+    process_tide_data,
+    parse_tide_datetime,
+    extract_meters,
+)
 
 # --- Thresholds ---
 WIND_GO = 10        # knots — ideal
@@ -87,12 +93,35 @@ def _fetch_buoy_wind_wave(buoy_id='46304'):
 def _get_tide_data():
     """Fetch tide extremes and build interpolation arrays.
     Returns (extremes_df, x_timestamps, y_heights) or (None, None, None).
-    extremes_df has columns: datetime, Height, type (high/low)."""
+    extremes_df has columns: datetime, Height, type (high/low).
+
+    Tries the Selenium-based CSV source first (same pipeline as the Tides page),
+    falls back to the BeautifulSoup scraper if Selenium is unavailable."""
+    data = None
+
+    # Preferred: Selenium-fetched CSV — matches what the Tides page uses
     try:
-        data = beautifulSoupFetchTidesForURL("https://www.tides.gc.ca/en/stations/07795")
-        if not data or not data.get('data'):
+        extremes_list = fetch_tide_extremes_selenium()
+        if extremes_list:
+            data = {'data': [
+                {'height': e['Height'], 'time': e['Time (PDT)& Date'], 'type': e['type']}
+                for e in extremes_list
+            ]}
+    except Exception as e:
+        print(f"Go/NoGo Selenium tide source failed: {e}")
+
+    # Fallback: BeautifulSoup scraper
+    if not data or not data.get('data'):
+        try:
+            data = beautifulSoupFetchTidesForURL("https://www.tides.gc.ca/en/stations/07795")
+        except Exception as e:
+            print(f"Go/NoGo BeautifulSoup tide source failed: {e}")
             return None, None, None
 
+    if not data or not data.get('data'):
+        return None, None, None
+
+    try:
         tide_df = process_tide_data(data)
         tide_df = tide_df.rename(columns={'Time (PDT)& Date': 'datetime'})
         tide_df['datetime'] = tide_df['datetime'].apply(parse_tide_datetime)
