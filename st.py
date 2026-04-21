@@ -12,14 +12,19 @@ from bs4 import BeautifulSoup
 import pytz
 import numpy as np
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import quote
 
 from streamlit_autorefresh import st_autorefresh
 
 from utils import cached_fetch_url, cached_fetch_url_live, prettydate, displayStreamlitDateTime
-from fetch_forecast import display_marine_forecast_for_url
-from fetch_forecast import display_summary_marine_forecast_for_url
+from fetch_forecast import (
+    display_marine_forecast_for_url,
+    display_summary_marine_forecast_for_url,
+    openAIFetchForecastForURL,
+    standardize_wind_direction,
+    clean_wind_speed,
+)
 from fetch_beach import display_beach_quality_for_sandy_cove
 from fetch_weather import display_weather_info, display_clear_skies_html
 from fetch_tides import display_point_atkinson_tides
@@ -117,28 +122,32 @@ def page_jericho():
 
 def page_halibut():
     try:
-        refreshBuoy('46146', 'Halibut Bank', container=st)
+        refreshBuoy('46146', 'Halibut Bank', container=st,
+                    forecast_url=URL_FORECAST_SOUTH_NANAIMO, forecast_title='South of Nanaimo')
     except Exception as e:
         st.error(f"Failed to load Halibut Bank buoy: {e}")
 
 
 def page_english_bay():
     try:
-        refreshBuoy('46304', 'English Bay', container=st)
+        refreshBuoy('46304', 'English Bay', container=st,
+                    forecast_url=URL_FORECAST_SOUTH_NANAIMO, forecast_title='South of Nanaimo')
     except Exception as e:
         st.error(f"Failed to load English Bay buoy: {e}")
 
 
 def page_atkinson():
     try:
-        refreshBuoy('WSB', 'Point Atkinson', container=st)
+        refreshBuoy('WSB', 'Point Atkinson', container=st,
+                    forecast_url=URL_FORECAST_SOUTH_NANAIMO, forecast_title='South of Nanaimo')
     except Exception as e:
         st.error(f"Failed to load Point Atkinson buoy: {e}")
 
 
 def page_pamrocks():
     try:
-        refreshBuoy('WAS', 'Pam Rocks', container=st)
+        refreshBuoy('WAS', 'Pam Rocks', container=st,
+                    forecast_url=URL_FORECAST_HOWESOUND, forecast_title='Howe Sound')
     except Exception as e:
         st.error(f"Failed to load Pam Rocks buoy: {e}")
 
@@ -327,122 +336,309 @@ def cached_kv_list(_container, buoy_id, api_token, account_id, namespace_id):
     return None
 
 
-def plot_historical_buoy_data(container, buoy_id):
-    """Fetch and plot historical wind and wave data from Cloudflare KV."""
+# ──────────────────────────────────────────────
+# Merged wind chart: past 3 days (buoy) + next 3 days (forecast)
+# ──────────────────────────────────────────────
+
+_COMPASS_DEGREES = {
+    'N': 0, 'NNE': 22.5, 'NE': 45, 'ENE': 67.5,
+    'E': 90, 'ESE': 112.5, 'SE': 135, 'SSE': 157.5,
+    'S': 180, 'SSW': 202.5, 'SW': 225, 'WSW': 247.5,
+    'W': 270, 'WNW': 292.5, 'NW': 315, 'NNW': 337.5,
+}
+
+
+def _fetch_buoy_wind_history_df(container, buoy_id, days_back=3):
+    """Fetch buoy wind history from Cloudflare KV.
+    Returns DataFrame with columns [timestamp, wind_speed, direction, wave_height] or None."""
     try:
         account_id = st.secrets["cloudflare_account_id"]
         namespace_id_raw = st.secrets["cloudflare_namespace_id"]
         api_token = st.secrets["cloudflare_api_token"]
     except KeyError:
-        container.warning("Cloudflare secrets not configured")
-        return
+        if container:
+            container.warning("Cloudflare secrets not configured")
+        return None
 
     namespace_id = get_resolved_namespace_id(account_id, api_token, namespace_id_raw)
-
     base_url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}"
     headers = {"Authorization": f"Bearer {api_token}"}
 
     try:
         response = cached_kv_list(container, buoy_id, api_token, account_id, namespace_id)
-        if response is None:
-            container.error("Could not fetch cached list")
-            return
+        if response is None or response.status_code != 200:
+            return None
+        data = response.json()
+        if not data.get("success", False):
+            return None
 
-        if response.status_code != 200:
-            container.error(f"Cloudflare API error: {response.status_code} - {response.text}")
-            return
-
-        try:
-            data = response.json()
-            if not data.get("success", False):
-                container.error(f"Cloudflare API error: {data.get('errors')}")
-                return
-
-            all_keys = [item["name"] for item in data.get("result", [])]
-            three_days_ago = datetime.now(pytz.timezone('America/Vancouver')) - pd.Timedelta(days=3)
-            data_points = []
-        except requests.exceptions.JSONDecodeError as e:
-            container.error(f"Failed to parse Cloudflare response: {str(e)}")
-            container.code(response.text[:500])
-            return
+        all_keys = [item["name"] for item in data.get("result", [])]
+        cutoff = datetime.now(pytz.timezone('America/Vancouver')) - pd.Timedelta(days=days_back)
+        data_points = []
 
         for key in all_keys:
-            if key.startswith(f"{buoy_id}_wind_"):
-                timestamp_str = key.replace(f"{buoy_id}_wind_", "")
-                try:
-                    timestamp = datetime.fromisoformat(timestamp_str)
-                    if timestamp >= three_days_ago:
-                        wind_value, direction, wave_height = get_buoy_observation_from_cf(
-                            base_url, headers, buoy_id, timestamp_str)
-                        data_points.append({
-                            'timestamp': timestamp,
-                            'wind_speed': wind_value,
-                            'direction': direction,
-                            'wave_height': wave_height
-                        })
-                except Exception as e:
-                    print(f"Error processing key {key}: {e}")
+            if not key.startswith(f"{buoy_id}_wind_"):
+                continue
+            timestamp_str = key.replace(f"{buoy_id}_wind_", "")
+            try:
+                timestamp = datetime.fromisoformat(timestamp_str)
+                if timestamp < cutoff:
+                    continue
+                wind_value, direction, wave_height = get_buoy_observation_from_cf(
+                    base_url, headers, buoy_id, timestamp_str)
+                data_points.append({
+                    'timestamp': timestamp,
+                    'wind_speed': wind_value,
+                    'direction': direction,
+                    'wave_height': wave_height,
+                })
+            except Exception as e:
+                print(f"Error processing key {key}: {e}")
 
-        if data_points:
-            df = pd.DataFrame(data_points).sort_values('timestamp')
-
-            min_wind = df['wind_speed'].min()
-            max_wind = df['wind_speed'].max()
-            container.info(f"Min wind speed: {min_wind} knots, Max wind speed: {max_wind} knots")
-
-            direction_map = {
-                'N': 0, 'NNE': 22.5, 'NE': 45, 'ENE': 67.5,
-                'E': 90, 'ESE': 112.5, 'SE': 135, 'SSE': 157.5,
-                'S': 180, 'SSW': 202.5, 'SW': 225, 'WSW': 247.5,
-                'W': 270, 'WNW': 292.5, 'NW': 315, 'NNW': 337.5
-            }
-            df['degree'] = df['direction'].map(direction_map).fillna(0)
-            df['rotation'] = (180 - df['degree']) % 360
-
-            import plotly.express as px
-
-            fig_wind = px.scatter(df,
-                                  x='timestamp', y='wind_speed',
-                                  title=f'Wind Speed and Direction Over Last 3 Days - Buoy {buoy_id}',
-                                  labels={'wind_speed': 'Wind Speed (knots)', 'timestamp': 'Time'})
-
-            now_van = datetime.now(pytz.timezone('America/Vancouver'))
-            fig_wind.update_xaxes(range=[three_days_ago, now_van])
-            fig_wind.update_yaxes(range=[0, 40])
-            fig_wind.add_hline(y=15, line_dash="dot", line_color="red")
-
-            fig_wind.update_traces(
-                marker=dict(
-                    symbol='arrow-up', size=14,
-                    angle=df['rotation'],
-                    line=dict(width=1, color='DarkSlateGrey')
-                ),
-                hovertemplate="<br>".join([
-                    "Time: %{x}", "Speed: %{y:.1f} knots", "Direction: %{customdata}"
-                ]),
-                customdata=df['direction']
-            )
-            container.plotly_chart(fig_wind, width='stretch')
-
-            df_waves = df.dropna(subset=['wave_height']).copy()
-            if not df_waves.empty:
-                df_waves['wave_height_cm'] = df_waves['wave_height'] * 100
-                fig_wave = px.line(df_waves,
-                                   x='timestamp', y='wave_height_cm',
-                                   title=f'Wave Height Over Last 3 Days - Buoy {buoy_id}',
-                                   labels={'wave_height_cm': 'Wave Height (cm)', 'timestamp': 'Time'})
-                fig_wave.update_xaxes(range=[three_days_ago, now_van])
-                fig_wave.update_yaxes(range=[0, 200])
-                fig_wave.add_hline(y=33, line_dash="dot", line_color="green")
-                fig_wave.add_hline(y=75, line_dash="dot", line_color="orange")
-                fig_wave.add_hline(y=100, line_dash="dot", line_color="red")
-                container.plotly_chart(fig_wave, width='stretch')
-        else:
-            container.warning(f"No data available for buoy {buoy_id} in the selected period")
-
+        if not data_points:
+            return None
+        return pd.DataFrame(data_points).sort_values('timestamp').reset_index(drop=True)
     except Exception as e:
         print(f"Error fetching historical data: {e}")
-        container.error("Could not load historical data")
+        return None
+
+
+def _parse_forecast_timestamps(time_labels, now_van):
+    """Convert forecast text labels (e.g. 'Monday afternoon', 'tonight', 'overnight')
+    into Vancouver-local datetimes. First row anchors to now. Unparseable labels step
+    forward 8 hours from the previous timestamp. Output is always monotonically increasing."""
+    weekday_map = {
+        'mon': 0, 'monday': 0,
+        'tue': 1, 'tuesday': 1, 'tues': 1,
+        'wed': 2, 'wednesday': 2,
+        'thu': 3, 'thursday': 3, 'thurs': 3,
+        'fri': 4, 'friday': 4,
+        'sat': 5, 'saturday': 5,
+        'sun': 6, 'sunday': 6,
+    }
+    # Period → local hour-of-day
+    period_hours = [
+        ('early morning', 5),
+        ('late tonight', 23),
+        ('overnight', 2),     # special-cased: rolls to next day
+        ('morning', 8),
+        ('afternoon', 14),
+        ('evening', 20),
+        ('tonight', 20),
+        ('night', 22),
+    ]
+
+    vancouver_tz = pytz.timezone('America/Vancouver')
+    timestamps = []
+    last_dt = None
+
+    for i, raw in enumerate(time_labels):
+        label = str(raw).strip().lower() if raw is not None else ''
+        if i == 0:
+            dt = now_van
+        else:
+            target_date = None
+            for key, day_num in weekday_map.items():
+                if key in label:
+                    days_ahead = (day_num - now_van.weekday()) % 7
+                    target_date = (now_van + timedelta(days=days_ahead)).date()
+                    break
+            if target_date is None:
+                if 'tomorrow' in label:
+                    target_date = (now_van + timedelta(days=1)).date()
+                elif 'today' in label or 'tonight' in label:
+                    target_date = now_van.date()
+
+            hour = None
+            rolls_next_day = False
+            for period, h in period_hours:
+                if period in label:
+                    hour = h
+                    if period == 'overnight':
+                        rolls_next_day = True
+                    break
+
+            if target_date is not None and hour is not None:
+                if rolls_next_day:
+                    target_date = target_date + timedelta(days=1)
+                dt = vancouver_tz.localize(datetime(
+                    target_date.year, target_date.month, target_date.day, hour, 0, 0))
+            else:
+                dt = (last_dt or now_van) + timedelta(hours=8)
+
+        # Strict monotonic — forecast rows must march forward
+        if last_dt is not None and dt <= last_dt:
+            dt = last_dt + timedelta(hours=6)
+
+        timestamps.append(dt)
+        last_dt = dt
+
+    return timestamps
+
+
+def _fetch_forecast_wind_df(url):
+    """Fetch GPT-parsed marine forecast and attach real timestamps.
+    Returns DataFrame [timestamp, time_label, wind speed, max wind speed, wind direction]
+    or None."""
+    if not url:
+        return None
+    try:
+        chatgpt_forecast = openAIFetchForecastForURL(url=url)
+        if not chatgpt_forecast:
+            return None
+        text = chatgpt_forecast.replace('```csv', '').replace('```', '')
+        df = pd.read_csv(io.StringIO(text), sep=',', on_bad_lines='skip')
+        df = df.dropna(how='all').reset_index(drop=True)
+        df.columns = df.columns.str.strip().str.lower()
+
+        if 'wind_direction' in df.columns:
+            df['wind direction'] = df['wind_direction'].astype(str).str.lower().apply(standardize_wind_direction)
+        elif 'wind direction' in df.columns:
+            df['wind direction'] = df['wind direction'].astype(str).str.lower().apply(standardize_wind_direction)
+        else:
+            df['wind direction'] = None
+
+        if 'wind speed' in df.columns:
+            df['wind speed'] = df['wind speed'].apply(clean_wind_speed)
+        else:
+            df['wind speed'] = 0
+
+        if 'max wind speed' in df.columns:
+            df['max wind speed'] = df['max wind speed'].apply(clean_wind_speed)
+        else:
+            df['max wind speed'] = df['wind speed']
+
+        if 'time' not in df.columns:
+            return None
+        df['time_label'] = df['time'].astype(str)
+
+        now_van = datetime.now(pytz.timezone('America/Vancouver'))
+        df['timestamp'] = _parse_forecast_timestamps(df['time_label'].tolist(), now_van)
+        return df
+    except Exception as e:
+        print(f"Error fetching forecast wind: {e}")
+        return None
+
+
+def plot_merged_wind_chart(container, buoy_id, forecast_url, forecast_title):
+    """Plot past 3 days of buoy wind + next 3 days of forecast wind on one chart.
+    Returns the buoy past-history DataFrame (for reuse by the wave chart) or None."""
+    import plotly.graph_objects as go
+
+    past_df = _fetch_buoy_wind_history_df(container, buoy_id)
+    forecast_df = _fetch_forecast_wind_df(forecast_url)
+
+    if (past_df is None or past_df.empty) and (forecast_df is None or forecast_df.empty):
+        container.warning(f"No wind data available for buoy {buoy_id}")
+        return past_df
+
+    now_van = datetime.now(pytz.timezone('America/Vancouver'))
+    x_min = now_van - timedelta(days=3)
+    x_max = now_van + timedelta(days=3)
+
+    fig = go.Figure()
+
+    # Past: buoy observations as arrow markers
+    if past_df is not None and not past_df.empty:
+        df = past_df.copy()
+        df['degree'] = df['direction'].map(_COMPASS_DEGREES).fillna(0)
+        df['rotation'] = (180 - df['degree']) % 360
+        fig.add_trace(go.Scatter(
+            x=df['timestamp'], y=df['wind_speed'],
+            mode='markers', name='Observed (Buoy)',
+            marker=dict(
+                symbol='arrow-up', size=14, angle=df['rotation'],
+                color='#1f77b4', line=dict(width=1, color='DarkSlateGrey'),
+            ),
+            customdata=df['direction'],
+            hovertemplate="<b>Observed</b><br>%{x}<br>Speed: %{y:.1f} kts<br>Dir: %{customdata}<extra></extra>",
+        ))
+
+    # Future: forecast line + gust line + direction arrows (where known)
+    if forecast_df is not None and not forecast_df.empty:
+        fdf = forecast_df.copy()
+
+        fig.add_trace(go.Scatter(
+            x=fdf['timestamp'], y=fdf['wind speed'],
+            mode='lines', name='Forecast',
+            line=dict(color='#ff7f0e', width=3, dash='dot'),
+            customdata=fdf['time_label'],
+            hovertemplate="<b>Forecast</b><br>%{customdata}<br>Speed: %{y:.0f} kts<extra></extra>",
+        ))
+        fig.add_trace(go.Scatter(
+            x=fdf['timestamp'], y=fdf['max wind speed'],
+            mode='lines', name='Forecast Gust',
+            line=dict(color='#ff7f0e', width=2, dash='dash'),
+            opacity=0.5,
+            customdata=fdf['time_label'],
+            hovertemplate="<b>Gust</b><br>%{customdata}<br>Speed: %{y:.0f} kts<extra></extra>",
+        ))
+
+        dir_df = fdf[fdf['wind direction'].isin(_COMPASS_DEGREES.keys())].copy()
+        if not dir_df.empty:
+            dir_df['degree'] = dir_df['wind direction'].map(_COMPASS_DEGREES)
+            dir_df['rotation'] = (180 - dir_df['degree']) % 360
+            fig.add_trace(go.Scatter(
+                x=dir_df['timestamp'], y=dir_df['wind speed'],
+                mode='markers', name='Forecast Direction',
+                marker=dict(
+                    symbol='arrow-up', size=14, angle=dir_df['rotation'],
+                    color='#ff7f0e', line=dict(width=1, color='DarkSlateGrey'),
+                ),
+                customdata=dir_df['wind direction'],
+                hovertemplate="<b>Forecast dir</b>: %{customdata}<extra></extra>",
+                showlegend=False,
+            ))
+
+    # Blue "Now" vertical line with time label at bottom (cross-platform hour format)
+    now_hour = now_van.hour % 12 or 12
+    now_label = f"Now · {now_van.strftime('%a')} {now_hour}:{now_van.strftime('%M %p')} PDT"
+    fig.add_vline(
+        x=now_van, line_width=2, line_color="blue",
+        annotation_text=now_label,
+        annotation_position="bottom",
+        annotation_font=dict(size=11, color="blue"),
+    )
+    fig.add_hline(y=15, line_dash="dot", line_color="red", opacity=0.4)
+
+    fig.update_layout(
+        title=f"Wind · Past 3 days + Forecast ({forecast_title}) — Buoy {buoy_id}",
+        xaxis_title="",
+        yaxis_title="Wind Speed (knots)",
+        yaxis=dict(range=[0, 40]),
+        xaxis=dict(range=[x_min, x_max]),
+        hovermode='closest',
+        legend=dict(orientation='h', y=-0.15),
+        margin=dict(l=40, r=20, t=50, b=60),
+    )
+
+    container.plotly_chart(fig, width='stretch')
+    return past_df
+
+
+def plot_wave_history_chart(container, past_df, buoy_id):
+    """Plot wave-height history from a past-buoy DataFrame (skips if no wave data)."""
+    if past_df is None or past_df.empty:
+        return
+    df_waves = past_df.dropna(subset=['wave_height']).copy()
+    if df_waves.empty:
+        return
+
+    import plotly.express as px
+    df_waves['wave_height_cm'] = df_waves['wave_height'] * 100
+    now_van = datetime.now(pytz.timezone('America/Vancouver'))
+    three_days_ago = now_van - timedelta(days=3)
+
+    fig_wave = px.line(df_waves,
+                       x='timestamp', y='wave_height_cm',
+                       title=f'Wave Height Over Last 3 Days - Buoy {buoy_id}',
+                       labels={'wave_height_cm': 'Wave Height (cm)', 'timestamp': 'Time'})
+    fig_wave.update_xaxes(range=[three_days_ago, now_van])
+    fig_wave.update_yaxes(range=[0, 200])
+    fig_wave.add_hline(y=33, line_dash="dot", line_color="green")
+    fig_wave.add_hline(y=75, line_dash="dot", line_color="orange")
+    fig_wave.add_hline(y=100, line_dash="dot", line_color="red")
+    container.plotly_chart(fig_wave, width='stretch')
 
 
 def record_buoy_data_history(buoy, container, wind_speed, direction, wave_height):
@@ -480,7 +676,8 @@ def record_buoy_data_history(buoy, container, wind_speed, direction, wave_height
     store_buoy_data_cached(base_url, headers, buoy, timestamp, wind_speed, direction, wave_height)
 
 
-def refreshBuoy(buoy='46146', title='Halibut Bank - 46146', container=None):
+def refreshBuoy(buoy='46146', title='Halibut Bank - 46146', container=None,
+                forecast_url=None, forecast_title=''):
     draw = container or st
     url = f'https://www.weather.gc.ca/marine/weatherConditions-currentConditions_e.html?mapID=02&siteID=14305&stationID={buoy}'
 
@@ -547,7 +744,8 @@ def refreshBuoy(buoy='46146', title='Halibut Bank - 46146', container=None):
     wave_val_for_record = highest_wave if data_wave_height != 'N/A' and waves else None
 
     record_buoy_data_history(buoy, container, wind_speed, direction, wave_val_for_record)
-    plot_historical_buoy_data(container, buoy)
+    past_df = plot_merged_wind_chart(container, buoy, forecast_url, forecast_title)
+    plot_wave_history_chart(container, past_df, buoy)
     with draw.expander("Map"):
         drawMapWithBuoy(container=st, buoy=buoy)
 
@@ -588,7 +786,7 @@ PAGE_LINKS = {
 
 pages = {
     "Conditions": [_pg_gonogo, _pg_dashboard],
-    "Live Data": [_pg_jericho, _pg_english_bay, _pg_atkinson, _pg_pamrocks, _pg_halibut],
+    "Live Data": [_pg_pamrocks, _pg_jericho, _pg_english_bay, _pg_atkinson, _pg_halibut],
     "Forecast & Tides": [_pg_forecast, _pg_tides, _pg_beach],
     "Regional Weather": [_pg_squamish, _pg_lionsbay],
     "Display": [_pg_kiosk],
