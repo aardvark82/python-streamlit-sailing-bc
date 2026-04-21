@@ -12,15 +12,39 @@ from utils import cached_fetch_url
 from wind_utils import create_arrow_html
 
 
-@st.cache_data(ttl=1800)
 def openAIFetchForecastForURL(url):
-    """Use GPT-4o to parse a marine forecast page into a CSV table of wind data."""
+    """Use GPT-4o to parse a marine forecast page into a CSV table of wind data.
+    The response depends on the time of day (evening vs not) so the cache key includes it."""
+    vancouver_tz = pytz.timezone('America/Vancouver')
+    now_pacific = datetime.now(vancouver_tz)
+
+    # Time-bucket for the cache key: crossing 7 PM / 9 PM / 11 PM must trigger a refetch
+    if now_pacific.hour >= 23:
+        bucket = 'overnight'
+    elif now_pacific.hour >= 21:
+        bucket = 'tonight'
+    elif now_pacific.hour >= 19:
+        bucket = 'evening'
+    else:
+        bucket = 'day'
+
+    return _openAIFetchForecastForURL_cached(url, bucket)
+
+
+@st.cache_data(ttl=1800)
+def _openAIFetchForecastForURL_cached(url, time_bucket):
+    """Cached implementation — keyed on (url, time_bucket) so crossings trigger refresh."""
     openai_api_key = st.secrets["OpenAI_key"]
     if openai_api_key is None:
         raise ValueError("OpenAI API key is not set in environment variables.")
 
     response = cached_fetch_url(url)
     response.raise_for_status()
+
+    vancouver_tz = pytz.timezone('America/Vancouver')
+    now_pacific = datetime.now(vancouver_tz)
+    now_str = now_pacific.strftime('%A %I:%M %p %Z')
+    is_evening = now_pacific.hour >= 19  # 7 PM Pacific
 
     chat_gpt_msg = (
         "Make it short and just the table. "
@@ -31,11 +55,18 @@ def openAIFetchForecastForURL(url):
         "- if it says 5 to 15 knots, wind speed is 5 and max wind speed is 15. "
         "- If it says light winds, use a value of 3. "
         "- Make sure the Max (can be called Gust or gusting in the forecast) wind speed if not mentioned "
-        "is the value of the wind speed, never less."
-        "Make it a CSV."
+        "is the value of the wind speed, never less. "
+        "Make it a CSV. "
         "The first few words describe the current conditions with a time of now and should be the 1st entry "
         "in the table. "
-        "Here's the forecast HTML:"
+        f"\n\nCurrent local time is {now_str}. "
+        "IMPORTANT time-aware rule for the FIRST row (current conditions): "
+        "If the forecast uses a transition phrase like 'winds X becoming Y this evening' "
+        "(or 'tonight' / 'overnight'), pick which phrase applies to right now: "
+        f"{'it IS evening now (>= 7 PM Pacific), so use the AFTER-transition value (e.g. Y / light / strong).' if is_evening else 'it is NOT evening yet (< 7 PM Pacific), so use the BEFORE-transition value (e.g. X / 5-15).'} "
+        "Apply the same logic for 'becoming ... tonight' (threshold 9 PM) and 'becoming ... overnight' (threshold 11 PM). "
+        "The 'time' column for this first row should still be labeled with the current period (e.g. 'now'). "
+        "\n\nHere's the forecast HTML:"
     )
     chat_gpt_msg = chat_gpt_msg + response.text
 
