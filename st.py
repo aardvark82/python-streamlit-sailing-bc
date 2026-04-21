@@ -244,7 +244,8 @@ def parseJerichoWindHistory(container=None):
     col1.metric(label="Wind Speed", value=last_row['Wind Speed'], delta=wind_trend, delta_color="inverse")
     col2.metric(label="Wind High", value=last_row['Wind Hi Speed'])
     col3.metric(label="Wind Direction", value=last_row['Wind Dir'])
-    col2.markdown(create_arrow_html(last_row['Wind Dir'], last_row['Wind Hi Speed']), unsafe_allow_html=True)
+    col3.markdown(create_arrow_html(last_row['Wind Dir'], last_row['Wind Hi Speed']),
+                  unsafe_allow_html=True)
 
     col1, col2, col3 = draw.columns(3)
     col1.metric(label="Bar", value=last_row['Bar'])
@@ -734,22 +735,31 @@ def refreshBuoy(buoy='46146', title='Halibut Bank - 46146', container=None,
     if highest_wave >= 1:
         draw.badge("Wave warning", color="orange")
 
+    # Split wind text ("NW 25 gust 30") into direction + highest speed for display
+    parts = data_wind.strip().split() if data_wind and isinstance(data_wind, str) else []
+    wind_direction = parts[0] if len(parts) > 0 else "N/A"
+    wind_numbers = re.findall(r'\d+', data_wind or '')
+    wind_speed_display = f"{max(int(n) for n in wind_numbers)} kts" if wind_numbers else "N/A"
+
     if data_wave_height == 'N/A':
-        draw.metric("Wind", data_wind)
+        col1, col2 = draw.columns(2)
+        col1.metric("Wind Speed", wind_speed_display)
+        col2.metric("Wind Direction", wind_direction)
+        col2.markdown(create_arrow_html(wind_direction, wind_speed_display),
+                      unsafe_allow_html=True)
     else:
-        col1, col2, col3 = draw.columns(3)
-        col1.metric("Wind", data_wind)
+        r1c1, r1c2, r1c3, r1c4 = draw.columns(4)
+        r1c1.metric("Wind Speed", wind_speed_display)
+        r1c2.metric("Wind Direction", wind_direction)
+        r1c2.markdown(create_arrow_html(wind_direction, wind_speed_display),
+                      unsafe_allow_html=True)
+        r1c3.metric("Wave Height", data_wave_height)
+        r1c4.metric("Air Temp", data_airtemp)
 
-        parts = data_wind.strip().split() if data_wind and isinstance(data_wind, str) else []
-        wind_direction = parts[0] if len(parts) > 0 else "N/A"
-        wind_speed_str = parts[1] if len(parts) > 1 else "0"
-
-        col1.markdown(create_arrow_html(wind_direction, wind_speed_str), unsafe_allow_html=True)
-        col2.metric("Wave Height", data_wave_height)
-        col3.metric("Air Temp", data_airtemp)
-        col1.metric("Water Temp", data_watertemp)
-        col2.metric("Wave Period", data_waveperiod)
-        col3.metric("Pressure", data_pressure)
+        r2c1, r2c2, r2c3 = draw.columns(3)
+        r2c1.metric("Water Temp", data_watertemp)
+        r2c2.metric("Wave Period", data_waveperiod)
+        r2c3.metric("Pressure", data_pressure)
 
     direction, wind_speed = parse_wind_data(data_wind)
     wave_val_for_record = highest_wave if data_wave_height != 'N/A' and waves else None
