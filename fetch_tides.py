@@ -503,22 +503,31 @@ def create_natural_tide_chart(tide_df, container=None):
     col1, col2, col3 = draw.columns(3)
 
     # Match the chart exactly by interpolating the smooth (cubic-spline) curve.
-    # The earlier `tide_interpolated` grid relied on .astype(np.int64) which can
-    # mis-handle tz-aware DatetimeIndex on some pandas versions, producing
-    # values shifted by hours from what the chart shows.
-    smooth_x_seconds = np.array(
-        [pd.Timestamp(t).timestamp() for t in smooth_tide_df['datetime']]
-    )
-    smooth_y_heights = np.asarray(smooth_tide_df['Height'].values, dtype=float)
-    current_ts = current_time.timestamp()
-    if smooth_x_seconds.size and smooth_x_seconds[0] <= current_ts <= smooth_x_seconds[-1]:
-        current_height = float(np.interp(current_ts, smooth_x_seconds, smooth_y_heights))
-    else:
-        # Outside curve range — clamp to nearest endpoint
-        current_height = float(
-            smooth_y_heights[0] if current_ts < smooth_x_seconds[0]
-            else smooth_y_heights[-1]
+    # Previously this used DatetimeIndex.astype(np.int64) // 10**9 which is
+    # fragile across pandas versions for tz-aware indexes.
+    try:
+        smooth_x_seconds = np.array(
+            [float(pd.Timestamp(t).timestamp()) for t in smooth_tide_df['datetime']],
+            dtype=float,
         )
+        smooth_y_heights = np.asarray(smooth_tide_df['Height'].values, dtype=float)
+        current_ts = float(current_time.timestamp())
+        if smooth_x_seconds.size and smooth_x_seconds[0] <= current_ts <= smooth_x_seconds[-1]:
+            current_height = float(np.interp(current_ts, smooth_x_seconds, smooth_y_heights))
+        elif smooth_x_seconds.size:
+            current_height = float(
+                smooth_y_heights[0] if current_ts < smooth_x_seconds[0]
+                else smooth_y_heights[-1]
+            )
+        else:
+            current_height = float('nan')
+    except Exception as e:
+        print(f"current_height computation failed: {e}; falling back to legacy interp")
+        current_height = float(np.interp(
+            current_time.timestamp(),
+            (tide_interpolated.index.astype(np.int64) // 10 ** 9).to_numpy().astype(float),
+            np.asarray(tide_interpolated['Height'].values, dtype=float),
+        ))
 
     # Determine rising or falling by checking the next tide point
     tide_direction = ""
@@ -695,37 +704,30 @@ def display_point_atkinson_tides(container=None, title="🌊Tides for Point Atki
     data = None
     draw.write(CANADA_GOVERNMENT_TIDE_POINT_ATKINSON)
 
-    # Selenium fetch can take 5–10 seconds — show progress so the page doesn't look frozen.
-    progress = draw.progress(0, text="Loading tide data…")
-
-    try:
+    # Selenium fetch can take 5–10 seconds — st.spinner is the simplest cross-version
+    # way to show a loading indicator (no progress arithmetic, no kwargs that may
+    # differ across Streamlit releases).
+    with st.spinner("Loading tide data — launching headless Chrome…"):
         if USE_BEAUTIFULSOUP:
             draw.badge("USE_BEAUTIFULSOUP")
-            progress.progress(20, text="Scraping tides.gc.ca…")
             data = beautifulSoupFetchTidesForURL("https://www.tides.gc.ca/en/stations/07795")
 
         if USE_SELENIUM:
-            progress.progress(15, text="Launching headless Chrome…")
             _csv = seleniumGetTidesFromURL('https://www.tides.gc.ca/en/stations/07795')
-            progress.progress(60, text="Downloaded predictions, parsing CSV…")
             csv_lines = _csv.splitlines()
             csv_subsampled = '\n'.join(csv_lines[::20])
             csv_lines2 = csv_subsampled.splitlines()
             halfway_point = len(csv_lines2) // 3
             csv_half_subsampled = '\n'.join(csv_lines2[:halfway_point])
-            progress.progress(80, text="Extracting tide extrema…")
             data = processCSVResponseToJSONSelenium(draw, csv_half_subsampled)
 
         if USE_CHAT_GPT:
             draw.badge("USE_CHAT_GPT")
-            progress.progress(40, text="Calling OpenAI to parse forecast…")
             response = openAIFetchTidesForURL("https://www.tides.gc.ca/en/stations/07795")
-            progress.progress(80, text="Parsing GPT response…")
             data = processResponseToJSONOpenAI(draw, response)
 
         if USE_STORMGLASS:
             draw.badge("USE_STORMGLASS")
-            progress.progress(40, text="Querying Stormglass API…")
             response = stormglassFetchTidesPointAtkinson()
             if 'errors' in response:
                 if 'key' in response['errors']:
@@ -735,18 +737,12 @@ def display_point_atkinson_tides(container=None, title="🌊Tides for Point Atki
             else:
                 data = processResponseToJSONStormglass(draw, response)
 
-        if data:
-            progress.progress(90, text="Building chart…")
+    if data:
+        with st.spinner("Building tide chart…"):
             tide_data = process_tide_data(data, draw, use_chat_gpt=USE_CHAT_GPT)
-            progress.progress(100, text="Done")
-            progress.empty()
             if not isinstance(data, type(None)):
                 create_natural_tide_chart(tide_data, draw)
             else:
                 draw.error("Unable to fetch tide data. Please try again later.")
-        else:
-            progress.empty()
-            draw.error("No data from fetch_tides.")
-    except Exception:
-        progress.empty()
-        raise
+    else:
+        draw.error("No data from fetch_tides.")

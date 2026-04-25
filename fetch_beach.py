@@ -5,8 +5,9 @@ import pandas as pd
 import pdfplumber
 import io
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from timeago import format as timeago_format
+import plotly.graph_objects as go
 
 
 @st.cache_data(ttl=3600)  # Cap at 1 fetch / hour — VCH is rate-sensitive
@@ -72,6 +73,168 @@ def _ecoli_color(value_str):
     return "green"
 
 
+def _ecoli_status(value_str):
+    """go / caution / nogo based on the latest E.coli reading."""
+    try:
+        val = int(str(value_str).replace("<", "").strip())
+    except (ValueError, TypeError):
+        return 'caution'
+    if val > 400:
+        return 'nogo'
+    if val > 200:
+        return 'caution'
+    return 'go'
+
+
+def _tide_status_for_beach(height, direction):
+    """Beach swim launch is risky when:
+       - tide < 3m AND falling (water retreating, mud flats)
+       - tide < 2m AND rising (still too shallow)
+       Otherwise the tide is fine."""
+    if height is None:
+        return 'caution'
+    if direction == 'falling' and height < 3.0:
+        return 'nogo'
+    if direction == 'rising' and height < 2.0:
+        return 'nogo'
+    return 'go'
+
+
+def _worst_status(*statuses):
+    order = {'go': 0, 'caution': 1, 'nogo': 2}
+    return max(statuses, key=lambda s: order.get(s, 0))
+
+
+def _build_beach_windows(ecoli_status_value, hours=24, step_hours=2):
+    """Build a list of 2-hour beach-condition slots across the next `hours` hours.
+    Returns list of dicts: {time_dt, day, time_label, tide_height, tide_dir, status}."""
+    # Imported lazily to avoid circular imports between fetch_beach <-> fetch_gonogo
+    from fetch_gonogo import _get_tide_data, _tide_at
+
+    _, x_ts, y_h = _get_tide_data()
+    vancouver_tz = pytz.timezone('America/Vancouver')
+    now = datetime.now(vancouver_tz)
+
+    # Anchor to the next even-numbered hour so labels read 8AM / 10AM / ... cleanly
+    start = now.replace(minute=0, second=0, microsecond=0)
+    if start.hour % step_hours:
+        start = start + timedelta(hours=step_hours - (start.hour % step_hours))
+
+    windows = []
+    for i in range(hours // step_hours):
+        slot = start + timedelta(hours=i * step_hours)
+        height = _tide_at(x_ts, y_h, slot) if x_ts is not None else None
+        direction = None
+        if height is not None and x_ts is not None:
+            future = _tide_at(x_ts, y_h, slot + timedelta(minutes=30))
+            if future is not None:
+                direction = 'rising' if future > height else 'falling'
+
+        tide_st = _tide_status_for_beach(height, direction)
+        status = _worst_status(ecoli_status_value, tide_st)
+
+        # Day label uses today / tomorrow / weekday for readability
+        if slot.date() == now.date():
+            day_label = 'Today'
+        elif slot.date() == (now + timedelta(days=1)).date():
+            day_label = 'Tomorrow'
+        else:
+            day_label = slot.strftime('%a')
+
+        hour12 = slot.hour % 12 or 12
+        ampm = 'AM' if slot.hour < 12 else 'PM'
+
+        windows.append({
+            'time_dt': slot,
+            'day': day_label,
+            'time_label': f'{hour12}{ampm}',
+            'tide_height': height,
+            'tide_dir': direction,
+            'status': status,
+        })
+    return windows
+
+
+_BEACH_NUMERIC = {'go': 1, 'caution': 0.5, 'nogo': 0}
+
+
+def display_beach_gonogo_table(draw, ecoli_status_value):
+    """Render a heatmap-style Go/No-Go grid for beach swimming over the next 24h
+    in 2-hour increments. Days on the y-axis, time slots on the x-axis."""
+    windows = _build_beach_windows(ecoli_status_value, hours=24, step_hours=2)
+    if not windows:
+        draw.warning("Could not build beach Go/No-Go table (tide data unavailable).")
+        return
+
+    # Group by day, preserve order
+    days = []
+    seen = set()
+    for w in windows:
+        if w['day'] not in seen:
+            days.append(w['day'])
+            seen.add(w['day'])
+    times = []
+    seen_t = set()
+    for w in windows:
+        if w['time_label'] not in seen_t:
+            times.append(w['time_label'])
+            seen_t.add(w['time_label'])
+
+    z = []
+    for day in days:
+        row = []
+        for time_label in times:
+            match = next((w for w in windows
+                          if w['day'] == day and w['time_label'] == time_label), None)
+            row.append(_BEACH_NUMERIC[match['status']] if match else None)
+        z.append(row)
+
+    colorscale = [
+        [0.00, '#e74c3c'], [0.25, '#e74c3c'],
+        [0.25, '#f39c12'], [0.75, '#f39c12'],
+        [0.75, '#2ecc71'], [1.00, '#2ecc71'],
+    ]
+
+    fig = go.Figure(data=go.Heatmap(
+        z=z, x=times, y=days,
+        colorscale=colorscale,
+        zmin=0, zmax=1,
+        showscale=False,
+        xgap=3, ygap=3,
+        hoverinfo='skip',
+    ))
+
+    # Annotate each cell with tide height + arrow
+    for w in windows:
+        if w['tide_height'] is None:
+            label = "—"
+        else:
+            arrow = ' ↑' if w['tide_dir'] == 'rising' else (' ↓' if w['tide_dir'] == 'falling' else '')
+            label = f"<b>{w['tide_height']:.1f}m</b>{arrow}"
+        fig.add_annotation(
+            x=w['time_label'], y=w['day'],
+            text=label, showarrow=False,
+            font=dict(color='white', size=12),
+        )
+
+    fig.update_layout(
+        height=170 + 50 * len(days),
+        margin=dict(l=80, r=20, t=10, b=20),
+        yaxis=dict(autorange='reversed'),
+        xaxis=dict(side='top'),
+        plot_bgcolor='white',
+    )
+    fig.update_traces(texttemplate=None)
+
+    draw.markdown("**Beach Go/No-Go — next 24h (2-hour increments)**")
+    draw.plotly_chart(fig, width='stretch')
+    draw.caption(
+        "Rules: water quality must be < 200 MPN. "
+        "Tide must be ≥ 3m if falling or ≥ 2m if rising — otherwise the water "
+        "retreats too far for an easy entry."
+    )
+
+
 def display_beach_quality_for_sandy_cove(draw=None, title=''):
     if draw is None:
         draw = st
@@ -112,3 +275,12 @@ def display_beach_quality_for_sandy_cove(draw=None, title=''):
 
     col2.metric("Station 2 (BWV-04-02)", ecoli_sample2)
     col2.badge(ecoli_sample2, color=_ecoli_color(ecoli_sample2))
+
+    # Worst-case water-quality status drives the table cells across the next 24h.
+    water_status = _worst_status(_ecoli_status(ecoli_sample1), _ecoli_status(ecoli_sample2))
+
+    draw.markdown("---")
+    try:
+        display_beach_gonogo_table(draw, water_status)
+    except Exception as e:
+        draw.warning(f"Beach Go/No-Go table unavailable: {e}")
