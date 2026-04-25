@@ -502,11 +502,23 @@ def create_natural_tide_chart(tide_df, container=None):
 
     col1, col2, col3 = draw.columns(3)
 
-    current_height = np.interp(
-        current_time.timestamp(),
-        tide_interpolated.index.astype(np.int64) // 10 ** 9,
-        tide_interpolated['Height']
+    # Match the chart exactly by interpolating the smooth (cubic-spline) curve.
+    # The earlier `tide_interpolated` grid relied on .astype(np.int64) which can
+    # mis-handle tz-aware DatetimeIndex on some pandas versions, producing
+    # values shifted by hours from what the chart shows.
+    smooth_x_seconds = np.array(
+        [pd.Timestamp(t).timestamp() for t in smooth_tide_df['datetime']]
     )
+    smooth_y_heights = np.asarray(smooth_tide_df['Height'].values, dtype=float)
+    current_ts = current_time.timestamp()
+    if smooth_x_seconds.size and smooth_x_seconds[0] <= current_ts <= smooth_x_seconds[-1]:
+        current_height = float(np.interp(current_ts, smooth_x_seconds, smooth_y_heights))
+    else:
+        # Outside curve range — clamp to nearest endpoint
+        current_height = float(
+            smooth_y_heights[0] if current_ts < smooth_x_seconds[0]
+            else smooth_y_heights[-1]
+        )
 
     # Determine rising or falling by checking the next tide point
     tide_direction = ""
