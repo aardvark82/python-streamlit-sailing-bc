@@ -118,15 +118,18 @@ def get_chromedriver_version() -> str:
 @st.cache_resource(show_spinner=False)
 def get_webdriver_options() -> Options:
     options = Options()
-    # Use new headless mode — significantly faster startup than the legacy --headless flag.
-    options.add_argument("--headless=new")
+    # Stick with the classic --headless flag for compatibility with older Chrome
+    # builds; --headless=new turned out to break some environments.
+    options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1280x800")
     options.add_argument('--ignore-certificate-errors')
 
-    # Trim down Chrome startup work: drop background features we don't need.
+    # Trim down Chrome startup work: drop a few background features we don't need.
+    # Kept conservative — anything that might affect downloads (images, popups,
+    # network features) is left at default.
     for flag in (
         "--disable-extensions",
         "--disable-background-networking",
@@ -141,9 +144,6 @@ def get_webdriver_options() -> Options:
         "--metrics-recording-only",
         "--no-first-run",
         "--mute-audio",
-        "--disable-features=Translate,OptimizationHints,MediaRouter,DialMediaRouteProvider",
-        "--disable-popup-blocking",
-        "--disable-prompt-on-repost",
     ):
         options.add_argument(flag)
 
@@ -156,8 +156,6 @@ def get_webdriver_options() -> Options:
         "download.prompt_for_download": False,
         "download.directory_upgrade": True,
         "safebrowsing.enabled": True,
-        # Block images to cut bandwidth on the tides.gc.ca page.
-        "profile.managed_default_content_settings.images": 2,
     })
     options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
 
@@ -171,7 +169,8 @@ def get_webdriver_service() -> Service:
 @st.cache_data(ttl=21600, show_spinner=False)
 def seleniumGetTidesFromURL(url):
     """Fetch tide CSV data from tides.gc.ca using Selenium headless Chrome.
-    Cached for 6 hours — tide predictions are precomputed and stable."""
+    Cached for 6 hours — tide predictions are precomputed and stable.
+    Raises on failure so a one-off error is not cached for 6 hours."""
     import time as time_module
 
     # Track existing CSVs so we can detect the new download deterministically
@@ -179,53 +178,50 @@ def seleniumGetTidesFromURL(url):
 
     options = get_webdriver_options()
     service = get_webdriver_service()
-    with webdriver.Chrome(options=options, service=service) as driver:
-        try:
-            url = "https://www.tides.gc.ca/en/stations/07795"
-            # Cap navigation time so a slow CDN can't hang the page indefinitely
-            driver.set_page_load_timeout(20)
-            driver.get(url)
+    driver = None
+    try:
+        driver = webdriver.Chrome(options=options, service=service)
+        url = "https://www.tides.gc.ca/en/stations/07795"
+        driver.set_page_load_timeout(25)
+        driver.get(url)
 
-            # Replace fixed sleep(1) with explicit wait — proceeds the moment the
-            # export controls render, often well under a second.
-            wait = WebDriverWait(driver, 10)
-            select_element = wait.until(
-                EC.presence_of_element_located((By.ID, "export-select"))
-            )
-            Select(select_element).select_by_value("Predictions")
+        wait = WebDriverWait(driver, 15)
+        select_element = wait.until(
+            EC.presence_of_element_located((By.ID, "export-select"))
+        )
+        Select(select_element).select_by_value("Predictions")
 
-            export_button = wait.until(
-                EC.element_to_be_clickable((By.ID, "export_button"))
-            )
-            export_button.click()
+        export_button = wait.until(
+            EC.element_to_be_clickable((By.ID, "export_button"))
+        )
+        export_button.click()
 
-            # Poll for the new CSV instead of sleeping a fixed 3 seconds.
-            csv_path = None
-            deadline = time_module.time() + 12
-            while time_module.time() < deadline:
-                current = set(glob_module.glob(os.path.join(download_dir, "*.csv")))
-                new_files = current - pre_existing
-                if new_files:
-                    candidate = max(new_files, key=os.path.getctime)
-                    # Make sure the file is fully written (size stable for 1 tick)
-                    s1 = os.path.getsize(candidate)
-                    time_module.sleep(0.15)
-                    if os.path.getsize(candidate) == s1:
-                        csv_path = candidate
-                        break
-                time_module.sleep(0.15)
+        # Poll for the new CSV instead of sleeping a fixed 3 seconds.
+        csv_path = None
+        deadline = time_module.time() + 15
+        while time_module.time() < deadline:
+            current = set(glob_module.glob(os.path.join(download_dir, "*.csv")))
+            new_files = current - pre_existing
+            if new_files:
+                candidate = max(new_files, key=os.path.getctime)
+                s1 = os.path.getsize(candidate)
+                time_module.sleep(0.2)
+                if os.path.getsize(candidate) == s1 and s1 > 0:
+                    csv_path = candidate
+                    break
+            time_module.sleep(0.2)
 
-            if csv_path is None:
-                raise Exception("No CSV file was downloaded within 12s")
+        if csv_path is None:
+            raise RuntimeError("Tides CSV did not download within 15s")
 
-            with open(csv_path, 'r') as file:
-                return file.read()
-        except Exception as e:
-            print(f"Selenium tide fetch error: {e}")
-            return None
-        finally:
-            if driver:
+        with open(csv_path, 'r') as f:
+            return f.read()
+    finally:
+        if driver is not None:
+            try:
                 driver.quit()
+            except Exception:
+                pass
 
 
 @st.cache_data(ttl=1800)
@@ -758,7 +754,28 @@ def display_point_atkinson_tides(container=None, title="🌊Tides for Point Atki
             data = beautifulSoupFetchTidesForURL("https://www.tides.gc.ca/en/stations/07795")
 
         if USE_SELENIUM:
-            _csv = seleniumGetTidesFromURL('https://www.tides.gc.ca/en/stations/07795')
+            try:
+                _csv = seleniumGetTidesFromURL('https://www.tides.gc.ca/en/stations/07795')
+            except Exception as e:
+                # Bust any stale None cached from earlier broken runs and surface a clear error.
+                try:
+                    seleniumGetTidesFromURL.clear()
+                except Exception:
+                    pass
+                draw.error(f"Tide fetch failed: {e}. Will retry on next refresh.")
+                _csv = None
+
+            if not _csv:
+                # Cache returned None from a previous failure — clear it so next refresh retries.
+                try:
+                    seleniumGetTidesFromURL.clear()
+                except Exception:
+                    pass
+                draw.warning(
+                    "Tide CSV is empty. The cache has been cleared — refresh the page to retry."
+                )
+                return
+
             csv_lines = _csv.splitlines()
             csv_subsampled = '\n'.join(csv_lines[::20])
             csv_lines2 = csv_subsampled.splitlines()
