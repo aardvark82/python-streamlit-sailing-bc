@@ -87,16 +87,15 @@ def _ecoli_status(value_str):
 
 
 def _tide_status_for_beach(height, direction):
-    """Sandy Cove beach is fully covered at high tide. The beach is usable when
-    the tide is low enough that sand is exposed:
-       - GO when falling AND tide < 3m (beach is appearing as water retreats)
-       - GO when rising  AND tide < 2m (beach still exposed, water hasn't covered it yet)
-       Otherwise the beach is underwater → NO-GO."""
+    """Sandy Cove rules:
+       - GO when falling AND tide > 3m
+       - GO when rising  AND tide > 2m
+       Otherwise NO-GO (beach is fully underwater at extreme high tide)."""
     if height is None:
         return 'caution'
-    if direction == 'falling' and height < 3.0:
+    if direction == 'falling' and height > 3.0:
         return 'go'
-    if direction == 'rising' and height < 2.0:
+    if direction == 'rising' and height > 2.0:
         return 'go'
     return 'nogo'
 
@@ -231,7 +230,7 @@ def display_beach_gonogo_table(draw, ecoli_status_value):
     draw.plotly_chart(fig, width='stretch')
     draw.caption(
         "Rules: water quality must be < 200 MPN, AND the beach must be exposed — "
-        "tide < 3m if falling, or < 2m if rising. At high tide Sandy Cove is "
+        "tide > 3m if falling, or > 2m if rising. At high tide Sandy Cove is "
         "fully underwater."
     )
 
