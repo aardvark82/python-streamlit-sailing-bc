@@ -683,40 +683,58 @@ def display_point_atkinson_tides(container=None, title="🌊Tides for Point Atki
     data = None
     draw.write(CANADA_GOVERNMENT_TIDE_POINT_ATKINSON)
 
-    if USE_BEAUTIFULSOUP:
-        draw.badge("USE_BEAUTIFULSOUP")
-        data = beautifulSoupFetchTidesForURL("https://www.tides.gc.ca/en/stations/07795")
+    # Selenium fetch can take 5–10 seconds — show progress so the page doesn't look frozen.
+    progress = draw.progress(0, text="Loading tide data…")
 
-    if USE_SELENIUM:
-        _csv = seleniumGetTidesFromURL('https://www.tides.gc.ca/en/stations/07795')
-        csv_lines = _csv.splitlines()
-        csv_subsampled = '\n'.join(csv_lines[::20])
-        csv_lines2 = csv_subsampled.splitlines()
-        halfway_point = len(csv_lines2) // 3
-        csv_half_subsampled = '\n'.join(csv_lines2[:halfway_point])
-        data = processCSVResponseToJSONSelenium(draw, csv_half_subsampled)
+    try:
+        if USE_BEAUTIFULSOUP:
+            draw.badge("USE_BEAUTIFULSOUP")
+            progress.progress(20, text="Scraping tides.gc.ca…")
+            data = beautifulSoupFetchTidesForURL("https://www.tides.gc.ca/en/stations/07795")
 
-    if USE_CHAT_GPT:
-        draw.badge("USE_CHAT_GPT")
-        response = openAIFetchTidesForURL("https://www.tides.gc.ca/en/stations/07795")
-        data = processResponseToJSONOpenAI(draw, response)
+        if USE_SELENIUM:
+            progress.progress(15, text="Launching headless Chrome…")
+            _csv = seleniumGetTidesFromURL('https://www.tides.gc.ca/en/stations/07795')
+            progress.progress(60, text="Downloaded predictions, parsing CSV…")
+            csv_lines = _csv.splitlines()
+            csv_subsampled = '\n'.join(csv_lines[::20])
+            csv_lines2 = csv_subsampled.splitlines()
+            halfway_point = len(csv_lines2) // 3
+            csv_half_subsampled = '\n'.join(csv_lines2[:halfway_point])
+            progress.progress(80, text="Extracting tide extrema…")
+            data = processCSVResponseToJSONSelenium(draw, csv_half_subsampled)
 
-    if USE_STORMGLASS:
-        draw.badge("USE_STORMGLASS")
-        response = stormglassFetchTidesPointAtkinson()
-        if 'errors' in response:
-            if 'key' in response['errors']:
-                error_msg = response['errors']['key']
-                if error_msg == 'API quota exceeded':
-                    draw.error("Stormglass API quota exceeded.")
+        if USE_CHAT_GPT:
+            draw.badge("USE_CHAT_GPT")
+            progress.progress(40, text="Calling OpenAI to parse forecast…")
+            response = openAIFetchTidesForURL("https://www.tides.gc.ca/en/stations/07795")
+            progress.progress(80, text="Parsing GPT response…")
+            data = processResponseToJSONOpenAI(draw, response)
+
+        if USE_STORMGLASS:
+            draw.badge("USE_STORMGLASS")
+            progress.progress(40, text="Querying Stormglass API…")
+            response = stormglassFetchTidesPointAtkinson()
+            if 'errors' in response:
+                if 'key' in response['errors']:
+                    error_msg = response['errors']['key']
+                    if error_msg == 'API quota exceeded':
+                        draw.error("Stormglass API quota exceeded.")
+            else:
+                data = processResponseToJSONStormglass(draw, response)
+
+        if data:
+            progress.progress(90, text="Building chart…")
+            tide_data = process_tide_data(data, draw, use_chat_gpt=USE_CHAT_GPT)
+            progress.progress(100, text="Done")
+            progress.empty()
+            if not isinstance(data, type(None)):
+                create_natural_tide_chart(tide_data, draw)
+            else:
+                draw.error("Unable to fetch tide data. Please try again later.")
         else:
-            data = processResponseToJSONStormglass(draw, response)
-
-    if data:
-        tide_data = process_tide_data(data, draw, use_chat_gpt=USE_CHAT_GPT)
-        if not isinstance(data, type(None)):
-            create_natural_tide_chart(tide_data, draw)
-        else:
-            draw.error("Unable to fetch tide data. Please try again later.")
-    else:
-        draw.error("No data from fetch_tides.")
+            progress.empty()
+            draw.error("No data from fetch_tides.")
+    except Exception:
+        progress.empty()
+        raise
