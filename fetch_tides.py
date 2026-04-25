@@ -118,23 +118,48 @@ def get_chromedriver_version() -> str:
 @st.cache_resource(show_spinner=False)
 def get_webdriver_options() -> Options:
     options = Options()
-    options.add_argument("--headless")
+    # Use new headless mode — significantly faster startup than the legacy --headless flag.
+    options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
-    options.add_argument("--disable-features=NetworkService")
-    options.add_argument("--window-size=1920x1080")
-    options.add_argument("--disable-features=VizDisplayCompositor")
+    options.add_argument("--window-size=1280x800")
     options.add_argument('--ignore-certificate-errors')
-    options.set_capability('goog:loggingPrefs', {'performance': 'ALL'})
+
+    # Trim down Chrome startup work: drop background features we don't need.
+    for flag in (
+        "--disable-extensions",
+        "--disable-background-networking",
+        "--disable-background-timer-throttling",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-breakpad",
+        "--disable-client-side-phishing-detection",
+        "--disable-component-extensions-with-background-pages",
+        "--disable-default-apps",
+        "--disable-renderer-backgrounding",
+        "--disable-sync",
+        "--metrics-recording-only",
+        "--no-first-run",
+        "--mute-audio",
+        "--disable-features=Translate,OptimizationHints,MediaRouter,DialMediaRouteProvider",
+        "--disable-popup-blocking",
+        "--disable-prompt-on-repost",
+    ):
+        options.add_argument(flag)
+
+    # Stop loading once the DOM is interactive — we only need the export button.
+    options.page_load_strategy = 'eager'
 
     os.makedirs(download_dir, exist_ok=True)
     options.add_experimental_option("prefs", {
         "download.default_directory": download_dir,
         "download.prompt_for_download": False,
         "download.directory_upgrade": True,
-        "safebrowsing.enabled": True
+        "safebrowsing.enabled": True,
+        # Block images to cut bandwidth on the tides.gc.ca page.
+        "profile.managed_default_content_settings.images": 2,
     })
+    options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
 
     return options
 
@@ -143,44 +168,64 @@ def get_webdriver_service() -> Service:
     return Service(executable_path=get_chromedriver_path())
 
 
+@st.cache_data(ttl=21600, show_spinner=False)
 def seleniumGetTidesFromURL(url):
-    """Fetch tide CSV data from tides.gc.ca using Selenium headless Chrome."""
+    """Fetch tide CSV data from tides.gc.ca using Selenium headless Chrome.
+    Cached for 6 hours — tide predictions are precomputed and stable."""
     import time as time_module
+
+    # Track existing CSVs so we can detect the new download deterministically
+    pre_existing = set(glob_module.glob(os.path.join(download_dir, "*.csv")))
 
     options = get_webdriver_options()
     service = get_webdriver_service()
     with webdriver.Chrome(options=options, service=service) as driver:
         try:
             url = "https://www.tides.gc.ca/en/stations/07795"
+            # Cap navigation time so a slow CDN can't hang the page indefinitely
+            driver.set_page_load_timeout(20)
             driver.get(url)
-            time_module.sleep(1)
 
-            select_element = driver.find_element(By.ID, "export-select")
-            select = Select(select_element)
-            select.select_by_value("Predictions")
+            # Replace fixed sleep(1) with explicit wait — proceeds the moment the
+            # export controls render, often well under a second.
+            wait = WebDriverWait(driver, 10)
+            select_element = wait.until(
+                EC.presence_of_element_located((By.ID, "export-select"))
+            )
+            Select(select_element).select_by_value("Predictions")
 
-            export_button = driver.find_element(By.ID, "export_button")
+            export_button = wait.until(
+                EC.element_to_be_clickable((By.ID, "export_button"))
+            )
             export_button.click()
-            time_module.sleep(3)
 
-            files = glob_module.glob(os.path.join(download_dir, "*.csv"))
-            if not files:
-                raise Exception("No CSV file was downloaded")
+            # Poll for the new CSV instead of sleeping a fixed 3 seconds.
+            csv_path = None
+            deadline = time_module.time() + 12
+            while time_module.time() < deadline:
+                current = set(glob_module.glob(os.path.join(download_dir, "*.csv")))
+                new_files = current - pre_existing
+                if new_files:
+                    candidate = max(new_files, key=os.path.getctime)
+                    # Make sure the file is fully written (size stable for 1 tick)
+                    s1 = os.path.getsize(candidate)
+                    time_module.sleep(0.15)
+                    if os.path.getsize(candidate) == s1:
+                        csv_path = candidate
+                        break
+                time_module.sleep(0.15)
 
-            latest_file = max(files, key=os.path.getctime)
-            with open(latest_file, 'r') as file:
-                csv_content = file.read()
+            if csv_path is None:
+                raise Exception("No CSV file was downloaded within 12s")
 
-            return csv_content
-
+            with open(csv_path, 'r') as file:
+                return file.read()
         except Exception as e:
-            print(f"Error: {e}")
-
+            print(f"Selenium tide fetch error: {e}")
+            return None
         finally:
             if driver:
                 driver.quit()
-
-    return None
 
 
 @st.cache_data(ttl=1800)

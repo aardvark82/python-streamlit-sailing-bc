@@ -613,11 +613,48 @@ def plot_merged_wind_chart(container, buoy_id, forecast_url, forecast_title):
     )
     fig.add_hline(y=15, line_dash="dot", line_color="red", opacity=0.4)
 
+    # Tide overlay (orange dotted line) on a secondary y-axis (0-5m, no label).
+    # Sampled hourly across the visible window so the curve is smooth without
+    # being expensive.
+    try:
+        from fetch_gonogo import _get_tide_data, _tide_at
+        _tide_extremes_df, tide_x_ts, tide_y_h = _get_tide_data()
+        if tide_x_ts is not None and tide_y_h is not None:
+            tide_x_dt = []
+            tide_y_m = []
+            cursor = x_min
+            step = timedelta(hours=1)
+            while cursor <= x_max:
+                h = _tide_at(tide_x_ts, tide_y_h, cursor)
+                if h is not None:
+                    tide_x_dt.append(pd.Timestamp(cursor))
+                    tide_y_m.append(h)
+                cursor += step
+            if tide_x_dt:
+                fig.add_trace(go.Scatter(
+                    x=tide_x_dt, y=tide_y_m,
+                    mode='lines', name='Tide (m)',
+                    line=dict(color='#ff7f0e', width=2, dash='dot'),
+                    yaxis='y2',
+                    hovertemplate="Tide: %{y:.2f}m<extra></extra>",
+                ))
+    except Exception as e:
+        print(f"Tide overlay skipped: {e}")
+
     fig.update_layout(
         title=f"Wind · Past 3 days + Forecast ({forecast_title}) — Buoy {buoy_id}",
         xaxis_title="",
         yaxis_title="Wind Speed (knots)",
         yaxis=dict(range=[0, 40]),
+        # Secondary axis for tide overlay — 0-5m, hidden label per user request.
+        yaxis2=dict(
+            range=[0, 5],
+            overlaying='y',
+            side='right',
+            showgrid=False,
+            showticklabels=False,
+            title=None,
+        ),
         xaxis=dict(range=[x_min, x_max]),
         hovermode='closest',
         legend=dict(orientation='h', y=-0.15),
