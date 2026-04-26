@@ -44,9 +44,10 @@ WHALE_FLEET = [
 # AISStream uses [[lat_sw, lon_sw], [lat_ne, lon_ne]]
 WHALE_BBOX = [[48.6, -124.4], [49.9, -122.7]]
 
-# How long to listen on each cache miss (seconds). Trade-off: longer catches
-# more vessels but blocks the UI longer.
-LISTEN_SECONDS = 8
+# How long to listen on each cache miss (seconds). ShipStaticData (which carries
+# the vessel name) is broadcast roughly every 6 minutes, so we need a longer
+# window to have a meaningful chance of catching it on first contact.
+LISTEN_SECONDS = 20
 
 
 def _normalize_name(name):
@@ -139,20 +140,57 @@ async def _collect_ais(api_key, listen_seconds):
     return list(by_mmsi.values())
 
 
-def _match_fleet(records):
-    """Filter raw vessel records down to those whose name matches our fleet."""
+def _match_fleet_record(r, fleet_lookup):
+    """Return the fleet entry for a single record (by current name) or None."""
+    if not r.get('name'):
+        return None
+    norm = _normalize_name(r['name'])
+    fleet = fleet_lookup.get(norm)
+    if fleet is not None:
+        return fleet
+    # Substring fallback (handles 'MV X' or 'X II' style minor variations)
+    for key, val in fleet_lookup.items():
+        if key and (key in norm or norm in key):
+            return val
+    return None
+
+
+def fetch_whale_positions():
+    """Listen briefly to AISStream, merge with persistent MMSI→name knowledge
+    in session_state, and return:
+      (matched_fleet, all_records_seen_in_window, learned_names_total, fetched_at)
+
+    NOT cached — caching turns out to mask the persistent-learning behaviour
+    we need across reruns. Repeated reruns within a few minutes will quickly
+    accumulate enough name knowledge to match boats reliably.
+    """
+    try:
+        api_key = st.secrets["aisstream-io_key"]
+    except KeyError:
+        return None, [], 0, None
+
+    # Persistent MMSI→name knowledge: once we hear a name for an MMSI we
+    # remember it for the rest of the session. New PositionReports for that
+    # MMSI then match the fleet even though no name arrives this window.
+    learned = st.session_state.setdefault('ais_mmsi_to_name', {})
+
+    records = asyncio.run(_collect_ais(api_key, LISTEN_SECONDS))
+
+    # Update the persistent name map with anything new we just heard
+    for r in records:
+        if r.get('name') and r.get('mmsi'):
+            learned[int(r['mmsi'])] = r['name']
+
+    # Build the final matched-fleet list using both fresh records and the
+    # learned name map (so a PositionReport with no name in this window can
+    # still be tied to our fleet if we've heard the name in a prior window).
     matched = []
     for r in records:
-        if not r.get('name'):
-            continue
-        norm = _normalize_name(r['name'])
-        # Try exact match first, then prefix match (some boats prefix MV/MS/etc)
-        fleet = _FLEET_LOOKUP.get(norm)
-        if fleet is None:
-            for key, val in _FLEET_LOOKUP.items():
-                if key and key in norm:
-                    fleet = val
-                    break
+        mmsi = r.get('mmsi')
+        # Inject persistent name if missing on this record
+        if mmsi and not r.get('name') and mmsi in learned:
+            r['name'] = learned[mmsi]
+        fleet = _match_fleet_record(r, _FLEET_LOOKUP)
         if fleet is None:
             continue
         matched.append({
@@ -161,20 +199,8 @@ def _match_fleet(records):
             'operator': fleet['operator'],
             'icon_color': fleet['icon_color'],
         })
-    return matched
 
-
-@st.cache_data(ttl=120, show_spinner=False)
-def fetch_whale_positions():
-    """Cached entry point — returns (matched_list, all_in_bbox_count, fetched_at)."""
-    try:
-        api_key = st.secrets["aisstream-io_key"]
-    except KeyError:
-        return None, 0, None
-
-    records = asyncio.run(_collect_ais(api_key, LISTEN_SECONDS))
-    matched = _match_fleet(records)
-    return matched, len(records), datetime.now(pytz.timezone('America/Vancouver'))
+    return matched, records, len(learned), datetime.now(pytz.timezone('America/Vancouver'))
 
 
 def _format_age(time_utc_str, now_van):
@@ -209,7 +235,7 @@ def display_whales_page(container=None):
     )
 
     with st.spinner(f"Listening for AIS broadcasts ({LISTEN_SECONDS}s)…"):
-        matched, total_in_bbox, fetched_at = fetch_whale_positions()
+        matched, all_records, learned_names_total, fetched_at = fetch_whale_positions()
 
     if matched is None:
         draw.error("AISStream.io key missing — set `aisstream-io_key` in Streamlit secrets.")
@@ -218,9 +244,50 @@ def display_whales_page(container=None):
     if fetched_at is not None:
         draw.caption(
             f"Last fetch: {fetched_at.strftime('%I:%M:%S %p')} · "
-            f"{total_in_bbox} vessels heard in bounding box · "
+            f"{len(all_records)} vessels heard this window · "
+            f"{learned_names_total} known MMSIs (cumulative this session) · "
             f"{len(matched)} matched whale-watching fleet"
         )
+
+    # ── Diagnostic expander: show every named vessel observed in the bbox so
+    # the user can spot whether a fleet boat is transmitting under a different
+    # exact name. (Triggered once we've heard at least one name.)
+    named_records = [
+        r for r in all_records
+        if r.get('name') and r.get('lat') is not None
+    ]
+    with draw.expander(
+        f"🔍 Vessels heard in bounding box ({len(named_records)} with name + position)"
+    ):
+        if named_records:
+            now_van = datetime.now(pytz.timezone('America/Vancouver'))
+            df_all = pd.DataFrame([
+                {
+                    'Name': r['name'],
+                    'MMSI': r.get('mmsi'),
+                    'Lat': round(r['lat'], 4) if r.get('lat') is not None else None,
+                    'Lon': round(r['lon'], 4) if r.get('lon') is not None else None,
+                    'Speed (kts)': round(r['sog'], 1) if r.get('sog') is not None else None,
+                    'Last seen': _format_age(r.get('time'), now_van),
+                }
+                for r in named_records
+            ])
+            try:
+                draw.dataframe(df_all)
+            except Exception as e:
+                draw.warning(f"All-vessels table failed: {e}")
+            draw.caption(
+                "If you spot a fleet boat under a slightly different name "
+                "(e.g. 'MV SALISH SEA DREAM'), tell me and I'll add it to "
+                "the matcher."
+            )
+        else:
+            draw.caption(
+                "No named vessels caught in this window. ShipStaticData "
+                "broadcasts are infrequent (~every 6 min); reload the page "
+                "in a minute or two — names will accumulate over multiple "
+                "windows."
+            )
 
     if not matched:
         draw.info(
