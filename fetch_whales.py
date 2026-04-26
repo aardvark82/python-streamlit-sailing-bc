@@ -225,81 +225,87 @@ def display_whales_page(container=None):
             "They may be in port, off duty, or out of AIS range. "
             "The page auto-refreshes every 5 minutes."
         )
-        # Fall through so we still render the empty fleet list
 
-    # ── Map ──
-    fig = go.Figure()
+    # ── Map (only when we have positions) ──
     if matched:
-        # Group by operator for legend tidiness
-        by_op = {}
-        for m in matched:
-            if m.get('lat') is None or m.get('lon') is None:
-                continue
-            by_op.setdefault(m['operator'], []).append(m)
+        try:
+            now_van = datetime.now(pytz.timezone('America/Vancouver'))
+            fig = go.Figure()
+            by_op = {}
+            for m in matched:
+                if m.get('lat') is None or m.get('lon') is None:
+                    continue
+                by_op.setdefault(m['operator'], []).append(m)
 
-        now_van = datetime.now(pytz.timezone('America/Vancouver'))
+            for operator, items in by_op.items():
+                color = items[0]['icon_color']
+                fig.add_trace(go.Scattermapbox(
+                    lat=[m['lat'] for m in items],
+                    lon=[m['lon'] for m in items],
+                    mode='markers+text',
+                    marker=dict(size=14, color=color),
+                    text=[m['fleet_name'] for m in items],
+                    textposition='top center',
+                    textfont=dict(size=11, color=color),
+                    name=operator,
+                    customdata=[
+                        [
+                            m['fleet_name'],
+                            operator,
+                            f"{m['sog']:.1f}" if m.get('sog') is not None else '?',
+                            f"{m['cog']:.0f}°" if m.get('cog') is not None else '?',
+                            _format_age(m.get('time'), now_van),
+                        ]
+                        for m in items
+                    ],
+                    hovertemplate=(
+                        "<b>%{customdata[0]}</b><br>"
+                        "%{customdata[1]}<br>"
+                        "Speed: %{customdata[2]} kts · Course: %{customdata[3]}<br>"
+                        "Last seen: %{customdata[4]}<extra></extra>"
+                    ),
+                ))
 
-        for operator, items in by_op.items():
-            color = items[0]['icon_color']
-            fig.add_trace(go.Scattermapbox(
-                lat=[m['lat'] for m in items],
-                lon=[m['lon'] for m in items],
-                mode='markers+text',
-                marker=dict(size=14, color=color),
-                text=[m['fleet_name'] for m in items],
-                textposition='top center',
-                textfont=dict(size=11, color=color),
-                name=operator,
-                customdata=[
-                    [
-                        m['fleet_name'],
-                        operator,
-                        f"{m['sog']:.1f}" if m.get('sog') is not None else '?',
-                        f"{m['cog']:.0f}°" if m.get('cog') is not None else '?',
-                        _format_age(m.get('time'), now_van),
-                    ]
-                    for m in items
-                ],
-                hovertemplate=(
-                    "<b>%{customdata[0]}</b><br>"
-                    "%{customdata[1]}<br>"
-                    "Speed: %{customdata[2]} kts · Course: %{customdata[3]}<br>"
-                    "Last seen: %{customdata[4]}<extra></extra>"
+            fig.update_layout(
+                mapbox=dict(
+                    style='open-street-map',
+                    center=dict(lat=49.20, lon=-123.30),
+                    zoom=8.5,
                 ),
-            ))
-    fig.update_layout(
-        mapbox=dict(
-            style='open-street-map',
-            center=dict(lat=49.20, lon=-123.30),
-            zoom=8.5,
-        ),
-        margin=dict(l=0, r=0, t=0, b=0),
-        height=520,
-        legend=dict(orientation='h', y=-0.05),
-    )
-    draw.plotly_chart(fig, width='stretch')
+                margin=dict(l=0, r=0, t=0, b=0),
+                height=520,
+                legend=dict(orientation='h', y=-0.05),
+            )
+            draw.plotly_chart(fig, width='stretch')
+        except Exception as e:
+            draw.warning(f"Map render failed: {e}")
 
     # ── Fleet table (always shown so user knows which boats we're tracking) ──
-    draw.markdown("**Fleet status**")
-    matched_by_name = {m['fleet_name']: m for m in matched or []}
-    rows = []
-    now_van = datetime.now(pytz.timezone('America/Vancouver'))
-    for boat in WHALE_FLEET:
-        m = matched_by_name.get(boat['name'])
-        if m:
-            rows.append({
-                'Boat': boat['name'],
-                'Operator': boat['operator'],
-                'Status': '🟢 Live',
-                'Speed (kts)': f"{m['sog']:.1f}" if m.get('sog') is not None else '–',
-                'Course': f"{m['cog']:.0f}°" if m.get('cog') is not None else '–',
-                'Last seen': _format_age(m.get('time'), now_van),
-            })
-        else:
-            rows.append({
-                'Boat': boat['name'],
-                'Operator': boat['operator'],
-                'Status': '⚫ Silent',
-                'Speed (kts)': '–', 'Course': '–', 'Last seen': '–',
-            })
-    draw.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True)
+    try:
+        draw.markdown("**Fleet status**")
+        matched_by_name = {m['fleet_name']: m for m in (matched or [])}
+        rows = []
+        now_van = datetime.now(pytz.timezone('America/Vancouver'))
+        for boat in WHALE_FLEET:
+            m = matched_by_name.get(boat['name'])
+            if m:
+                rows.append({
+                    'Boat': boat['name'],
+                    'Operator': boat['operator'],
+                    'Status': '🟢 Live',
+                    'Speed (kts)': f"{m['sog']:.1f}" if m.get('sog') is not None else '–',
+                    'Course': f"{m['cog']:.0f}°" if m.get('cog') is not None else '–',
+                    'Last seen': _format_age(m.get('time'), now_van),
+                })
+            else:
+                rows.append({
+                    'Boat': boat['name'],
+                    'Operator': boat['operator'],
+                    'Status': '⚫ Silent',
+                    'Speed (kts)': '–', 'Course': '–', 'Last seen': '–',
+                })
+        # Omit width entirely — st.dataframe in this Streamlit version had a
+        # str→int error on width='stretch'.
+        draw.dataframe(pd.DataFrame(rows))
+    except Exception as e:
+        draw.warning(f"Fleet table render failed: {e}")
