@@ -31,6 +31,9 @@ WHALE_FLEET = [
     {'name': 'Lightship',        'operator': 'Vancouver Whale Watch',  'icon_color': '#2ca02c'},
     {'name': 'Salish Sea Dream',   'operator': 'Prince of Whales', 'icon_color': '#ff7f0e'},
     {'name': 'Salish Sea Freedom', 'operator': 'Prince of Whales', 'icon_color': '#ff7f0e'},
+    {'name': 'Salish Sea Eclipse', 'operator': 'Prince of Whales', 'icon_color': '#ff7f0e'},
+    {'name': 'Ocean Magic II',     'operator': 'Prince of Whales', 'icon_color': '#ff7f0e'},
+    {'name': 'Ocean Magic',        'operator': 'Prince of Whales', 'icon_color': '#ff7f0e'},
 ]
 
 

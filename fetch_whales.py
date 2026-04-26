@@ -32,9 +32,12 @@ WHALE_FLEET = [
     {'name': 'EXPRESS',          'operator': 'Vancouver Whale Watch',  'icon_color': '#2ca02c'},
     {'name': 'STRIDER',          'operator': 'Vancouver Whale Watch',  'icon_color': '#2ca02c'},
     {'name': 'LIGHTSHIP',        'operator': 'Vancouver Whale Watch',  'icon_color': '#2ca02c'},
-    # Prince of Whales
+    # Prince of Whales (Vancouver, Victoria, Telegraph Cove)
     {'name': 'SALISH SEA DREAM',   'operator': 'Prince of Whales', 'icon_color': '#ff7f0e'},
     {'name': 'SALISH SEA FREEDOM', 'operator': 'Prince of Whales', 'icon_color': '#ff7f0e'},
+    {'name': 'SALISH SEA ECLIPSE', 'operator': 'Prince of Whales', 'icon_color': '#ff7f0e'},
+    {'name': 'OCEAN MAGIC II',     'operator': 'Prince of Whales', 'icon_color': '#ff7f0e'},
+    {'name': 'OCEAN MAGIC',        'operator': 'Prince of Whales', 'icon_color': '#ff7f0e'},
 ]
 
 # Strait of Georgia + Howe Sound + Burrard Inlet bounding box
