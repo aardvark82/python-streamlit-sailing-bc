@@ -30,6 +30,7 @@ from fetch_weather import display_weather_info, display_clear_skies_html
 from fetch_tides import display_point_atkinson_tides
 from wind_utils import create_arrow_html
 from fetch_gonogo import display_gonogo_sidebar, display_gonogo_page, display_kiosk_page
+from fetch_whales import display_whales_page
 from pathlib import Path
 
 # Read version from VERSION file
@@ -150,6 +151,13 @@ def page_pamrocks():
                     forecast_url=URL_FORECAST_HOWESOUND, forecast_title='Howe Sound')
     except Exception as e:
         st.error(f"Failed to load Pam Rocks buoy: {e}")
+
+
+def page_whales():
+    try:
+        display_whales_page(container=st)
+    except Exception as e:
+        st.error(f"Failed to load whale tracker: {e}")
 
 
 def page_forecast():
@@ -826,6 +834,7 @@ _pg_halibut = st.Page(page_halibut, title="Halibut Bank", icon="🔵")
 _pg_english_bay = st.Page(page_english_bay, title="English Bay", icon="🔵")
 _pg_atkinson = st.Page(page_atkinson, title="Pt Atkinson", icon="🔵")
 _pg_pamrocks = st.Page(page_pamrocks, title="Pam Rocks", icon="🔵")
+_pg_whales = st.Page(page_whales, title="Whale boats", icon="🐋")
 _pg_forecast = st.Page(page_forecast, title="Marine Forecast", icon="🌊")
 _pg_tides = st.Page(page_tides, title="Tides", icon="🌊")
 _pg_beach = st.Page(page_beach, title="Beach", icon="🏖️")
@@ -844,7 +853,7 @@ PAGE_LINKS = {
 
 pages = {
     "Conditions": [_pg_gonogo, _pg_dashboard],
-    "Live Data": [_pg_pamrocks, _pg_jericho, _pg_english_bay, _pg_atkinson, _pg_halibut],
+    "Live Data": [_pg_pamrocks, _pg_whales, _pg_jericho, _pg_english_bay, _pg_atkinson, _pg_halibut],
     "Forecast & Tides": [_pg_forecast, _pg_tides, _pg_beach],
     "Regional Weather": [_pg_squamish, _pg_lionsbay],
     "Display": [_pg_kiosk],

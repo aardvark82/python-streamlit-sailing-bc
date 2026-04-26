@@ -12,6 +12,7 @@ selenium # tides click CSV export button
 pdfplumber # beach quality values
 pytz
 streamlit-autorefresh
+websockets # AISStream.io WebSocket for whale-watching boat tracking
 
 
 
