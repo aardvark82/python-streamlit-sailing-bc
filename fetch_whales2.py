@@ -1,9 +1,10 @@
-"""Whale-watching boat tracker — VesselAPI variant.
+"""Whale-watching boat tracker — VesselAPI Ship Tracking variant.
 
-Uses vesselapi.com REST API (https://vesselapi.com/docs/vessels) to look up
-each fleet vessel by name (returns MMSI + metadata), then queries position
-by MMSI. Position fetches are gated behind a manual "Fetch positions" button
-to limit billable API usage; the page also tracks the running call count.
+Uses VesselAPI's Ship Tracking REST API
+(https://vesselapi.com/ship-tracking-api) to look up fleet vessels by name
+and then batch-fetch their latest reported positions in one call. Position
+fetches are gated behind a manual 'Fetch positions' button to limit billable
+API usage; the page also tracks the running call count.
 """
 
 from datetime import datetime
@@ -16,7 +17,18 @@ import plotly.graph_objects as go
 
 
 VESSELAPI_BASE = "https://api.vesselapi.com/v1"
-SOURCE_URL = "https://vesselapi.com/docs/vessels"
+SOURCE_URL = "https://vesselapi.com/ship-tracking-api"
+
+
+def _pos_field(pos, *names):
+    """Read a field from a position record, tolerating both snake_case
+    (vessel_name) and camelCase (vesselName) shapes returned by the API."""
+    if not pos:
+        return None
+    for n in names:
+        if n in pos and pos[n] is not None:
+            return pos[n]
+    return None
 
 # Same curated fleet as the AISStream tracker — kept in this module so the two
 # pages stay independent and editable.
@@ -81,64 +93,104 @@ def _search_vessel_by_name(api_key, name):
         return None, None
 
 
-def _get_vessel_position(api_key, mmsi):
-    """Fetch the latest position for an MMSI. NOT cached — counted as billable."""
-    url = f"{VESSELAPI_BASE}/vessel/{mmsi}/position"
-    params = {'filter.idType': 'mmsi'}
+def _get_vessel_positions_batch(api_key, mmsis):
+    """Fetch latest positions for multiple MMSIs in a single Ship Tracking API call.
+    Uses /vessels/positions — one billable request regardless of fleet size.
+    Returns dict {mmsi: position_record} for vessels that have a position."""
+    if not mmsis:
+        return {}
+    url = f"{VESSELAPI_BASE}/vessels/positions"
+    params = {
+        'filter.ids': ','.join(str(m) for m in mmsis),
+        'filter.idType': 'mmsi',
+        'pagination.limit': 50,
+    }
     headers = {'Authorization': f'Bearer {api_key}'}
     try:
-        r = requests.get(url, params=params, headers=headers, timeout=15)
+        r = requests.get(url, params=params, headers=headers, timeout=20)
         r.raise_for_status()
-        return (r.json() or {}).get('vessel')
+        data = r.json() or {}
+        # Response array key may vary across API versions/products
+        items = data.get('vessels') or data.get('positions') or data.get('data') or []
+        out = {}
+        for v in items:
+            mmsi = _pos_field(v, 'mmsi', 'MMSI')
+            if mmsi is not None:
+                out[int(mmsi)] = v
+        return out
     except Exception as e:
-        print(f"VesselAPI position {mmsi} failed: {e}")
-        return None
+        print(f"VesselAPI Ship Tracking batch positions failed: {e}")
+        return {}
 
 
 def _format_age(iso_ts, now_van):
+    """Return a friendly relative-time string like '2min ago' or '3 hours ago'."""
     if not iso_ts:
         return ''
     try:
-        # Accept '2026-01-15T12:30:00Z' or '+00:00'
+        # Accept '2026-01-15T12:30:00Z', '+00:00', or trailing fractional seconds.
         s = str(iso_ts).replace('Z', '+00:00')
         dt = datetime.fromisoformat(s)
         delta = now_van - dt.astimezone(now_van.tzinfo)
         secs = int(delta.total_seconds())
-        if secs < 60:  return f'{secs}s ago'
-        if secs < 3600:  return f'{secs // 60}m ago'
-        if secs < 86400: return f'{secs // 3600}h ago'
-        return f'{secs // 86400}d ago'
+        if secs < 0:
+            return 'just now'
+        if secs < 60:
+            return f"{secs}s ago"
+        if secs < 3600:
+            mins = secs // 60
+            return f"{mins}min ago"
+        if secs < 86400:
+            hours = secs // 3600
+            return f"{hours} hour ago" if hours == 1 else f"{hours} hours ago"
+        days = secs // 86400
+        return f"{days} day ago" if days == 1 else f"{days} days ago"
     except Exception:
         return ''
 
 
 def _do_fetch_all(api_key):
-    """Run a full fleet search + position fetch. Returns list of dicts and
-    increments the request counter in session state for each network call."""
-    results = []
-
-    # Resolve MMSIs (cached → only first run truly hits the API)
-    cache_was_warm_for = set()
+    """Resolve fleet MMSIs (cached search-by-name calls) then fetch all
+    positions in a SINGLE batch /vessels/positions call. Returns list of
+    dicts with the latest reported position + last-seen timestamp."""
+    # Phase 1 — resolve MMSIs (cached in @st.cache_data for 24h)
     if 'vesselapi_searched_names' not in st.session_state:
         st.session_state['vesselapi_searched_names'] = set()
-    cache_was_warm_for = st.session_state['vesselapi_searched_names']
+    seen_names = st.session_state['vesselapi_searched_names']
 
+    boat_to_mmsi = {}     # boat name -> mmsi
+    boat_to_meta = {}     # boat name -> static record from search
     for boat in WHALE_FLEET:
-        # Only count the search call when this name hasn't been resolved this session
-        if boat['name'] not in cache_was_warm_for:
+        if boat['name'] not in seen_names:
             _bump_count(1)
-            cache_was_warm_for.add(boat['name'])
+            seen_names.add(boat['name'])
 
         mmsi, meta = _search_vessel_by_name(api_key, boat['name'])
-        if mmsi is None:
-            results.append({**boat, 'mmsi': None, 'position': None})
-            continue
+        if mmsi is not None:
+            boat_to_mmsi[boat['name']] = int(mmsi)
+            boat_to_meta[boat['name']] = meta
 
-        # Position is always counted — gated behind the button so user controls cost
+    # Phase 2 — single batch call for all known MMSIs
+    positions_by_mmsi = {}
+    if boat_to_mmsi:
         _bump_count(1)
-        pos = _get_vessel_position(api_key, mmsi)
-        results.append({**boat, 'mmsi': mmsi, 'position': pos, 'meta': meta})
+        positions_by_mmsi = _get_vessel_positions_batch(
+            api_key, list(boat_to_mmsi.values())
+        )
 
+    # Phase 3 — assemble result list, attaching latest position + last_seen
+    results = []
+    for boat in WHALE_FLEET:
+        mmsi = boat_to_mmsi.get(boat['name'])
+        pos = positions_by_mmsi.get(mmsi) if mmsi is not None else None
+        last_seen_iso = _pos_field(pos, 'timestamp', 'lastSeen', 'last_seen', 'processed_timestamp')
+        results.append({
+            **boat,
+            'mmsi': mmsi,
+            'position': pos,
+            'meta': boat_to_meta.get(boat['name']),
+            'last_seen_iso': last_seen_iso,
+        })
     return results
 
 
@@ -146,9 +198,9 @@ def display_whales2_page(container=None):
     """Render the VesselAPI-backed whale tracker."""
     draw = container or st
 
-    draw.subheader("🐋 Whale boats 2 — VesselAPI")
+    draw.subheader("🐋 Whale boats 2 — VesselAPI Ship Tracking")
     draw.markdown(
-        f"**Source:** [{SOURCE_URL}]({SOURCE_URL}) — REST lookups by vessel name + MMSI."
+        f"**Source:** [{SOURCE_URL}]({SOURCE_URL}) — Ship Tracking REST lookups by name + MMSI."
     )
 
     api_key = _api_key()
@@ -205,7 +257,7 @@ def display_whales2_page(container=None):
     # ── Map ──
     matched = [
         r for r in results
-        if r.get('position') and r['position'].get('latitude') is not None
+        if r.get('position') and _pos_field(r['position'], 'latitude') is not None
     ]
 
     if matched:
@@ -219,8 +271,8 @@ def display_whales2_page(container=None):
             for operator, items in by_op.items():
                 color = items[0]['icon_color']
                 fig.add_trace(go.Scattermapbox(
-                    lat=[r['position']['latitude'] for r in items],
-                    lon=[r['position']['longitude'] for r in items],
+                    lat=[_pos_field(r['position'], 'latitude') for r in items],
+                    lon=[_pos_field(r['position'], 'longitude') for r in items],
                     mode='markers+text',
                     marker=dict(size=14, color=color),
                     text=[r['name'] for r in items],
@@ -231,9 +283,15 @@ def display_whales2_page(container=None):
                         [
                             r['name'],
                             operator,
-                            f"{r['position'].get('sog', 0):.1f}" if r['position'].get('sog') is not None else '?',
-                            f"{r['position'].get('cog', 0):.0f}°" if r['position'].get('cog') is not None else '?',
-                            _format_age(r['position'].get('timestamp'), now_van),
+                            (
+                                f"{_pos_field(r['position'], 'sog'):.1f}"
+                                if _pos_field(r['position'], 'sog') is not None else '?'
+                            ),
+                            (
+                                f"{_pos_field(r['position'], 'cog'):.0f}°"
+                                if _pos_field(r['position'], 'cog') is not None else '?'
+                            ),
+                            _format_age(r.get('last_seen_iso'), now_van) or '–',
                         ]
                         for r in items
                     ],
@@ -268,14 +326,17 @@ def display_whales2_page(container=None):
         now_van = datetime.now(pytz.timezone('America/Vancouver'))
         for r in results:
             pos = r.get('position') or {}
+            sog = _pos_field(pos, 'sog')
+            cog = _pos_field(pos, 'cog')
+            has_pos = _pos_field(pos, 'latitude') is not None
             rows.append({
                 'Boat': r['name'],
                 'Operator': r['operator'],
                 'MMSI': r.get('mmsi') or '—',
-                'Status': '🟢 Live' if pos.get('latitude') is not None else '⚫ Silent',
-                'Speed (kts)': f"{pos.get('sog', 0):.1f}" if pos.get('sog') is not None else '–',
-                'Course': f"{pos.get('cog', 0):.0f}°" if pos.get('cog') is not None else '–',
-                'Last seen': _format_age(pos.get('timestamp'), now_van),
+                'Status': '🟢 Live' if has_pos else '⚫ Silent',
+                'Speed (kts)': f"{sog:.1f}" if sog is not None else '–',
+                'Course': f"{cog:.0f}°" if cog is not None else '–',
+                'Last seen': _format_age(r.get('last_seen_iso'), now_van) or '–',
             })
         draw.dataframe(pd.DataFrame(rows))
     except Exception as e:
