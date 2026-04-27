@@ -106,9 +106,15 @@ def _get_vessel_position(api_key, mmsi):
         r = requests.get(url, params=params, headers=headers, timeout=15)
         r.raise_for_status()
         data = r.json() or {}
-        # The endpoint may wrap the result under 'vessel' (snake_case docs) or
-        # return the position fields at the top level (camelCase example).
-        pos = data.get('vessel') if isinstance(data.get('vessel'), dict) else data
+        # The Ship Tracking endpoint wraps the position fields under
+        # 'vesselPosition' (camelCase). Older docs sometimes show 'vessel'.
+        # Fall back to the top-level dict if neither wrapper is present.
+        pos = (
+            data.get('vesselPosition')
+            or data.get('vessel')
+            or data.get('position')
+            or data
+        )
         return pos, {'request_url': r.url, 'raw': data}
     except Exception as e:
         return None, {'error': str(e), 'request_url': url, 'params': params}
@@ -384,12 +390,16 @@ def display_whales2_page(container=None):
             pos = r.get('position') or {}
             sog = _pos_field(pos, 'sog')
             cog = _pos_field(pos, 'cog')
-            has_pos = _pos_field(pos, 'latitude') is not None
+            lat = _pos_field(pos, 'latitude')
+            lon = _pos_field(pos, 'longitude')
+            has_pos = lat is not None and lon is not None
             rows.append({
                 'Boat': r['name'],
                 'Operator': r['operator'],
                 'MMSI': r.get('mmsi') or '—',
                 'Status': '🟢 Live' if has_pos else '⚫ Silent',
+                'Latitude':  f"{lat:.5f}" if lat is not None else '–',
+                'Longitude': f"{lon:.5f}" if lon is not None else '–',
                 'Speed (kts)': f"{sog:.1f}" if sog is not None else '–',
                 'Course': f"{cog:.0f}°" if cog is not None else '–',
                 'Last seen': _format_age(r.get('last_seen_iso'), now_van) or '–',
