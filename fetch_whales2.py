@@ -31,8 +31,9 @@ def _pos_field(pos, *names):
             return pos[n]
     return None
 
-# Same curated fleet as the AISStream tracker — kept in this module so the two
-# pages stay independent and editable.
+# Curated fleet. `mmsi` is optional — when present we skip the unreliable
+# search-by-name and call /vessel/{mmsi}/position directly. MMSIs collected
+# from cross-checking with MyShipTracking iOS.
 WHALE_FLEET = [
     {'name': 'Aurora I',         'operator': 'Wild Whales Vancouver',  'icon_color': '#1f77b4'},
     {'name': 'Aurora II',        'operator': 'Wild Whales Vancouver',  'icon_color': '#1f77b4'},
@@ -43,7 +44,8 @@ WHALE_FLEET = [
     {'name': 'Strider',          'operator': 'Vancouver Whale Watch',  'icon_color': '#2ca02c'},
     {'name': 'Lightship',        'operator': 'Vancouver Whale Watch',  'icon_color': '#2ca02c'},
     {'name': 'Salish Sea Dream',   'operator': 'Prince of Whales', 'icon_color': '#ff7f0e'},
-    {'name': 'Salish Sea Freedom', 'operator': 'Prince of Whales', 'icon_color': '#ff7f0e'},
+    {'name': 'Salish Sea Freedom', 'operator': 'Prince of Whales', 'icon_color': '#ff7f0e',
+     'mmsi': 316042213},
     {'name': 'Salish Sea Eclipse', 'operator': 'Prince of Whales', 'icon_color': '#ff7f0e'},
     {'name': 'Ocean Magic II',     'operator': 'Prince of Whales', 'icon_color': '#ff7f0e'},
     {'name': 'Ocean Magic',        'operator': 'Prince of Whales', 'icon_color': '#ff7f0e'},
@@ -139,8 +141,25 @@ def _format_age(iso_ts, now_van):
 
 
 def _resolve_mmsi(api_key, boat_name, diagnostics):
-    """Search-by-name (cached 24h) and return (mmsi, meta) for one boat.
-    Counts the call only the first time the name is resolved this session."""
+    """Resolve MMSI for one boat with this priority:
+       1. Session-level user override (set via the override UI).
+       2. Hard-coded MMSI on the WHALE_FLEET entry.
+       3. Cached search-by-name (least reliable for short generic names).
+    Returns (mmsi, meta_or_none)."""
+    # 1. Session override
+    overrides = st.session_state.get('vesselapi_mmsi_overrides') or {}
+    if boat_name in overrides and overrides[boat_name]:
+        try:
+            return int(overrides[boat_name]), {'name': boat_name, 'source': 'manual_override'}
+        except (TypeError, ValueError):
+            pass
+
+    # 2. Hard-coded MMSI on the fleet entry
+    fleet_entry = next((b for b in WHALE_FLEET if b['name'] == boat_name), None)
+    if fleet_entry and fleet_entry.get('mmsi'):
+        return int(fleet_entry['mmsi']), {'name': boat_name, 'source': 'fleet_hardcoded'}
+
+    # 3. Cached search-by-name fallback
     if 'vesselapi_searched_names' not in st.session_state:
         st.session_state['vesselapi_searched_names'] = set()
     seen = st.session_state['vesselapi_searched_names']
@@ -378,6 +397,51 @@ def display_whales2_page(container=None):
         draw.dataframe(pd.DataFrame(rows))
     except Exception as e:
         draw.warning(f"Fleet table render failed: {e}")
+
+    # ── Manual MMSI override editor ──
+    # The search-by-name endpoint frequently picks the wrong vessel for short or
+    # generic boat names. If MyShipTracking iOS shows the boat correctly, tap
+    # the boat there → see the MMSI → enter it here. Saved overrides persist
+    # for the session and bypass the search entirely on subsequent fetches.
+    st.session_state.setdefault('vesselapi_mmsi_overrides', {})
+    overrides = st.session_state['vesselapi_mmsi_overrides']
+
+    with draw.expander("⚙️ Manual MMSI overrides (paste from MyShipTracking)", expanded=False):
+        draw.caption(
+            "Open MyShipTracking iOS → tap the boat → copy its MMSI → paste here. "
+            "Overrides skip the buggy name-search entirely."
+        )
+        c_a, c_b, c_c = draw.columns([2, 1.4, 0.8])
+        boat_choice = c_a.selectbox(
+            "Boat",
+            [b['name'] for b in WHALE_FLEET],
+            index=[i for i, b in enumerate(WHALE_FLEET) if b['name'] == 'Salish Sea Freedom'][0],
+            key='mmsi_override_boat',
+        )
+        mmsi_value = c_b.text_input(
+            "MMSI",
+            value=str(overrides.get(boat_choice, '') or ''),
+            key='mmsi_override_value',
+            placeholder='e.g. 316023456',
+        )
+        if c_c.button("Save", key='mmsi_override_save'):
+            mmsi_clean = mmsi_value.strip()
+            if mmsi_clean:
+                try:
+                    overrides[boat_choice] = int(mmsi_clean)
+                    draw.success(f"Saved {boat_choice} → MMSI {overrides[boat_choice]}")
+                except ValueError:
+                    draw.error("MMSI must be a number.")
+            else:
+                # Empty input = clear the override
+                overrides.pop(boat_choice, None)
+                draw.success(f"Cleared override for {boat_choice}")
+
+        if overrides:
+            draw.markdown("**Active overrides:**")
+            draw.dataframe(pd.DataFrame(
+                [{'Boat': k, 'MMSI': v} for k, v in overrides.items()]
+            ))
 
     # ── Diagnostics: show raw API responses so we can spot wrong MMSIs etc.
     if diagnostics:
