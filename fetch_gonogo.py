@@ -771,7 +771,13 @@ _KIOSK_CSS = """
     [data-testid="stHeader"] { display: none !important; }
     [data-testid="stToolbar"] { display: none !important; }
     footer { display: none !important; }
-    .block-container { padding-top: 1rem !important; max-width: 100% !important; }
+    .block-container {
+        padding-top: 1rem !important;
+        /* Generous bottom padding so the Home button is reachable on
+           mobile — without this Safari/Chrome bottom URL bars can hide it. */
+        padding-bottom: 8rem !important;
+        max-width: 100% !important;
+    }
 
     /* Dark background */
     .stApp { background-color: #0a0a0a !important; }
@@ -825,7 +831,7 @@ _KIOSK_CSS = """
 
     /* Big 'Home / Exit kiosk' button at the bottom */
     .kiosk-home-wrap {
-        margin: 2rem 0 1rem 0;
+        margin: 3rem 0 5rem 0;  /* extra bottom margin so user can scroll past */
         text-align: center;
     }
     .kiosk-home-wrap [data-testid="stPageLink"] {
