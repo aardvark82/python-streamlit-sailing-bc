@@ -7,6 +7,7 @@ fetches are gated behind a manual 'Fetch positions' button to limit billable
 API usage; the page also tracks the running call count.
 """
 
+import json
 from datetime import datetime
 
 import requests
@@ -67,8 +68,9 @@ def _bump_count(n=1):
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def _search_vessel_by_name(api_key, name):
-    """Search VesselAPI for a vessel name. Returns (mmsi, raw_record) or (None, None).
-    Cached for 24h so repeated runs don't re-burn the search quota."""
+    """Search VesselAPI for a vessel name.
+    Returns (mmsi, raw_record, full_search_payload) — third value used for
+    diagnostics so the user can inspect what the API actually returned."""
     url = f"{VESSELAPI_BASE}/search/vessels"
     params = {'filter.name': name, 'pagination.limit': 5}
     headers = {'Authorization': f'Bearer {api_key}'}
@@ -78,8 +80,7 @@ def _search_vessel_by_name(api_key, name):
         data = r.json() or {}
         vessels = data.get('vessels') or []
         if not vessels:
-            return None, None
-        # Pick the closest exact match if available
+            return None, None, {'request_url': r.url, 'raw': data}
         target = name.strip().lower()
         best = None
         for v in vessels:
@@ -87,40 +88,42 @@ def _search_vessel_by_name(api_key, name):
                 best = v
                 break
         best = best or vessels[0]
-        return best.get('mmsi'), best
+        return best.get('mmsi'), best, {'request_url': r.url, 'raw': data}
     except Exception as e:
-        print(f"VesselAPI search '{name}' failed: {e}")
-        return None, None
+        return None, None, {'error': str(e), 'request_url': url, 'params': params}
 
 
 def _get_vessel_positions_batch(api_key, mmsis):
     """Fetch latest positions for multiple MMSIs in a single Ship Tracking API call.
     Uses /vessels/positions — one billable request regardless of fleet size.
-    Returns dict {mmsi: position_record} for vessels that have a position."""
+    Returns (positions_by_mmsi_dict, raw_response_or_error_dict)."""
     if not mmsis:
-        return {}
+        return {}, {'note': 'no MMSIs to query'}
     url = f"{VESSELAPI_BASE}/vessels/positions"
+    # Default time.from is "past 2 hours" which is too narrow for whale-watching
+    # boats that may be docked overnight. Look back 7 days so we always see the
+    # latest reported position.
+    look_back = (datetime.utcnow() - pd.Timedelta(days=7))
     params = {
         'filter.ids': ','.join(str(m) for m in mmsis),
         'filter.idType': 'mmsi',
         'pagination.limit': 50,
+        'time.from': look_back.strftime('%Y-%m-%dT%H:%M:%SZ'),
     }
     headers = {'Authorization': f'Bearer {api_key}'}
     try:
         r = requests.get(url, params=params, headers=headers, timeout=20)
         r.raise_for_status()
         data = r.json() or {}
-        # Response array key may vary across API versions/products
         items = data.get('vessels') or data.get('positions') or data.get('data') or []
         out = {}
         for v in items:
             mmsi = _pos_field(v, 'mmsi', 'MMSI')
             if mmsi is not None:
                 out[int(mmsi)] = v
-        return out
+        return out, {'request_url': r.url, 'raw': data}
     except Exception as e:
-        print(f"VesselAPI Ship Tracking batch positions failed: {e}")
-        return {}
+        return {}, {'error': str(e), 'request_url': url, 'params': params}
 
 
 def _format_age(iso_ts, now_van):
@@ -151,34 +154,35 @@ def _format_age(iso_ts, now_van):
 
 def _do_fetch_all(api_key):
     """Resolve fleet MMSIs (cached search-by-name calls) then fetch all
-    positions in a SINGLE batch /vessels/positions call. Returns list of
-    dicts with the latest reported position + last-seen timestamp."""
-    # Phase 1 — resolve MMSIs (cached in @st.cache_data for 24h)
+    positions in a SINGLE batch /vessels/positions call.
+    Returns (results_list, diagnostics_dict)."""
     if 'vesselapi_searched_names' not in st.session_state:
         st.session_state['vesselapi_searched_names'] = set()
     seen_names = st.session_state['vesselapi_searched_names']
 
-    boat_to_mmsi = {}     # boat name -> mmsi
-    boat_to_meta = {}     # boat name -> static record from search
+    diagnostics = {'searches': {}, 'positions': None}
+
+    boat_to_mmsi = {}
+    boat_to_meta = {}
     for boat in WHALE_FLEET:
         if boat['name'] not in seen_names:
             _bump_count(1)
             seen_names.add(boat['name'])
 
-        mmsi, meta = _search_vessel_by_name(api_key, boat['name'])
+        mmsi, meta, raw = _search_vessel_by_name(api_key, boat['name'])
+        diagnostics['searches'][boat['name']] = raw
         if mmsi is not None:
             boat_to_mmsi[boat['name']] = int(mmsi)
             boat_to_meta[boat['name']] = meta
 
-    # Phase 2 — single batch call for all known MMSIs
     positions_by_mmsi = {}
     if boat_to_mmsi:
         _bump_count(1)
-        positions_by_mmsi = _get_vessel_positions_batch(
+        positions_by_mmsi, pos_diag = _get_vessel_positions_batch(
             api_key, list(boat_to_mmsi.values())
         )
+        diagnostics['positions'] = pos_diag
 
-    # Phase 3 — assemble result list, attaching latest position + last_seen
     results = []
     for boat in WHALE_FLEET:
         mmsi = boat_to_mmsi.get(boat['name'])
@@ -191,7 +195,7 @@ def _do_fetch_all(api_key):
             'meta': boat_to_meta.get(boat['name']),
             'last_seen_iso': last_seen_iso,
         })
-    return results
+    return results, diagnostics
 
 
 def display_whales2_page(container=None):
@@ -236,15 +240,16 @@ def display_whales2_page(container=None):
     if fetch_clicked:
         with st.spinner("Querying VesselAPI for fleet positions…"):
             try:
-                results = _do_fetch_all(api_key)
+                results, diagnostics = _do_fetch_all(api_key)
                 st.session_state['vesselapi_last_results'] = results
+                st.session_state['vesselapi_last_diagnostics'] = diagnostics
                 st.session_state['vesselapi_last_fetched_at'] = datetime.now(
                     pytz.timezone('America/Vancouver'))
             except Exception as e:
                 draw.error(f"Fetch failed: {e}")
-                results = None
 
     results = st.session_state.get('vesselapi_last_results')
+    diagnostics = st.session_state.get('vesselapi_last_diagnostics')
 
     if not results:
         draw.info(
@@ -341,3 +346,44 @@ def display_whales2_page(container=None):
         draw.dataframe(pd.DataFrame(rows))
     except Exception as e:
         draw.warning(f"Fleet table render failed: {e}")
+
+    # ── Diagnostics: show raw API responses so we can spot wrong MMSIs etc.
+    if diagnostics:
+        with draw.expander("🔍 Raw API responses (diagnostics)"):
+            draw.markdown(
+                "**Per-boat search results.** If `mmsi` here does NOT belong to "
+                "the actual whale-watching boat, the search picked the wrong "
+                "vessel and the position lookup will be useless. Tell me the "
+                "correct MMSI and I'll switch to a hard-coded mapping."
+            )
+            search_rows = []
+            for boat_name, payload in (diagnostics.get('searches') or {}).items():
+                vessels = (payload or {}).get('raw', {}).get('vessels') or []
+                if not vessels:
+                    search_rows.append({
+                        'Searched': boat_name,
+                        'Top hit': '—',
+                        'MMSI': '—',
+                        'Country': '—',
+                        'Type': '—',
+                    })
+                else:
+                    top = vessels[0]
+                    search_rows.append({
+                        'Searched': boat_name,
+                        'Top hit': top.get('name') or top.get('vessel_name') or '?',
+                        'MMSI': top.get('mmsi') or '—',
+                        'Country': top.get('country') or '—',
+                        'Type': top.get('vessel_type') or top.get('type') or '—',
+                    })
+            try:
+                draw.dataframe(pd.DataFrame(search_rows))
+            except Exception:
+                pass
+
+            pos_diag = diagnostics.get('positions') or {}
+            draw.markdown("---")
+            draw.markdown("**Batch /vessels/positions response**")
+            if 'error' in pos_diag:
+                draw.error(f"HTTP error: {pos_diag.get('error')}")
+            draw.code(json.dumps(pos_diag, indent=2, default=str)[:4000], language='json')
