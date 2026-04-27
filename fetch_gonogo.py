@@ -822,12 +822,50 @@ _KIOSK_CSS = """
         font-size: 0.85rem;
         color: #888 !important;
     }
+
+    /* Big 'Home / Exit kiosk' button at the bottom */
+    .kiosk-home-wrap {
+        margin: 2rem 0 1rem 0;
+        text-align: center;
+    }
+    .kiosk-home-wrap [data-testid="stPageLink"] {
+        display: block;
+        width: 100%;
+    }
+    .kiosk-home-wrap [data-testid="stPageLink"] a,
+    .kiosk-home-wrap [data-testid="stPageLink"] button {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        width: 100% !important;
+        font-size: 1.6rem !important;
+        font-weight: 700 !important;
+        color: #fff !important;
+        background: #1f3a5f !important;
+        border: 2px solid #4a90e2 !important;
+        border-radius: 14px !important;
+        padding: 1.4rem 1rem !important;
+        text-decoration: none !important;
+        box-shadow: 0 2px 10px rgba(74, 144, 226, 0.3);
+    }
+    .kiosk-home-wrap [data-testid="stPageLink"] a:hover,
+    .kiosk-home-wrap [data-testid="stPageLink"] button:hover {
+        background: #2c5282 !important;
+        border-color: #6cb3ff !important;
+    }
+    .kiosk-home-wrap [data-testid="stPageLink"] * {
+        color: #fff !important;
+    }
 </style>
 """
 
 
-def display_kiosk_page():
-    """Full-screen dark kiosk mode for TV / Nvidia Shield screensaver."""
+def display_kiosk_page(home_page=None):
+    """Full-screen dark kiosk mode for TV / Nvidia Shield screensaver.
+
+    `home_page` is an optional st.Page reference for the main Go/No-Go page.
+    When provided we render a big 'Home' button at the bottom so mobile users
+    can exit kiosk mode (the sidebar is hidden by the kiosk CSS)."""
     st.markdown(_KIOSK_CSS, unsafe_allow_html=True)
 
     factors, weather = _gather_current_factors()
@@ -865,6 +903,12 @@ def display_kiosk_page():
         windows = _analyze_5day_windows(weather)
         if windows:
             _draw_kiosk_chart(windows)
+
+    # ── Big Home button at the bottom — exit kiosk mode on mobile ──
+    if home_page is not None:
+        st.markdown('<div class="kiosk-home-wrap">', unsafe_allow_html=True)
+        st.page_link(home_page, label="🏠  Home / Exit kiosk", icon=None)
+        st.markdown('</div>', unsafe_allow_html=True)
 
 
 def _draw_kiosk_snapshot(weather):

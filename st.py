@@ -41,6 +41,20 @@ APP_VERSION = int(_version_file.read_text().strip()) if _version_file.exists() e
 # Auto-refresh every 5 minutes
 st_autorefresh(interval=300000, key="data_refresher")
 
+# Trim Streamlit's default ~6rem top padding so pages start near the top of
+# the viewport on desktop and mobile. The kiosk page overrides this further.
+st.markdown(
+    """
+    <style>
+        .block-container {
+            padding-top: 1.2rem !important;
+            padding-bottom: 2rem !important;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # --- Constants ---
 URL_FORECAST_HOWESOUND = 'https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=06400'
 URL_FORECAST_SOUTH_NANAIMO = 'https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=14305'
@@ -206,7 +220,10 @@ def page_lionsbay():
 
 def page_kiosk():
     try:
-        display_kiosk_page()
+        # _pg_gonogo is defined later at module scope; safe to reference here
+        # because this function is only called via pg.run() after all pages
+        # are constructed.
+        display_kiosk_page(home_page=_pg_gonogo)
     except Exception as e:
         st.error(f"Failed to load kiosk mode: {e}")
 
