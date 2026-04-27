@@ -493,6 +493,64 @@ def create_natural_tide_chart(tide_df, container=None):
         fp=tide_df['Height'].values
     )
 
+    # ── Compute metrics BEFORE rendering, so they can sit above the chart.
+    # On mobile this means the user sees Current Tide / Next Tide / Daily Range
+    # immediately at the top, with the full-width chart underneath.
+    current_time = datetime.now(vancouver_tz)
+
+    try:
+        smooth_x_seconds = np.array(
+            [float(pd.Timestamp(t).timestamp()) for t in smooth_tide_df['datetime']],
+            dtype=float,
+        )
+        smooth_y_heights = np.asarray(smooth_tide_df['Height'].values, dtype=float)
+        current_ts = float(current_time.timestamp())
+        if smooth_x_seconds.size and smooth_x_seconds[0] <= current_ts <= smooth_x_seconds[-1]:
+            current_height = float(np.interp(current_ts, smooth_x_seconds, smooth_y_heights))
+        elif smooth_x_seconds.size:
+            current_height = float(
+                smooth_y_heights[0] if current_ts < smooth_x_seconds[0]
+                else smooth_y_heights[-1]
+            )
+        else:
+            current_height = float('nan')
+    except Exception as e:
+        print(f"current_height computation failed: {e}; falling back to legacy interp")
+        current_height = float(np.interp(
+            current_time.timestamp(),
+            (tide_interpolated.index.astype(np.int64) // 10 ** 9).to_numpy().astype(float),
+            np.asarray(tide_interpolated['Height'].values, dtype=float),
+        ))
+
+    tide_direction = ""
+    next_tide_height_str = "No data available"
+    next_tide_delta = ""
+    if 'datetime' in tide_df.columns:
+        try:
+            next_tide = tide_df[tide_df['datetime'] > current_time].iloc[0]
+            tide_direction = "Rising" if next_tide['Height'] > current_height else "Falling"
+            time_diff = next_tide['datetime'] - current_time
+            next_tide_height_str = f"{next_tide['Height']:.2f}m"
+            next_tide_delta = (
+                f"in {time_diff.total_seconds() // 3600:.0f}h "
+                f"{(time_diff.total_seconds() // 60 % 60):.0f}m"
+            )
+        except (IndexError, KeyError):
+            pass
+
+    if 'Height' in tide_df.columns:
+        daily_range_str = f"{tide_df['Height'].max() - tide_df['Height'].min():.2f}m"
+    else:
+        daily_range_str = "No data available"
+
+    # Metrics row (above the chart so it's the first thing seen on mobile)
+    col1, col2, col3 = draw.columns(3)
+    col1.metric("Current Tide Level", f"{current_height:.2f}m",
+                delta=tide_direction, delta_color="off")
+    col2.metric("Next Tide", next_tide_height_str, next_tide_delta)
+    col3.metric("Daily Tide Range", daily_range_str)
+
+    # ── Build chart and render full-width below the metrics ──
     fig = go.Figure()
 
     fig.add_trace(go.Scatter(
@@ -531,78 +589,13 @@ def create_natural_tide_chart(tide_df, container=None):
                    zeroline=True, zerolinewidth=2, zerolinecolor='rgba(128,128,128,0.5)')
     )
 
-    current_time = datetime.now(vancouver_tz)
-    current_time_ts = current_time.timestamp() * 1000
-
     fig.add_vline(
-        x=current_time_ts, line_width=2, line_dash="dash", line_color="red",
-        annotation_text="Current Time", annotation_position="top right"
+        x=current_time.timestamp() * 1000,
+        line_width=2, line_dash="dash", line_color="red",
+        annotation_text="Current Time", annotation_position="top right",
     )
 
     draw.plotly_chart(fig, width='stretch')
-
-    col1, col2, col3 = draw.columns(3)
-
-    # Match the chart exactly by interpolating the smooth (cubic-spline) curve.
-    # Previously this used DatetimeIndex.astype(np.int64) // 10**9 which is
-    # fragile across pandas versions for tz-aware indexes.
-    try:
-        smooth_x_seconds = np.array(
-            [float(pd.Timestamp(t).timestamp()) for t in smooth_tide_df['datetime']],
-            dtype=float,
-        )
-        smooth_y_heights = np.asarray(smooth_tide_df['Height'].values, dtype=float)
-        current_ts = float(current_time.timestamp())
-        if smooth_x_seconds.size and smooth_x_seconds[0] <= current_ts <= smooth_x_seconds[-1]:
-            current_height = float(np.interp(current_ts, smooth_x_seconds, smooth_y_heights))
-        elif smooth_x_seconds.size:
-            current_height = float(
-                smooth_y_heights[0] if current_ts < smooth_x_seconds[0]
-                else smooth_y_heights[-1]
-            )
-        else:
-            current_height = float('nan')
-    except Exception as e:
-        print(f"current_height computation failed: {e}; falling back to legacy interp")
-        current_height = float(np.interp(
-            current_time.timestamp(),
-            (tide_interpolated.index.astype(np.int64) // 10 ** 9).to_numpy().astype(float),
-            np.asarray(tide_interpolated['Height'].values, dtype=float),
-        ))
-
-    # Determine rising or falling by checking the next tide point
-    tide_direction = ""
-    if 'datetime' in tide_df.columns:
-        try:
-            next_tide = tide_df[tide_df['datetime'] > current_time].iloc[0]
-            if next_tide['Height'] > current_height:
-                tide_direction = "Rising"
-            else:
-                tide_direction = "Falling"
-        except (IndexError, KeyError):
-            pass
-
-    col1.metric("Current Tide Level", f"{current_height:.2f}m", delta=tide_direction, delta_color="off")
-
-    if 'datetime' in tide_df.columns:
-        try:
-            next_tide = tide_df[tide_df['datetime'] > current_time].iloc[0]
-            time_diff = next_tide['datetime'] - current_time
-            col2.metric(
-                "Next Tide",
-                f"{next_tide['Height']:.2f}m",
-                f"in {time_diff.total_seconds() // 3600:.0f}h {(time_diff.total_seconds() // 60 % 60):.0f}m"
-            )
-        except (IndexError, KeyError):
-            col2.metric("Next Tide", "No data available", "")
-    else:
-        col2.metric("Next Tide", "No data available", "")
-
-    if 'Height' in tide_df.columns:
-        daily_range = tide_df['Height'].max() - tide_df['Height'].min()
-        col3.metric("Daily Tide Range", f"{daily_range:.2f}m")
-    else:
-        col3.metric("Daily Tide Range", "No data available")
 
     with draw.expander("Tide Table"):
         display_tide_table_text(tide_df=tide_df, container=st)
