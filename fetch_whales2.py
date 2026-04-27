@@ -35,21 +35,34 @@ def _pos_field(pos, *names):
 # Curated fleet. `mmsi` is optional — when present we skip the unreliable
 # search-by-name and call /vessel/{mmsi}/position directly. MMSIs collected
 # from cross-checking with MyShipTracking iOS.
+# `region` lets us filter the fleet for cheaper region-only refreshes.
 WHALE_FLEET = [
-    {'name': 'Aurora I',         'operator': 'Wild Whales Vancouver',  'icon_color': '#1f77b4'},
-    {'name': 'Aurora II',        'operator': 'Wild Whales Vancouver',  'icon_color': '#1f77b4'},
-    {'name': 'Eagle Eyes',       'operator': 'Wild Whales Vancouver',  'icon_color': '#1f77b4'},
-    {'name': 'Jing Yu',          'operator': 'Wild Whales Vancouver',  'icon_color': '#1f77b4'},
-    {'name': 'Explorathor II',   'operator': 'Vancouver Whale Watch',  'icon_color': '#2ca02c'},
-    {'name': 'Express',          'operator': 'Vancouver Whale Watch',  'icon_color': '#2ca02c'},
-    {'name': 'Strider',          'operator': 'Vancouver Whale Watch',  'icon_color': '#2ca02c'},
-    {'name': 'Lightship',        'operator': 'Vancouver Whale Watch',  'icon_color': '#2ca02c'},
-    {'name': 'Salish Sea Dream',   'operator': 'Prince of Whales', 'icon_color': '#ff7f0e'},
-    {'name': 'Salish Sea Freedom', 'operator': 'Prince of Whales', 'icon_color': '#ff7f0e',
-     'mmsi': 316042213},
-    {'name': 'Salish Sea Eclipse', 'operator': 'Prince of Whales', 'icon_color': '#ff7f0e'},
-    {'name': 'Ocean Magic II',     'operator': 'Prince of Whales', 'icon_color': '#ff7f0e'},
-    {'name': 'Ocean Magic',        'operator': 'Prince of Whales', 'icon_color': '#ff7f0e'},
+    {'name': 'Aurora I',         'operator': 'Wild Whales Vancouver',  'region': 'Vancouver',
+     'icon_color': '#1f77b4'},
+    {'name': 'Aurora II',        'operator': 'Wild Whales Vancouver',  'region': 'Vancouver',
+     'icon_color': '#1f77b4'},
+    {'name': 'Eagle Eyes',       'operator': 'Wild Whales Vancouver',  'region': 'Vancouver',
+     'icon_color': '#1f77b4'},
+    {'name': 'Jing Yu',          'operator': 'Wild Whales Vancouver',  'region': 'Vancouver',
+     'icon_color': '#1f77b4'},
+    {'name': 'Explorathor II',   'operator': 'Vancouver Whale Watch',  'region': 'Vancouver',
+     'icon_color': '#2ca02c'},
+    {'name': 'Express',          'operator': 'Vancouver Whale Watch',  'region': 'Vancouver',
+     'icon_color': '#2ca02c'},
+    {'name': 'Strider',          'operator': 'Vancouver Whale Watch',  'region': 'Vancouver',
+     'icon_color': '#2ca02c'},
+    {'name': 'Lightship',        'operator': 'Vancouver Whale Watch',  'region': 'Vancouver',
+     'icon_color': '#2ca02c'},
+    {'name': 'Salish Sea Dream',   'operator': 'Prince of Whales', 'region': 'Vancouver',
+     'icon_color': '#ff7f0e'},
+    {'name': 'Salish Sea Freedom', 'operator': 'Prince of Whales', 'region': 'Vancouver',
+     'icon_color': '#ff7f0e', 'mmsi': 316042213},
+    {'name': 'Salish Sea Eclipse', 'operator': 'Prince of Whales', 'region': 'Victoria',
+     'icon_color': '#ff7f0e'},
+    {'name': 'Ocean Magic II',     'operator': 'Prince of Whales', 'region': 'Telegraph Cove',
+     'icon_color': '#ff7f0e'},
+    {'name': 'Ocean Magic',        'operator': 'Prince of Whales', 'region': 'Telegraph Cove',
+     'icon_color': '#ff7f0e'},
 ]
 
 
@@ -321,13 +334,16 @@ def _do_fetch_one(api_key, boat):
     return _build_result(boat, mmsi, meta, pos), diagnostics
 
 
-def _do_fetch_all(api_key):
+def _do_fetch_all(api_key, region=None):
     """Resolve fleet MMSIs (cached) then fetch each position via the
     single-vessel /vessel/{id}/position endpoint — one call per boat.
+    Pass `region=...` to limit the fetch to a subset (e.g. 'Vancouver').
     Returns (results_list, diagnostics_dict)."""
     diagnostics = {'searches': {}, 'positions': {}}
     results = []
     for boat in WHALE_FLEET:
+        if region and boat.get('region') != region:
+            continue
         mmsi, meta = _resolve_mmsi(api_key, boat['name'], diagnostics)
         pos = None
         if mmsi is not None:
@@ -336,6 +352,26 @@ def _do_fetch_all(api_key):
             diagnostics['positions'][boat['name']] = pos_diag
         results.append(_build_result(boat, mmsi, meta, pos))
     return results, diagnostics
+
+
+def _merge_results(prior, new_results):
+    """Patch prior fleet results with new entries (matched by boat name)
+    so a region-only refresh updates only those rows, leaving others as-is."""
+    if not prior:
+        return list(new_results)
+    by_name = {r['name']: r for r in new_results}
+    out = []
+    for r in prior:
+        if r.get('name') in by_name:
+            out.append(by_name[r['name']])
+        else:
+            out.append(r)
+    # Append any new entries not previously present
+    prior_names = {r.get('name') for r in prior}
+    for r in new_results:
+        if r['name'] not in prior_names:
+            out.append(r)
+    return out
 
 
 def display_whales2_page(container=None):
@@ -396,6 +432,40 @@ def display_whales2_page(container=None):
              "Useful for testing without burning the full-fleet quota.",
     )
 
+    # Second button row: region update + zoom controls
+    rb1, rb2, rb3, rb4 = draw.columns([1.3, 0.5, 0.5, 1.7])
+    fetch_van_clicked = rb1.button(
+        "🌊 Update Vancouver",
+        help="Refresh positions for Vancouver-area boats only. Cheaper than "
+             "the full fleet fetch — leaves Victoria and Telegraph Cove rows "
+             "as they were.",
+    )
+    zoom_in_clicked = rb2.button(
+        "🔍+",
+        help="Zoom map in.",
+    )
+    zoom_out_clicked = rb3.button(
+        "🔎−",
+        help="Zoom map out.",
+    )
+
+    # Map zoom state — adjusted by the buttons above
+    st.session_state.setdefault('whales2_map_zoom', 8.5)
+    if zoom_in_clicked:
+        st.session_state['whales2_map_zoom'] = min(
+            st.session_state['whales2_map_zoom'] + 1, 14
+        )
+    if zoom_out_clicked:
+        st.session_state['whales2_map_zoom'] = max(
+            st.session_state['whales2_map_zoom'] - 1, 4
+        )
+
+    def _bust_count_cache():
+        try:
+            _count_vesselapi_calls_last_30_days.clear()
+        except Exception:
+            pass
+
     if fetch_clicked:
         with st.spinner("Querying VesselAPI for fleet positions…"):
             try:
@@ -404,14 +474,24 @@ def display_whales2_page(container=None):
                 st.session_state['vesselapi_last_diagnostics'] = diagnostics
                 st.session_state['vesselapi_last_fetched_at'] = datetime.now(
                     pytz.timezone('America/Vancouver'))
-                # New calls were just recorded to KV — bust the count cache
-                # so the metric reflects them on the next render.
-                try:
-                    _count_vesselapi_calls_last_30_days.clear()
-                except Exception:
-                    pass
+                _bust_count_cache()
             except Exception as e:
                 draw.error(f"Fetch failed: {e}")
+
+    if fetch_van_clicked:
+        with st.spinner("Updating Vancouver-area boats…"):
+            try:
+                new_results, diag = _do_fetch_all(api_key, region='Vancouver')
+                merged = _merge_results(
+                    st.session_state.get('vesselapi_last_results'), new_results
+                )
+                st.session_state['vesselapi_last_results'] = merged
+                st.session_state['vesselapi_last_diagnostics'] = diag
+                st.session_state['vesselapi_last_fetched_at'] = datetime.now(
+                    pytz.timezone('America/Vancouver'))
+                _bust_count_cache()
+            except Exception as e:
+                draw.error(f"Update Vancouver failed: {e}")
 
     if fetch_one_clicked:
         # Find the Salish Sea Freedom entry from the fleet list
@@ -506,16 +586,28 @@ def display_whales2_page(container=None):
                     ),
                 ))
 
+            # Re-center on Vancouver-area subset when one is in focus, else
+            # auto-fit to the points we have.
+            van_pts = [r for r in matched
+                       if (r.get('region') == 'Vancouver'
+                           and _pos_field(r['position'], 'latitude') is not None)]
+            anchor = van_pts[0] if van_pts else matched[0]
+            center_lat = _pos_field(anchor['position'], 'latitude') or 49.20
+            center_lon = _pos_field(anchor['position'], 'longitude') or -123.30
+
             fig.update_layout(
                 mapbox=dict(
                     style='open-street-map',
-                    center=dict(lat=49.20, lon=-123.30),
-                    zoom=8.5,
+                    center=dict(lat=center_lat, lon=center_lon),
+                    zoom=st.session_state.get('whales2_map_zoom', 8.5),
                 ),
                 margin=dict(l=0, r=0, t=0, b=0),
                 height=520,
                 legend=dict(orientation='h', y=-0.05),
             )
+            # Plotly's native scroll/pinch-to-zoom is enabled by default;
+            # the explicit + / − buttons above are for users on touchscreens
+            # (e.g. Nvidia Shield kiosk) where Plotly's UI is hidden.
             draw.plotly_chart(fig, width='stretch')
         except Exception as e:
             draw.warning(f"Map render failed: {e}")
