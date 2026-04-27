@@ -8,7 +8,8 @@ API usage; the page also tracks the running call count.
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
+from urllib.parse import quote
 
 import requests
 import streamlit as st
@@ -62,10 +63,128 @@ def _api_key():
     return None
 
 
-def _bump_count(n=1):
-    """Increment the running API request counter in session state."""
+# ──────────────────────────────────────────────
+# Cloudflare KV-backed call tracking (so the count persists across users
+# and reruns, not just this session). Reuses the same KV namespace already
+# powering the buoy wind-history feature.
+# ──────────────────────────────────────────────
+
+VESSELAPI_KV_PREFIX = "vesselapi_call_"
+
+
+def _kv_credentials():
+    """Return Cloudflare KV creds dict or None when not configured."""
+    try:
+        return {
+            'account_id': st.secrets["cloudflare_account_id"],
+            'namespace_id_raw': st.secrets["cloudflare_namespace_id"],
+            'api_token': st.secrets["cloudflare_api_token"],
+        }
+    except (KeyError, FileNotFoundError):
+        return None
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _kv_resolve_namespace(account_id, api_token, name_or_id):
+    """Cache namespace-id resolution for an hour so we don't hammer the API."""
+    if "storage/kv/namespaces/" in name_or_id:
+        return name_or_id
+    headers = {"Authorization": f"Bearer {api_token}"}
+    url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/storage/kv/namespaces"
+    try:
+        r = requests.get(url, headers=headers, timeout=10)
+        r.raise_for_status()
+        for ns in r.json().get("result", []):
+            if ns.get("title") == name_or_id:
+                return ns.get("id")
+    except Exception as e:
+        print(f"KV namespace resolve failed: {e}")
+    return name_or_id
+
+
+def _record_vesselapi_call(label=''):
+    """Write a tiny key to Cloudflare KV recording one billable VesselAPI call.
+    Key format: vesselapi_call_<utc_iso_with_dashes>. Failures are silent."""
+    creds = _kv_credentials()
+    if not creds:
+        return
+    namespace_id = _kv_resolve_namespace(
+        creds['account_id'], creds['api_token'], creds['namespace_id_raw']
+    )
+    base_url = (
+        f"https://api.cloudflare.com/client/v4/accounts/"
+        f"{creds['account_id']}/storage/kv/namespaces/{namespace_id}"
+    )
+    now_utc = datetime.utcnow()
+    # Use dashes in time so the key is filename-safe and unambiguous to parse.
+    key = f"{VESSELAPI_KV_PREFIX}{now_utc.strftime('%Y-%m-%dT%H-%M-%S-%f')}"
+    try:
+        requests.put(
+            f"{base_url}/values/{quote(key, safe='')}",
+            headers={"Authorization": f"Bearer {creds['api_token']}"},
+            data=(label or '1'),
+            timeout=10,
+        )
+    except Exception as e:
+        print(f"VesselAPI KV record failed: {e}")
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _count_vesselapi_calls_last_30_days():
+    """List Cloudflare KV keys with prefix vesselapi_call_ and count those
+    whose timestamp falls within the last 30 days. Cached 5 minutes."""
+    creds = _kv_credentials()
+    if not creds:
+        return None
+    namespace_id = _kv_resolve_namespace(
+        creds['account_id'], creds['api_token'], creds['namespace_id_raw']
+    )
+    base_url = (
+        f"https://api.cloudflare.com/client/v4/accounts/"
+        f"{creds['account_id']}/storage/kv/namespaces/{namespace_id}"
+    )
+    headers = {"Authorization": f"Bearer {creds['api_token']}"}
+    cutoff = datetime.utcnow() - timedelta(days=30)
+    count = 0
+    cursor = None
+    pages = 0
+    try:
+        while pages < 30:  # hard ceiling — 30k keys should be more than enough
+            pages += 1
+            params = {'prefix': VESSELAPI_KV_PREFIX, 'limit': 1000}
+            if cursor:
+                params['cursor'] = cursor
+            r = requests.get(f"{base_url}/keys", params=params, headers=headers, timeout=15)
+            r.raise_for_status()
+            payload = r.json() or {}
+            for item in payload.get('result', []):
+                key = item.get('name', '')
+                ts_str = key.replace(VESSELAPI_KV_PREFIX, '', 1)
+                try:
+                    date_part, time_part = ts_str.split('T', 1)
+                    h, m, s, _us = time_part.split('-', 3)
+                    dt = datetime.fromisoformat(f"{date_part}T{h}:{m}:{s}")
+                    if dt >= cutoff:
+                        count += 1
+                except Exception:
+                    continue
+            cursor = (payload.get('result_info') or {}).get('cursor')
+            if not cursor:
+                break
+    except Exception as e:
+        print(f"VesselAPI KV count failed: {e}")
+        return None
+    return count
+
+
+def _bump_count(n=1, label=''):
+    """Increment the persistent KV-backed counter (and the session counter as a
+    quick local mirror). One KV write per call so /vessels/positions usage is
+    tracked across every user and rerun, not just this session."""
     st.session_state.setdefault('vesselapi_request_count', 0)
     st.session_state['vesselapi_request_count'] += n
+    for _ in range(n):
+        _record_vesselapi_call(label)
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
@@ -242,7 +361,19 @@ def display_whales2_page(container=None):
 
     # ── Header row: counter + Fetch button ──
     c1, c2, c3, c4 = draw.columns([1, 1, 1.1, 1.4])
-    c1.metric("API requests this session", st.session_state['vesselapi_request_count'])
+
+    # Pull persistent count from Cloudflare KV; fall back to session counter
+    # if KV isn't configured / reachable.
+    last_30_count = _count_vesselapi_calls_last_30_days()
+    if last_30_count is not None:
+        c1.metric("API requests (last 30 days)", last_30_count)
+    else:
+        c1.metric(
+            "API requests this session",
+            st.session_state['vesselapi_request_count'],
+            help="Cloudflare KV not configured — falling back to session count.",
+        )
+
     if st.session_state['vesselapi_last_fetched_at']:
         c2.metric(
             "Last fetched",
@@ -273,6 +404,12 @@ def display_whales2_page(container=None):
                 st.session_state['vesselapi_last_diagnostics'] = diagnostics
                 st.session_state['vesselapi_last_fetched_at'] = datetime.now(
                     pytz.timezone('America/Vancouver'))
+                # New calls were just recorded to KV — bust the count cache
+                # so the metric reflects them on the next render.
+                try:
+                    _count_vesselapi_calls_last_30_days.clear()
+                except Exception:
+                    pass
             except Exception as e:
                 draw.error(f"Fetch failed: {e}")
 
@@ -302,6 +439,10 @@ def display_whales2_page(container=None):
                     st.session_state['vesselapi_last_diagnostics'] = one_diag
                     st.session_state['vesselapi_last_fetched_at'] = datetime.now(
                         pytz.timezone('America/Vancouver'))
+                    try:
+                        _count_vesselapi_calls_last_30_days.clear()
+                    except Exception:
+                        pass
                 except Exception as e:
                     draw.error(f"Lookup failed: {e}")
 
