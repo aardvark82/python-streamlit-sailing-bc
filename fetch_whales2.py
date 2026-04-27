@@ -66,14 +66,55 @@ WHALE_FLEET = [
 ]
 
 
-def _api_key():
-    """Fetch the VesselAPI key from Streamlit secrets. Try common naming conventions."""
+def _api_keys_list():
+    """Return VesselAPI keys in priority order: primary first, then backup.
+    Empty list when no keys configured."""
+    keys = []
+    primary = None
     for key_name in ('vesselapi_key', 'vessel_api_key', 'vesselapi-com_key'):
         try:
-            return st.secrets[key_name]
+            primary = st.secrets[key_name]
+            break
         except (KeyError, FileNotFoundError):
             continue
-    return None
+    if primary:
+        keys.append(('primary', primary))
+    try:
+        backup = st.secrets['vesselapi2_key']
+        if backup:
+            keys.append(('backup', backup))
+    except (KeyError, FileNotFoundError):
+        pass
+    return keys
+
+
+def _http_get(url, params=None, timeout=15):
+    """GET helper that automatically falls back from primary→backup VesselAPI
+    key on HTTP 429 (rate limit). Returns (response_or_None, key_label_used).
+    Raises RuntimeError if no keys are configured. The caller is responsible
+    for inspecting response.status_code on the returned response."""
+    keys = _api_keys_list()
+    if not keys:
+        raise RuntimeError("No VesselAPI keys configured (set vesselapi_key in secrets).")
+    last_response = None
+    for label, key in keys:
+        try:
+            r = requests.get(
+                url, params=params,
+                headers={'Authorization': f'Bearer {key}'},
+                timeout=timeout,
+            )
+        except Exception as e:
+            print(f"VesselAPI {label} key request error: {e}")
+            continue
+        last_response = r
+        if r.status_code == 429:
+            # Mark this key rate-limited so the UI can surface it.
+            st.session_state.setdefault('vesselapi_rate_limited_keys', set()).add(label)
+            print(f"VesselAPI {label} key rate-limited; trying next key.")
+            continue
+        return r, label
+    return last_response, 'rate_limited_all'
 
 
 # ──────────────────────────────────────────────
@@ -201,20 +242,33 @@ def _bump_count(n=1, label=''):
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
-def _search_vessel_by_name(api_key, name):
-    """Search VesselAPI for a vessel name.
-    Returns (mmsi, raw_record, full_search_payload) — third value used for
-    diagnostics so the user can inspect what the API actually returned."""
+def _search_vessel_by_name(name):
+    """Search VesselAPI by vessel name. Tries primary key, falls back to
+    backup on 429. Cached per name for 24h.
+    Returns (mmsi, raw_record, diagnostic_payload)."""
     url = f"{VESSELAPI_BASE}/search/vessels"
     params = {'filter.name': name, 'pagination.limit': 5}
-    headers = {'Authorization': f'Bearer {api_key}'}
     try:
-        r = requests.get(url, params=params, headers=headers, timeout=15)
-        r.raise_for_status()
+        r, key_used = _http_get(url, params=params)
+        if r is None:
+            return None, None, {'error': 'no response', 'request_url': url, 'params': params}
+        if r.status_code == 429:
+            return None, None, {
+                'error': 'all VesselAPI keys rate-limited (429)',
+                'request_url': r.url, 'key_used': key_used,
+            }
+        if r.status_code != 200:
+            return None, None, {
+                'error': f"HTTP {r.status_code}",
+                'request_url': r.url,
+                'body': r.text[:500],
+                'key_used': key_used,
+            }
         data = r.json() or {}
         vessels = data.get('vessels') or []
+        diag = {'request_url': r.url, 'raw': data, 'key_used': key_used}
         if not vessels:
-            return None, None, {'request_url': r.url, 'raw': data}
+            return None, None, diag
         target = name.strip().lower()
         best = None
         for v in vessels:
@@ -222,32 +276,42 @@ def _search_vessel_by_name(api_key, name):
                 best = v
                 break
         best = best or vessels[0]
-        return best.get('mmsi'), best, {'request_url': r.url, 'raw': data}
+        return best.get('mmsi'), best, diag
     except Exception as e:
         return None, None, {'error': str(e), 'request_url': url, 'params': params}
 
 
-def _get_vessel_position(api_key, mmsi):
+def _get_vessel_position(mmsi):
     """Fetch latest position for ONE MMSI via /vessel/{id}/position.
+    Tries primary VesselAPI key, falls back to backup on 429.
     Returns (position_record_or_None, diagnostic_payload).
     Each call counts as 1 billable API request."""
     url = f"{VESSELAPI_BASE}/vessel/{mmsi}/position"
     params = {'filter.idType': 'mmsi'}
-    headers = {'Authorization': f'Bearer {api_key}'}
     try:
-        r = requests.get(url, params=params, headers=headers, timeout=15)
-        r.raise_for_status()
+        r, key_used = _http_get(url, params=params)
+        if r is None:
+            return None, {'error': 'no response', 'request_url': url, 'params': params}
+        if r.status_code == 429:
+            return None, {
+                'error': 'all VesselAPI keys rate-limited (429)',
+                'request_url': r.url, 'key_used': key_used,
+            }
+        if r.status_code != 200:
+            return None, {
+                'error': f"HTTP {r.status_code}",
+                'request_url': r.url,
+                'body': r.text[:500],
+                'key_used': key_used,
+            }
         data = r.json() or {}
-        # The Ship Tracking endpoint wraps the position fields under
-        # 'vesselPosition' (camelCase). Older docs sometimes show 'vessel'.
-        # Fall back to the top-level dict if neither wrapper is present.
         pos = (
             data.get('vesselPosition')
             or data.get('vessel')
             or data.get('position')
             or data
         )
-        return pos, {'request_url': r.url, 'raw': data}
+        return pos, {'request_url': r.url, 'raw': data, 'key_used': key_used}
     except Exception as e:
         return None, {'error': str(e), 'request_url': url, 'params': params}
 
@@ -278,7 +342,7 @@ def _format_age(iso_ts, now_van):
         return ''
 
 
-def _resolve_mmsi(api_key, boat_name, diagnostics):
+def _resolve_mmsi(boat_name, diagnostics):
     """Resolve MMSI for one boat with this priority:
        1. Session-level user override (set via the override UI).
        2. Hard-coded MMSI on the WHALE_FLEET entry.
@@ -297,14 +361,14 @@ def _resolve_mmsi(api_key, boat_name, diagnostics):
     if fleet_entry and fleet_entry.get('mmsi'):
         return int(fleet_entry['mmsi']), {'name': boat_name, 'source': 'fleet_hardcoded'}
 
-    # 3. Cached search-by-name fallback
+    # 3. Cached search-by-name fallback (handles primary→backup key on 429)
     if 'vesselapi_searched_names' not in st.session_state:
         st.session_state['vesselapi_searched_names'] = set()
     seen = st.session_state['vesselapi_searched_names']
     if boat_name not in seen:
         _bump_count(1)
         seen.add(boat_name)
-    mmsi, meta, raw = _search_vessel_by_name(api_key, boat_name)
+    mmsi, meta, raw = _search_vessel_by_name(boat_name)
     diagnostics.setdefault('searches', {})[boat_name] = raw
     return (int(mmsi) if mmsi is not None else None, meta)
 
@@ -321,20 +385,20 @@ def _build_result(boat, mmsi, meta, pos):
     }
 
 
-def _do_fetch_one(api_key, boat):
+def _do_fetch_one(boat):
     """Resolve MMSI then fetch the latest position for ONE fleet boat using
     /vessel/{id}/position. Returns (result_dict, diagnostics_dict)."""
     diagnostics = {'searches': {}, 'positions': {}}
-    mmsi, meta = _resolve_mmsi(api_key, boat['name'], diagnostics)
+    mmsi, meta = _resolve_mmsi(boat['name'], diagnostics)
     pos = None
     if mmsi is not None:
         _bump_count(1)
-        pos, pos_diag = _get_vessel_position(api_key, mmsi)
+        pos, pos_diag = _get_vessel_position(mmsi)
         diagnostics['positions'][boat['name']] = pos_diag
     return _build_result(boat, mmsi, meta, pos), diagnostics
 
 
-def _do_fetch_all(api_key, region=None):
+def _do_fetch_all(region=None):
     """Resolve fleet MMSIs (cached) then fetch each position via the
     single-vessel /vessel/{id}/position endpoint — one call per boat.
     Pass `region=...` to limit the fetch to a subset (e.g. 'Vancouver').
@@ -344,11 +408,11 @@ def _do_fetch_all(api_key, region=None):
     for boat in WHALE_FLEET:
         if region and boat.get('region') != region:
             continue
-        mmsi, meta = _resolve_mmsi(api_key, boat['name'], diagnostics)
+        mmsi, meta = _resolve_mmsi(boat['name'], diagnostics)
         pos = None
         if mmsi is not None:
             _bump_count(1)
-            pos, pos_diag = _get_vessel_position(api_key, mmsi)
+            pos, pos_diag = _get_vessel_position(mmsi)
             diagnostics['positions'][boat['name']] = pos_diag
         results.append(_build_result(boat, mmsi, meta, pos))
     return results, diagnostics
@@ -383,12 +447,21 @@ def display_whales2_page(container=None):
         f"**Source:** [{SOURCE_URL}]({SOURCE_URL}) — Ship Tracking REST lookups by name + MMSI."
     )
 
-    api_key = _api_key()
-    if not api_key:
+    keys_available = _api_keys_list()
+    if not keys_available:
         draw.error(
-            "VesselAPI key missing. Add `vesselapi_key` to `.streamlit/secrets.toml`."
+            "VesselAPI key missing. Add `vesselapi_key` (and optionally a "
+            "backup `vesselapi2_key`) to `.streamlit/secrets.toml`."
         )
         return
+
+    rate_limited = st.session_state.get('vesselapi_rate_limited_keys') or set()
+    if rate_limited:
+        labels = ', '.join(sorted(rate_limited))
+        draw.warning(
+            f"⚠️ {labels} VesselAPI key(s) hit rate-limit this session — "
+            f"requests are auto-falling-back to the next available key."
+        )
 
     # Initialize session state
     st.session_state.setdefault('vesselapi_request_count', 0)
@@ -469,7 +542,7 @@ def display_whales2_page(container=None):
     if fetch_clicked:
         with st.spinner("Querying VesselAPI for fleet positions…"):
             try:
-                results, diagnostics = _do_fetch_all(api_key)
+                results, diagnostics = _do_fetch_all()
                 st.session_state['vesselapi_last_results'] = results
                 st.session_state['vesselapi_last_diagnostics'] = diagnostics
                 st.session_state['vesselapi_last_fetched_at'] = datetime.now(
@@ -481,7 +554,7 @@ def display_whales2_page(container=None):
     if fetch_van_clicked:
         with st.spinner("Updating Vancouver-area boats…"):
             try:
-                new_results, diag = _do_fetch_all(api_key, region='Vancouver')
+                new_results, diag = _do_fetch_all(region='Vancouver')
                 merged = _merge_results(
                     st.session_state.get('vesselapi_last_results'), new_results
                 )
@@ -504,7 +577,7 @@ def display_whales2_page(container=None):
         else:
             with st.spinner(f"Looking up {target_boat['name']}…"):
                 try:
-                    one_result, one_diag = _do_fetch_one(api_key, target_boat)
+                    one_result, one_diag = _do_fetch_one(target_boat)
                     # Merge: replace Salish Sea Freedom's row in stored results, or
                     # initialize results with just that boat if no prior fetch.
                     prior = st.session_state.get('vesselapi_last_results') or []
