@@ -93,37 +93,23 @@ def _search_vessel_by_name(api_key, name):
         return None, None, {'error': str(e), 'request_url': url, 'params': params}
 
 
-def _get_vessel_positions_batch(api_key, mmsis):
-    """Fetch latest positions for multiple MMSIs in a single Ship Tracking API call.
-    Uses /vessels/positions — one billable request regardless of fleet size.
-    Returns (positions_by_mmsi_dict, raw_response_or_error_dict)."""
-    if not mmsis:
-        return {}, {'note': 'no MMSIs to query'}
-    url = f"{VESSELAPI_BASE}/vessels/positions"
-    # Default time.from is "past 2 hours" which is too narrow for whale-watching
-    # boats that may be docked overnight. Look back 7 days so we always see the
-    # latest reported position.
-    look_back = (datetime.utcnow() - pd.Timedelta(days=7))
-    params = {
-        'filter.ids': ','.join(str(m) for m in mmsis),
-        'filter.idType': 'mmsi',
-        'pagination.limit': 50,
-        'time.from': look_back.strftime('%Y-%m-%dT%H:%M:%SZ'),
-    }
+def _get_vessel_position(api_key, mmsi):
+    """Fetch latest position for ONE MMSI via /vessel/{id}/position.
+    Returns (position_record_or_None, diagnostic_payload).
+    Each call counts as 1 billable API request."""
+    url = f"{VESSELAPI_BASE}/vessel/{mmsi}/position"
+    params = {'filter.idType': 'mmsi'}
     headers = {'Authorization': f'Bearer {api_key}'}
     try:
-        r = requests.get(url, params=params, headers=headers, timeout=20)
+        r = requests.get(url, params=params, headers=headers, timeout=15)
         r.raise_for_status()
         data = r.json() or {}
-        items = data.get('vessels') or data.get('positions') or data.get('data') or []
-        out = {}
-        for v in items:
-            mmsi = _pos_field(v, 'mmsi', 'MMSI')
-            if mmsi is not None:
-                out[int(mmsi)] = v
-        return out, {'request_url': r.url, 'raw': data}
+        # The endpoint may wrap the result under 'vessel' (snake_case docs) or
+        # return the position fields at the top level (camelCase example).
+        pos = data.get('vessel') if isinstance(data.get('vessel'), dict) else data
+        return pos, {'request_url': r.url, 'raw': data}
     except Exception as e:
-        return {}, {'error': str(e), 'request_url': url, 'params': params}
+        return None, {'error': str(e), 'request_url': url, 'params': params}
 
 
 def _format_age(iso_ts, now_van):
@@ -152,49 +138,59 @@ def _format_age(iso_ts, now_van):
         return ''
 
 
-def _do_fetch_all(api_key):
-    """Resolve fleet MMSIs (cached search-by-name calls) then fetch all
-    positions in a SINGLE batch /vessels/positions call.
-    Returns (results_list, diagnostics_dict)."""
+def _resolve_mmsi(api_key, boat_name, diagnostics):
+    """Search-by-name (cached 24h) and return (mmsi, meta) for one boat.
+    Counts the call only the first time the name is resolved this session."""
     if 'vesselapi_searched_names' not in st.session_state:
         st.session_state['vesselapi_searched_names'] = set()
-    seen_names = st.session_state['vesselapi_searched_names']
-
-    diagnostics = {'searches': {}, 'positions': None}
-
-    boat_to_mmsi = {}
-    boat_to_meta = {}
-    for boat in WHALE_FLEET:
-        if boat['name'] not in seen_names:
-            _bump_count(1)
-            seen_names.add(boat['name'])
-
-        mmsi, meta, raw = _search_vessel_by_name(api_key, boat['name'])
-        diagnostics['searches'][boat['name']] = raw
-        if mmsi is not None:
-            boat_to_mmsi[boat['name']] = int(mmsi)
-            boat_to_meta[boat['name']] = meta
-
-    positions_by_mmsi = {}
-    if boat_to_mmsi:
+    seen = st.session_state['vesselapi_searched_names']
+    if boat_name not in seen:
         _bump_count(1)
-        positions_by_mmsi, pos_diag = _get_vessel_positions_batch(
-            api_key, list(boat_to_mmsi.values())
-        )
-        diagnostics['positions'] = pos_diag
+        seen.add(boat_name)
+    mmsi, meta, raw = _search_vessel_by_name(api_key, boat_name)
+    diagnostics.setdefault('searches', {})[boat_name] = raw
+    return (int(mmsi) if mmsi is not None else None, meta)
 
+
+def _build_result(boat, mmsi, meta, pos):
+    last_seen_iso = _pos_field(
+        pos, 'timestamp', 'lastSeen', 'last_seen', 'processed_timestamp')
+    return {
+        **boat,
+        'mmsi': mmsi,
+        'position': pos,
+        'meta': meta,
+        'last_seen_iso': last_seen_iso,
+    }
+
+
+def _do_fetch_one(api_key, boat):
+    """Resolve MMSI then fetch the latest position for ONE fleet boat using
+    /vessel/{id}/position. Returns (result_dict, diagnostics_dict)."""
+    diagnostics = {'searches': {}, 'positions': {}}
+    mmsi, meta = _resolve_mmsi(api_key, boat['name'], diagnostics)
+    pos = None
+    if mmsi is not None:
+        _bump_count(1)
+        pos, pos_diag = _get_vessel_position(api_key, mmsi)
+        diagnostics['positions'][boat['name']] = pos_diag
+    return _build_result(boat, mmsi, meta, pos), diagnostics
+
+
+def _do_fetch_all(api_key):
+    """Resolve fleet MMSIs (cached) then fetch each position via the
+    single-vessel /vessel/{id}/position endpoint — one call per boat.
+    Returns (results_list, diagnostics_dict)."""
+    diagnostics = {'searches': {}, 'positions': {}}
     results = []
     for boat in WHALE_FLEET:
-        mmsi = boat_to_mmsi.get(boat['name'])
-        pos = positions_by_mmsi.get(mmsi) if mmsi is not None else None
-        last_seen_iso = _pos_field(pos, 'timestamp', 'lastSeen', 'last_seen', 'processed_timestamp')
-        results.append({
-            **boat,
-            'mmsi': mmsi,
-            'position': pos,
-            'meta': boat_to_meta.get(boat['name']),
-            'last_seen_iso': last_seen_iso,
-        })
+        mmsi, meta = _resolve_mmsi(api_key, boat['name'], diagnostics)
+        pos = None
+        if mmsi is not None:
+            _bump_count(1)
+            pos, pos_diag = _get_vessel_position(api_key, mmsi)
+            diagnostics['positions'][boat['name']] = pos_diag
+        results.append(_build_result(boat, mmsi, meta, pos))
     return results, diagnostics
 
 
@@ -220,7 +216,7 @@ def display_whales2_page(container=None):
     st.session_state.setdefault('vesselapi_last_fetched_at', None)
 
     # ── Header row: counter + Fetch button ──
-    c1, c2, c3 = draw.columns([1, 1, 1])
+    c1, c2, c3, c4 = draw.columns([1, 1, 1.1, 1.4])
     c1.metric("API requests this session", st.session_state['vesselapi_request_count'])
     if st.session_state['vesselapi_last_fetched_at']:
         c2.metric(
@@ -231,10 +227,17 @@ def display_whales2_page(container=None):
         c2.metric("Last fetched", "Never")
 
     fetch_clicked = c3.button(
-        "🛰 Fetch positions",
+        "🛰 Fetch all positions",
         type='primary',
-        help="Triggers a name-search (cached 24h) + position lookup per fleet vessel. "
-             "Each call increments the counter on the left.",
+        help="Resolves MMSIs (cached 24h) then calls /vessel/{id}/position for "
+             "each fleet boat — 1 API request per boat. Each call increments "
+             "the counter on the left.",
+    )
+
+    fetch_one_clicked = c4.button(
+        "🔎 Lookup Salish Sea Freedom",
+        help="Search + single-vessel position lookup for Salish Sea Freedom only. "
+             "Useful for testing without burning the full-fleet quota.",
     )
 
     if fetch_clicked:
@@ -247,6 +250,35 @@ def display_whales2_page(container=None):
                     pytz.timezone('America/Vancouver'))
             except Exception as e:
                 draw.error(f"Fetch failed: {e}")
+
+    if fetch_one_clicked:
+        # Find the Salish Sea Freedom entry from the fleet list
+        target_boat = next(
+            (b for b in WHALE_FLEET if b['name'].lower() == 'salish sea freedom'),
+            None,
+        )
+        if target_boat is None:
+            draw.error("Salish Sea Freedom not in fleet list.")
+        else:
+            with st.spinner(f"Looking up {target_boat['name']}…"):
+                try:
+                    one_result, one_diag = _do_fetch_one(api_key, target_boat)
+                    # Merge: replace Salish Sea Freedom's row in stored results, or
+                    # initialize results with just that boat if no prior fetch.
+                    prior = st.session_state.get('vesselapi_last_results') or []
+                    if prior:
+                        prior = [
+                            one_result if r.get('name') == target_boat['name'] else r
+                            for r in prior
+                        ]
+                    else:
+                        prior = [one_result]
+                    st.session_state['vesselapi_last_results'] = prior
+                    st.session_state['vesselapi_last_diagnostics'] = one_diag
+                    st.session_state['vesselapi_last_fetched_at'] = datetime.now(
+                        pytz.timezone('America/Vancouver'))
+                except Exception as e:
+                    draw.error(f"Lookup failed: {e}")
 
     results = st.session_state.get('vesselapi_last_results')
     diagnostics = st.session_state.get('vesselapi_last_diagnostics')
