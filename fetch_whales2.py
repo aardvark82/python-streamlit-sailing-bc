@@ -468,11 +468,20 @@ def display_whales2_page(container=None):
     st.session_state.setdefault('vesselapi_last_results', None)
     st.session_state.setdefault('vesselapi_last_fetched_at', None)
 
-    # ── Header row: counter + Fetch button ──
-    c1, c2, c3, c4 = draw.columns([1, 1, 1.1, 1.4])
+    # Prominent shared staleness banner (color-coded by age) — replaces the
+    # 'Last fetched' metric tile to save vertical space and stay consistent
+    # with the other Live Data pages.
+    from utils import display_last_updated_badge
+    display_last_updated_badge(
+        draw,
+        st.session_state.get('vesselapi_last_fetched_at'),
+        label="Last updated",
+    )
 
-    # Pull persistent count from Cloudflare KV; fall back to session counter
-    # if KV isn't configured / reachable.
+    # ── Header row: counter + Fetch buttons ──
+    c1, c3, c4 = draw.columns([1.3, 1.1, 1.4])
+
+    # Pull persistent count from Cloudflare KV; fall back to session counter.
     last_30_count = _count_vesselapi_calls_last_30_days()
     if last_30_count is not None:
         c1.metric("API requests (last 30 days)", last_30_count)
@@ -482,14 +491,6 @@ def display_whales2_page(container=None):
             st.session_state['vesselapi_request_count'],
             help="Cloudflare KV not configured — falling back to session count.",
         )
-
-    if st.session_state['vesselapi_last_fetched_at']:
-        c2.metric(
-            "Last fetched",
-            st.session_state['vesselapi_last_fetched_at'].strftime('%I:%M:%S %p'),
-        )
-    else:
-        c2.metric("Last fetched", "Never")
 
     fetch_clicked = c3.button(
         "🛰 Fetch all positions",

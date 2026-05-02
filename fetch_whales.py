@@ -242,8 +242,10 @@ def display_whales_page(container=None):
         return
 
     if fetched_at is not None:
+        # Shared prominent staleness banner across pages
+        from utils import display_last_updated_badge
+        display_last_updated_badge(draw, fetched_at, label="Last updated")
         draw.caption(
-            f"Last fetch: {fetched_at.strftime('%I:%M:%S %p')} · "
             f"{len(all_records)} vessels heard this window · "
             f"{learned_names_total} known MMSIs (cumulative this session) · "
             f"{len(matched)} matched whale-watching fleet"

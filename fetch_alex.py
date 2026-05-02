@@ -19,6 +19,8 @@ import pandas as pd
 import pytz
 import plotly.graph_objects as go
 
+from utils import display_last_updated_badge
+
 
 FLESPI_BASE = "https://flespi.io/gw"
 DEVICE_IMEI = "862094065008336"
@@ -121,12 +123,6 @@ def display_alex_page(container=None):
     draw = container or st
     draw.subheader("📍 Alex's Zodiac Pro 420 — Live Location")
 
-    # Banner — token expiry reminder
-    draw.warning(
-        "🔑 Flespi token expires **May 1, 2027** — generate a new one at "
-        "[flespi.io](https://flespi.io) when needed."
-    )
-
     # Secret presence check
     try:
         st.secrets["flespi_api_key"]
@@ -158,18 +154,17 @@ def display_alex_page(container=None):
     last_ts = tele.get('_ts') or tele.get('server.timestamp') or tele.get('timestamp')
 
     now_van = datetime.now(pytz.timezone('America/Vancouver'))
+    last_seen_str = _format_age(last_ts, now_van) or "no recent fix"
+
+    # Prominent staleness banner so the user immediately knows how fresh
+    # the position is (color-coded green/orange/red by age).
+    display_last_updated_badge(draw, last_ts, label="Last seen")
 
     # ── 3 boxes at top: latitude / speed / longitude ──
     c1, c2, c3 = draw.columns(3)
     c1.metric("Latitude",  f"{lat:.5f}"  if lat   is not None else "—")
     c2.metric("Speed (kph)", f"{speed:.1f}" if speed is not None else "—")
     c3.metric("Longitude", f"{lon:.5f}"  if lon   is not None else "—")
-
-    last_seen_str = _format_age(last_ts, now_van) or "no recent fix"
-    draw.caption(
-        f"**Last seen: {last_seen_str}** · {DEVICE_NAME} · {DEVICE_MODEL} · "
-        f"IMEI {DEVICE_IMEI}"
-    )
 
     # ── Last 6h trail ──
     try:
@@ -292,3 +287,13 @@ def display_alex_page(container=None):
             draw.warning(f"History table render failed: {e}")
     else:
         draw.caption("No position fixes recorded in the last 6 hours.")
+
+    # Token expiry reminder — moved below the map per user request so it
+    # doesn't push the live data down on first paint.
+    draw.caption(
+        f"_{DEVICE_NAME} · {DEVICE_MODEL} · IMEI {DEVICE_IMEI}_"
+    )
+    draw.info(
+        "🔑 Flespi token expires **May 1, 2027** — generate a new one at "
+        "[flespi.io](https://flespi.io) when needed."
+    )
