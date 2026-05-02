@@ -408,7 +408,7 @@ def display_alex_page(container=None):
             mode='markers+text',
             marker=dict(size=11, color=station_colors, opacity=0.9),
             text=station_labels,
-            textposition='top right',
+            textposition='bottom center',
             textfont=dict(size=11, color='#0f172a'),
             name='Marine stations',
             hovertemplate=station_hovers,
