@@ -241,8 +241,6 @@ def parseJerichoWindHistory(container=None):
     draw = container or st
 
     url = "https://jsca.bc.ca/main/downld02.txt"
-    container.write('https://jsca.bc.ca/services/weather/ -  data from csv ' + url)
-
     res = cached_fetch_url(url)
 
     csv_raw = res.content.decode('utf-8')
@@ -279,7 +277,10 @@ def parseJerichoWindHistory(container=None):
         wind_trend = None
 
     displayWindWarningIfNeeded(last_row['Wind Hi Speed'], container=draw)
-    displayStreamlitDateTime(last_row['datetime'], draw, label="Last reading")
+    displayStreamlitDateTime(
+        last_row['datetime'], draw, label="Last reading",
+        source_url=url, source_label='jsca.bc.ca csv',
+    )
 
     col1, col2, col3 = draw.columns(3)
     col1.metric(label="Wind Speed", value=last_row['Wind Speed'], delta=wind_trend, delta_color="inverse")
