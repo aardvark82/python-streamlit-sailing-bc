@@ -323,15 +323,15 @@ def display_alex_page(container=None):
     # Sort oldest-first so the line draws in chronological order
     pts.sort(key=lambda p: p.get('ts') or 0)
 
-    # ── Map zoom controls ──
+    # ── Map zoom controls (±2 per click for snappier feel) ──
     st.session_state.setdefault('alex_map_zoom', 9.4)
     z1, z2, _ = draw.columns([0.4, 0.4, 4])
     if z1.button("🔍+", key='alex_zoom_in', help="Zoom map in"):
         st.session_state['alex_map_zoom'] = min(
-            st.session_state['alex_map_zoom'] + 1, 14)
+            st.session_state['alex_map_zoom'] + 2, 16)
     if z2.button("🔎−", key='alex_zoom_out', help="Zoom map out"):
         st.session_state['alex_map_zoom'] = max(
-            st.session_state['alex_map_zoom'] - 1, 4)
+            st.session_state['alex_map_zoom'] - 2, 3)
 
     # ── Map ──
     fig = go.Figure()
@@ -425,7 +425,9 @@ def display_alex_page(container=None):
             marker=dict(size=12, color=scolor, opacity=0.95),
             text=[slabel],
             textposition='bottom center',
-            textfont=dict(size=14, color=scolor),
+            # Wind value rendered in bold black for max legibility on any
+            # basemap; the dot itself keeps the speed-bucket color.
+            textfont=dict(size=14, color='#000000', family='Open Sans Bold'),
             name='Marine stations',
             hovertemplate=shover,
             showlegend=False,

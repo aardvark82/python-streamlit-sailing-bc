@@ -523,15 +523,15 @@ def display_whales2_page(container=None):
         help="Zoom map out.",
     )
 
-    # Map zoom state — adjusted by the buttons above
+    # Map zoom state — adjusted by the buttons above (±2 per click)
     st.session_state.setdefault('whales2_map_zoom', 8.5)
     if zoom_in_clicked:
         st.session_state['whales2_map_zoom'] = min(
-            st.session_state['whales2_map_zoom'] + 1, 14
+            st.session_state['whales2_map_zoom'] + 2, 16
         )
     if zoom_out_clicked:
         st.session_state['whales2_map_zoom'] = max(
-            st.session_state['whales2_map_zoom'] - 1, 4
+            st.session_state['whales2_map_zoom'] - 2, 3
         )
 
     def _bust_count_cache():

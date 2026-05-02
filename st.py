@@ -354,7 +354,9 @@ def drawMapWithBuoy(container=None, buoy=None, wind_kts=None,
         marker=dict(size=14, color=color, opacity=0.95),
         text=[label],
         textposition='bottom center',
-        textfont=dict(size=16, color=color),
+        # Wind value: bold black for legibility on any basemap; the dot keeps
+        # the bucketed speed color.
+        textfont=dict(size=16, color='#000000', family='Open Sans Bold'),
         hovertemplate=(
             f"<b>Buoy {buoy}</b><br>"
             f"Wind: {(direction + ' ') if direction else ''}{kts_text}"

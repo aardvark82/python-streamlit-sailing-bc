@@ -298,15 +298,15 @@ def display_whales_page(container=None):
             "The page auto-refreshes every 5 minutes."
         )
 
-    # ── Map zoom controls ──
+    # ── Map zoom controls (±2 per click) ──
     st.session_state.setdefault('whales1_map_zoom', 8.5)
     z1, z2, _ = draw.columns([0.4, 0.4, 4])
     if z1.button("🔍+", key='whales1_zoom_in', help="Zoom map in"):
         st.session_state['whales1_map_zoom'] = min(
-            st.session_state['whales1_map_zoom'] + 1, 14)
+            st.session_state['whales1_map_zoom'] + 2, 16)
     if z2.button("🔎−", key='whales1_zoom_out', help="Zoom map out"):
         st.session_state['whales1_map_zoom'] = max(
-            st.session_state['whales1_map_zoom'] - 1, 4)
+            st.session_state['whales1_map_zoom'] - 2, 3)
 
     # ── Map (only when we have positions) ──
     if matched:
