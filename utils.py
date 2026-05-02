@@ -27,8 +27,11 @@ def prettydate(d):
     return timeago_format(d, now_vancouver)
 
 
-def displayStreamlitDateTime(datetime_input, container=None):
-    """Accepts a string or datetime object, tries its best at recognizing/parsing it, and displays it in Streamlit format."""
+def displayStreamlitDateTime(datetime_input, container=None, label="Last updated"):
+    """Render a prominent color-coded staleness badge for a datetime/string.
+    Replaces the older title+text layout so every page shows freshness in
+    the same harmonised format. The optional `label` lets callers say
+    'Issued', 'Sampled', etc."""
     draw = container or st
     if isinstance(datetime_input, str):
         tzinfos = {
@@ -39,8 +42,7 @@ def displayStreamlitDateTime(datetime_input, container=None):
     else:
         datetime_van = datetime_input.replace(tzinfo=gettz('America/Vancouver'))
 
-    draw.title(prettydate(datetime_van))
-    draw.text(datetime_van)
+    display_last_updated_badge(draw, datetime_van, label=label)
 
 
 def _relative_time_phrase(secs):

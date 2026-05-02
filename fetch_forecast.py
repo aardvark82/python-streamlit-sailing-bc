@@ -341,8 +341,9 @@ def display_summary_marine_forecast_for_url(draw=None, url='', title=''):
         wind_warning = result['wind_warning']
         strong_wind_warning = result['strong_wind_warning']
 
-        relative_date = timeago_format(issue_date, datetime.now(pytz.timezone('America/Vancouver')))
-        draw.subheader(f"{title} Issued {relative_date}")
+        from utils import display_last_updated_badge
+        draw.subheader(title)
+        display_last_updated_badge(draw, issue_date, label="Issued")
         draw.write(url)
 
         if wind_warning:

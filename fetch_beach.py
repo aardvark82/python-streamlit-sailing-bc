@@ -250,9 +250,9 @@ def display_beach_quality_for_sandy_cove(draw=None, title=''):
         st.warning('Beach water quality data unavailable — the VCH PDF may be slow or temporarily down. Will retry on next refresh.')
         return
 
-    # Prominent measurement date
-    relative_date = timeago_format(time_measurement, datetime.now(pytz.timezone('America/Vancouver')))
-    draw.subheader(f"Sampled {relative_date}")
+    # Prominent measurement date — harmonised colored staleness badge
+    from utils import display_last_updated_badge
+    display_last_updated_badge(draw, time_measurement, label="Sampled")
     draw.caption(time_measurement.strftime('%A, %B %d %Y at %I:%M %p'))
 
     # Legend

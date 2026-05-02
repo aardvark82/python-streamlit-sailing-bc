@@ -279,7 +279,7 @@ def parseJerichoWindHistory(container=None):
         wind_trend = None
 
     displayWindWarningIfNeeded(last_row['Wind Hi Speed'], container=draw)
-    displayStreamlitDateTime(last_row['datetime'], draw)
+    displayStreamlitDateTime(last_row['datetime'], draw, label="Last reading")
 
     col1, col2, col3 = draw.columns(3)
     col1.metric(label="Wind Speed", value=last_row['Wind Speed'], delta=wind_trend, delta_color="inverse")
@@ -805,7 +805,7 @@ def refreshBuoy(buoy='46146', title='Halibut Bank - 46146', container=None,
     winds = re.findall(r'\d+', data_wind)
     highest_wind = int(winds[0]) if winds else 0
     displayWindWarningIfNeeded(highest_wind, container=draw)
-    displayStreamlitDateTime(time, draw)
+    displayStreamlitDateTime(time, draw, label="Issued")
     draw.text(data_wind)
 
     waves = re.findall(r"[-+]?\d*\.\d+|\d+", data_wave_height)
