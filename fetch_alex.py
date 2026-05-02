@@ -358,6 +358,10 @@ def display_alex_page(container=None):
         ))
 
     # ── Marine station overlay (wind / wave at nearby weather stations) ──
+    # Color the dot by wind speed using the same buckets as the wind arrows:
+    #   <5 blue, <10 green, <20 orange, <30 red, 30+ black.
+    from wind_utils import _color_for_speed
+
     station_lats, station_lons, station_labels, station_hovers, station_colors = [], [], [], [], []
     for s in MARINE_STATIONS:
         try:
@@ -400,7 +404,13 @@ def display_alex_page(container=None):
         station_lons.append(s['lon'])
         station_labels.append(label)
         station_hovers.append(hover)
-        station_colors.append(s['color'])
+        # Wind-bucket color overrides the per-station color so the user can
+        # spot the strongest spot at a glance.
+        try:
+            speed_for_color = float(w_kts) if w_kts is not None else 0
+        except (TypeError, ValueError):
+            speed_for_color = 0
+        station_colors.append(_color_for_speed(speed_for_color))
 
     if station_lats:
         fig.add_trace(go.Scattermapbox(
