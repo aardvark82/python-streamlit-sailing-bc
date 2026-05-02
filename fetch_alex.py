@@ -9,7 +9,9 @@ Renders a Plotly Mapbox map (open-street-map style — no Mapbox token needed)
 with the historical trail and the current marker.
 """
 
+import io
 import json
+import re
 import time as time_module
 from datetime import datetime, timedelta
 
@@ -18,8 +20,24 @@ import streamlit as st
 import pandas as pd
 import pytz
 import plotly.graph_objects as go
+from bs4 import BeautifulSoup
 
-from utils import display_last_updated_badge
+from utils import display_last_updated_badge, cached_fetch_url, cached_fetch_url_live
+
+
+# Local marine stations to overlay on the Alex map
+MARINE_STATIONS = [
+    {'name': 'Pam Rocks',     'kind': 'buoy', 'buoy_id': 'WAS',
+     'lat': 49.490, 'lon': -123.300, 'color': '#9333ea'},
+    {'name': 'Halibut Bank',  'kind': 'buoy', 'buoy_id': '46146',
+     'lat': 49.340, 'lon': -123.720, 'color': '#0891b2'},
+    {'name': 'Pt Atkinson',   'kind': 'buoy', 'buoy_id': 'WSB',
+     'lat': 49.3304, 'lon': -123.2646, 'color': '#16a34a'},
+    {'name': 'Jericho',       'kind': 'jericho',
+     'lat': 49.275, 'lon': -123.198, 'color': '#ca8a04'},
+    {'name': 'Howe Sound',    'kind': 'howe_forecast',
+     'lat': 49.580, 'lon': -123.300, 'color': '#dc2626'},
+]
 
 
 FLESPI_BASE = "https://flespi.io/gw"
@@ -95,6 +113,82 @@ def _fetch_messages_last_n_hours(device_id, hours=6):
     r = requests.get(url, headers=_flespi_headers(), params=params, timeout=20)
     r.raise_for_status()
     return (r.json() or {}).get('result') or []
+
+
+@st.cache_data(ttl=180, show_spinner=False)
+def _fetch_buoy_summary(buoy_id):
+    """Returns dict {direction, wind_kts, wave_m, raw} for a weather.gc.ca buoy.
+    None values when the field isn't reported. Cached 3 min like the live buoy
+    fetch elsewhere."""
+    url = (
+        'https://www.weather.gc.ca/marine/weatherConditions-currentConditions_e.html'
+        f'?mapID=02&siteID=14305&stationID={buoy_id}'
+    )
+    try:
+        res = cached_fetch_url_live(url)
+        soup = BeautifulSoup(res.content, 'html.parser')
+        table = soup.find('table', class_='table')
+        if not table or not table.tbody:
+            return None
+        rows = table.tbody.find_all('tr')
+        wind_text = rows[0].find_all('td')[0].text.strip()
+        parts = wind_text.split()
+        direction = parts[0] if parts else None
+        nums = re.findall(r'\d+', wind_text)
+        wind_kts = max(int(n) for n in nums) if nums else None
+        wave_m = None
+        if buoy_id in ('46146', '46304') and len(rows) > 1:
+            wave_text = rows[1].find_all('td')[0].text.strip()
+            wave_nums = re.findall(r'[-+]?\d*\.\d+|\d+', wave_text)
+            if wave_nums:
+                try:
+                    wave_m = float(wave_nums[0])
+                except ValueError:
+                    pass
+        return {'direction': direction, 'wind_kts': wind_kts,
+                'wave_m': wave_m, 'raw': wind_text}
+    except Exception as e:
+        print(f"Buoy {buoy_id} summary failed: {e}")
+        return None
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _fetch_jericho_summary():
+    """Last reading from the Jericho Beach weather CSV. Cached 10 min."""
+    try:
+        url = "https://jsca.bc.ca/main/downld02.txt"
+        res = cached_fetch_url(url)
+        csv_raw = res.content.decode('utf-8')
+        lines = csv_raw.splitlines()
+        csv_fixed = '\n'.join(lines[3:])
+        df = pd.read_csv(io.StringIO(csv_fixed), header=None, sep=r'\s+')
+        last = df.iloc[-1]
+        # Column positions: 7 = Wind Speed, 8 = Wind Dir, 10 = Wind Hi Speed
+        wind_speed = float(last.iloc[7]) if pd.notna(last.iloc[7]) else None
+        wind_dir = str(last.iloc[8]) if pd.notna(last.iloc[8]) else None
+        return {'direction': wind_dir, 'wind_kts': wind_speed,
+                'wave_m': None, 'raw': f"{wind_dir} {wind_speed}kts"}
+    except Exception as e:
+        print(f"Jericho summary failed: {e}")
+        return None
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _fetch_howe_sound_summary():
+    """Howe Sound marine forecast — current period wind from GPT-parsed CSV."""
+    try:
+        from fetch_gonogo import _get_howe_sound_forecast_rows
+        rows = _get_howe_sound_forecast_rows()
+        if not rows:
+            return None
+        r = rows[0]
+        wind_kts = r.get('max_wind_speed') or r.get('wind_speed')
+        period = r.get('time') or 'now'
+        return {'direction': None, 'wind_kts': wind_kts,
+                'wave_m': None, 'raw': f"forecast {period}: {wind_kts}kts"}
+    except Exception as e:
+        print(f"Howe Sound forecast summary failed: {e}")
+        return None
 
 
 def _format_age(unix_ts, now_van):
@@ -261,6 +355,63 @@ def display_alex_page(container=None):
                 "Time: %{customdata[0]}<br>"
                 "Speed: %{customdata[1]} kph<extra></extra>"
             ),
+        ))
+
+    # ── Marine station overlay (wind / wave at nearby weather stations) ──
+    station_lats, station_lons, station_labels, station_hovers, station_colors = [], [], [], [], []
+    for s in MARINE_STATIONS:
+        try:
+            if s['kind'] == 'buoy':
+                summary = _fetch_buoy_summary(s['buoy_id'])
+            elif s['kind'] == 'jericho':
+                summary = _fetch_jericho_summary()
+            elif s['kind'] == 'howe_forecast':
+                summary = _fetch_howe_sound_summary()
+            else:
+                summary = None
+        except Exception as e:
+            print(f"Station {s['name']} fetch failed: {e}")
+            summary = None
+
+        if summary is None:
+            continue
+
+        d = summary.get('direction') or ''
+        w_kts = summary.get('wind_kts')
+        w_m = summary.get('wave_m')
+        wind_part = f"{w_kts:.0f}kts" if isinstance(w_kts, (int, float)) else (f"{w_kts}kts" if w_kts else "—")
+        label_parts = [s['name']]
+        if d:
+            label_parts.append(f"{d} {wind_part}")
+        else:
+            label_parts.append(wind_part)
+        if w_m is not None:
+            label_parts.append(f"{w_m * 100:.0f}cm")
+        label = " · ".join(label_parts)
+
+        hover = (
+            f"<b>{s['name']}</b><br>"
+            f"Wind: {d + ' ' if d else ''}{wind_part}"
+            + (f"<br>Wave: {w_m * 100:.0f} cm" if w_m is not None else "")
+            + "<extra></extra>"
+        )
+
+        station_lats.append(s['lat'])
+        station_lons.append(s['lon'])
+        station_labels.append(label)
+        station_hovers.append(hover)
+        station_colors.append(s['color'])
+
+    if station_lats:
+        fig.add_trace(go.Scattermapbox(
+            lat=station_lats, lon=station_lons,
+            mode='markers+text',
+            marker=dict(size=11, color=station_colors, opacity=0.9),
+            text=station_labels,
+            textposition='top right',
+            textfont=dict(size=11, color='#0f172a'),
+            name='Marine stations',
+            hovertemplate=station_hovers,
         ))
 
     # Current marker (red, on top)
