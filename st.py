@@ -805,9 +805,11 @@ def refreshBuoy(buoy='46146', title='Halibut Bank - 46146', container=None,
     winds = re.findall(r'\d+', data_wind)
     highest_wind = int(winds[0]) if winds else 0
     displayWindWarningIfNeeded(highest_wind, container=draw)
-    displayStreamlitDateTime(time, draw, label="Issued", source_url=url,
-                              source_label='weather.gc.ca buoy')
-    draw.text(data_wind)
+    displayStreamlitDateTime(
+        time, draw, label="Issued",
+        source_url=url, source_label='weather.gc.ca buoy',
+        extra_text=data_wind,  # raw observation, e.g. 'W 17 gusts 20'
+    )
 
     waves = re.findall(r"[-+]?\d*\.\d+|\d+", data_wave_height)
     highest_wave = float(waves[0]) if waves else 0.0

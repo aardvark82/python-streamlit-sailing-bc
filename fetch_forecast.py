@@ -343,14 +343,30 @@ def display_summary_marine_forecast_for_url(draw=None, url='', title=''):
 
         from utils import display_last_updated_badge
         draw.subheader(title)
-        display_last_updated_badge(draw, issue_date, label="Issued",
-                                   source_url=url,
-                                   source_label='weather.gc.ca forecast')
 
-        if wind_warning:
-            draw.badge("wind warning in effect", color="orange")
+        # Build an inline pill for wind warnings so they sit on the same row
+        # as the Issued badge / source link instead of taking their own row.
+        warning_html = ''
         if strong_wind_warning:
-            draw.badge("wind warning in effect", color="red")
+            warning_html = (
+                '<span style="margin-left:0.6rem;background:#e74c3c;color:#fff;'
+                'padding:0.35rem 0.7rem;border-radius:8px;font-size:0.9rem;'
+                'font-weight:700;display:inline-block;vertical-align:middle;">'
+                '⚠ Strong Wind Warning</span>'
+            )
+        elif wind_warning:
+            warning_html = (
+                '<span style="margin-left:0.6rem;background:#f39c12;color:#000;'
+                'padding:0.35rem 0.7rem;border-radius:8px;font-size:0.9rem;'
+                'font-weight:700;display:inline-block;vertical-align:middle;">'
+                '⚠ Wind Warning</span>'
+            )
+
+        display_last_updated_badge(
+            draw, issue_date, label="Issued",
+            source_url=url, source_label='weather.gc.ca forecast',
+            extra_html=warning_html or None,
+        )
 
         start_time = time.time()
         chatgpt_forecast = openAIFetchForecastForURL(url=url)

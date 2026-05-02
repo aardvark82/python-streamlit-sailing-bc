@@ -106,8 +106,32 @@ def display_weather_info(container=None, lat=None, long=None, title=''):
 
     vancouver_tz = pytz.timezone('America/Vancouver')
     weather_timestamp_van = weather_data.timestamp.astimezone(vancouver_tz)
-    relative_date = timeago_format(weather_timestamp_van, datetime.now(vancouver_tz))
-    container.subheader(f"Issued {relative_date}")
+
+    # Harmonised staleness badge — consistent with all other pages.
+    from utils import display_last_updated_badge
+    if title:
+        container.subheader(title)
+    source_url = (
+        f"https://openweathermap.org/weathermap?lat={lat}&lon={long}&zoom=10"
+        if lat is not None and long is not None
+        else "https://openweathermap.org/"
+    )
+    raw_summary = ''
+    try:
+        wind_kts = weather_data.wind_speed_now * 1.94384
+        wind_dir_short = get_wind_direction(weather_data.wind_direction_now)
+        raw_summary = (
+            f"{wind_dir_short} {wind_kts:.0f}kts · "
+            f"{weather_data.temperature:.0f}°C · "
+            f"{weather_data.next_3_hours_precipitation:.1f}mm/3h"
+        )
+    except Exception:
+        pass
+    display_last_updated_badge(
+        container, weather_timestamp_van, label="Issued",
+        source_url=source_url, source_label='openweathermap.org',
+        extra_text=raw_summary or None,
+    )
 
     if weather_data:
         col1, col2, col3 = container.columns(3)

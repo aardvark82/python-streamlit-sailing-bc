@@ -28,11 +28,13 @@ def prettydate(d):
 
 
 def displayStreamlitDateTime(datetime_input, container=None, label="Last updated",
-                              source_url=None, source_label=None):
+                              source_url=None, source_label=None,
+                              extra_text=None, extra_html=None):
     """Render a prominent color-coded staleness badge for a datetime/string.
     Replaces the older title+text layout so every page shows freshness in
     the same harmonised format. Optional `source_url` adds a small inline
-    'source ↗' link next to the badge to save vertical space."""
+    'source ↗' link next to the badge to save vertical space; `extra_text`
+    adds a dark monospace pill to its right (e.g. raw 'W 17 gusts 20')."""
     draw = container or st
     if isinstance(datetime_input, str):
         tzinfos = {
@@ -46,6 +48,7 @@ def displayStreamlitDateTime(datetime_input, container=None, label="Last updated
     display_last_updated_badge(
         draw, datetime_van, label=label,
         source_url=source_url, source_label=source_label,
+        extra_text=extra_text, extra_html=extra_html,
     )
 
 
@@ -65,7 +68,8 @@ def _relative_time_phrase(secs):
 
 
 def display_last_updated_badge(container, last_seen, label="Last updated",
-                                now=None, source_url=None, source_label=None):
+                                now=None, source_url=None, source_label=None,
+                                extra_text=None, extra_html=None):
     """Render a prominent, color-coded staleness banner at the top of a page.
 
     Color buckets (Vancouver-local relative age):
@@ -77,6 +81,10 @@ def display_last_updated_badge(container, last_seen, label="Last updated",
     `last_seen` accepts datetime (aware or naive UTC), unix timestamp, or None.
     `source_url`, when provided, renders as a small 'source ↗' link inline
     next to the badge (saves vertical space vs a separate row).
+    `extra_text` (e.g. raw observation 'W 17 gusts 20') renders as a small
+    dark monospace pill to the right of the link, also inline.
+    `extra_html` is appended verbatim to the inline row — use it to add
+    custom warning pills, badges, etc. that need bespoke styling.
     """
     draw = container or st
     van_tz = pytz.timezone('America/Vancouver')
@@ -126,5 +134,20 @@ def display_last_updated_badge(container, last_seen, label="Last updated",
             f'word-break:break-all;">'
             f'🔗 {link_text} ↗</a>'
         )
+
+    if extra_text:
+        # Small neutral pill — handy for raw observation text like 'W 17 gusts 20'
+        badge_html += (
+            f'<span style="margin-left:0.6rem;'
+            f'background:#1f2937;color:#f1f5f9;'
+            f'padding:0.35rem 0.7rem;border-radius:8px;'
+            f'font-size:0.95rem;font-weight:600;'
+            f'display:inline-block;vertical-align:middle;'
+            f'font-family:ui-monospace, SFMono-Regular, Menlo, monospace;">'
+            f'{extra_text}</span>'
+        )
+
+    if extra_html:
+        badge_html += extra_html
 
     draw.markdown(badge_html, unsafe_allow_html=True)
