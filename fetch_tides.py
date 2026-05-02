@@ -736,7 +736,13 @@ def display_point_atkinson_tides(container=None, title="🌊Tides for Point Atki
     draw.subheader(title)
 
     data = None
-    draw.write(CANADA_GOVERNMENT_TIDE_POINT_ATKINSON)
+    # Tiny inline source link — saves vertical space vs a full row.
+    draw.markdown(
+        f'<a href="{CANADA_GOVERNMENT_TIDE_POINT_ATKINSON}" target="_blank" '
+        f'style="font-size:0.85rem;color:#6b7280;text-decoration:none;">'
+        f'🔗 tides.gc.ca ↗</a>',
+        unsafe_allow_html=True,
+    )
 
     # Selenium fetch can take 5–10 seconds — st.spinner is the simplest cross-version
     # way to show a loading indicator (no progress arithmetic, no kwargs that may

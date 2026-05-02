@@ -27,11 +27,12 @@ def prettydate(d):
     return timeago_format(d, now_vancouver)
 
 
-def displayStreamlitDateTime(datetime_input, container=None, label="Last updated"):
+def displayStreamlitDateTime(datetime_input, container=None, label="Last updated",
+                              source_url=None, source_label=None):
     """Render a prominent color-coded staleness badge for a datetime/string.
     Replaces the older title+text layout so every page shows freshness in
-    the same harmonised format. The optional `label` lets callers say
-    'Issued', 'Sampled', etc."""
+    the same harmonised format. Optional `source_url` adds a small inline
+    'source ↗' link next to the badge to save vertical space."""
     draw = container or st
     if isinstance(datetime_input, str):
         tzinfos = {
@@ -42,7 +43,10 @@ def displayStreamlitDateTime(datetime_input, container=None, label="Last updated
     else:
         datetime_van = datetime_input.replace(tzinfo=gettz('America/Vancouver'))
 
-    display_last_updated_badge(draw, datetime_van, label=label)
+    display_last_updated_badge(
+        draw, datetime_van, label=label,
+        source_url=source_url, source_label=source_label,
+    )
 
 
 def _relative_time_phrase(secs):
@@ -60,7 +64,8 @@ def _relative_time_phrase(secs):
     return f'{d} day ago' if d == 1 else f'{d} days ago'
 
 
-def display_last_updated_badge(container, last_seen, label="Last updated", now=None):
+def display_last_updated_badge(container, last_seen, label="Last updated",
+                                now=None, source_url=None, source_label=None):
     """Render a prominent, color-coded staleness banner at the top of a page.
 
     Color buckets (Vancouver-local relative age):
@@ -70,6 +75,8 @@ def display_last_updated_badge(container, last_seen, label="Last updated", now=N
       otherwise    → gray    (very stale / unknown)
 
     `last_seen` accepts datetime (aware or naive UTC), unix timestamp, or None.
+    `source_url`, when provided, renders as a small 'source ↗' link inline
+    next to the badge (saves vertical space vs a separate row).
     """
     draw = container or st
     van_tz = pytz.timezone('America/Vancouver')
@@ -102,11 +109,22 @@ def display_last_updated_badge(container, last_seen, label="Last updated", now=N
         else:
             color, bg = '#374151', '#e5e7eb'   # gray
 
-    draw.markdown(
+    badge_html = (
         f'<div style="background:{bg};color:{color};'
         f'padding:0.6rem 1rem;border-radius:10px;'
         f'font-size:1.15rem;font-weight:700;display:inline-block;'
-        f'margin-bottom:0.6rem;">'
-        f'{label}: {text}</div>',
-        unsafe_allow_html=True,
+        f'margin-bottom:0.6rem;vertical-align:middle;">'
+        f'{label}: {text}</div>'
     )
+
+    if source_url:
+        link_text = source_label or 'source'
+        badge_html += (
+            f'<a href="{source_url}" target="_blank" '
+            f'style="margin-left:0.6rem;font-size:0.85rem;'
+            f'color:#6b7280;text-decoration:none;vertical-align:middle;'
+            f'word-break:break-all;">'
+            f'🔗 {link_text} ↗</a>'
+        )
+
+    draw.markdown(badge_html, unsafe_allow_html=True)

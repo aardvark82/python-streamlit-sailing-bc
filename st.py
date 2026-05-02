@@ -800,12 +800,12 @@ def refreshBuoy(buoy='46146', title='Halibut Bank - 46146', container=None,
         data_watertemp = rows[2].find_all('td')[1].text.strip() + '°C'
 
     draw.subheader('Weather Data for ' + title + ' - ' + buoy)
-    draw.write(url)
 
     winds = re.findall(r'\d+', data_wind)
     highest_wind = int(winds[0]) if winds else 0
     displayWindWarningIfNeeded(highest_wind, container=draw)
-    displayStreamlitDateTime(time, draw, label="Issued")
+    displayStreamlitDateTime(time, draw, label="Issued", source_url=url,
+                              source_label='weather.gc.ca buoy')
     draw.text(data_wind)
 
     waves = re.findall(r"[-+]?\d*\.\d+|\d+", data_wave_height)

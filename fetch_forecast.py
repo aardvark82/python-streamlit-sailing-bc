@@ -343,8 +343,9 @@ def display_summary_marine_forecast_for_url(draw=None, url='', title=''):
 
         from utils import display_last_updated_badge
         draw.subheader(title)
-        display_last_updated_badge(draw, issue_date, label="Issued")
-        draw.write(url)
+        display_last_updated_badge(draw, issue_date, label="Issued",
+                                   source_url=url,
+                                   source_label='weather.gc.ca forecast')
 
         if wind_warning:
             draw.badge("wind warning in effect", color="orange")
