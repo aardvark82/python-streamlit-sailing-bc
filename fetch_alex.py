@@ -244,10 +244,15 @@ def display_alex_page(container=None):
             ),
         ))
 
+    # Center on the boat's last known position so zoom in/out stays focused
+    # on the vessel; fall back to the bbox center if we have no fix.
+    center_lat = lat if lat is not None else CENTER_LAT
+    center_lon = lon if lon is not None else CENTER_LON
+
     fig.update_layout(
         mapbox=dict(
             style='open-street-map',
-            center=dict(lat=CENTER_LAT, lon=CENTER_LON),
+            center=dict(lat=center_lat, lon=center_lon),
             zoom=st.session_state.get('alex_map_zoom', 9.4),
             bounds=dict(
                 west=BBOX['west'], east=BBOX['east'],

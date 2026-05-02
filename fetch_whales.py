@@ -346,10 +346,21 @@ def display_whales_page(container=None):
                     ),
                 ))
 
+            # Center on the first matched fleet boat with a fix so zoom keeps
+            # focus on the boats. Falls back to a Vancouver-area default if no
+            # boat has a position.
+            anchor = next(
+                (m for m in matched
+                 if m.get('lat') is not None and m.get('lon') is not None),
+                None,
+            )
+            center_lat = anchor['lat'] if anchor else 49.20
+            center_lon = anchor['lon'] if anchor else -123.30
+
             fig.update_layout(
                 mapbox=dict(
                     style='open-street-map',
-                    center=dict(lat=49.20, lon=-123.30),
+                    center=dict(lat=center_lat, lon=center_lon),
                     zoom=st.session_state.get('whales1_map_zoom', 8.5),
                 ),
                 margin=dict(l=0, r=0, t=0, b=0),
