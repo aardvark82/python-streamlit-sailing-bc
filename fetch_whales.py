@@ -296,6 +296,16 @@ def display_whales_page(container=None):
             "The page auto-refreshes every 5 minutes."
         )
 
+    # ── Map zoom controls ──
+    st.session_state.setdefault('whales1_map_zoom', 8.5)
+    z1, z2, _ = draw.columns([0.4, 0.4, 4])
+    if z1.button("🔍+", key='whales1_zoom_in', help="Zoom map in"):
+        st.session_state['whales1_map_zoom'] = min(
+            st.session_state['whales1_map_zoom'] + 1, 14)
+    if z2.button("🔎−", key='whales1_zoom_out', help="Zoom map out"):
+        st.session_state['whales1_map_zoom'] = max(
+            st.session_state['whales1_map_zoom'] - 1, 4)
+
     # ── Map (only when we have positions) ──
     if matched:
         try:
@@ -340,7 +350,7 @@ def display_whales_page(container=None):
                 mapbox=dict(
                     style='open-street-map',
                     center=dict(lat=49.20, lon=-123.30),
-                    zoom=8.5,
+                    zoom=st.session_state.get('whales1_map_zoom', 8.5),
                 ),
                 margin=dict(l=0, r=0, t=0, b=0),
                 height=520,

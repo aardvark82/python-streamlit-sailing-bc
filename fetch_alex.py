@@ -192,6 +192,16 @@ def display_alex_page(container=None):
     # Sort oldest-first so the line draws in chronological order
     pts.sort(key=lambda p: p.get('ts') or 0)
 
+    # ── Map zoom controls ──
+    st.session_state.setdefault('alex_map_zoom', 9.4)
+    z1, z2, _ = draw.columns([0.4, 0.4, 4])
+    if z1.button("🔍+", key='alex_zoom_in', help="Zoom map in"):
+        st.session_state['alex_map_zoom'] = min(
+            st.session_state['alex_map_zoom'] + 1, 14)
+    if z2.button("🔎−", key='alex_zoom_out', help="Zoom map out"):
+        st.session_state['alex_map_zoom'] = max(
+            st.session_state['alex_map_zoom'] - 1, 4)
+
     # ── Map ──
     fig = go.Figure()
 
@@ -238,7 +248,7 @@ def display_alex_page(container=None):
         mapbox=dict(
             style='open-street-map',
             center=dict(lat=CENTER_LAT, lon=CENTER_LON),
-            zoom=9.4,
+            zoom=st.session_state.get('alex_map_zoom', 9.4),
             bounds=dict(
                 west=BBOX['west'], east=BBOX['east'],
                 south=BBOX['south'], north=BBOX['north'],
@@ -249,3 +259,31 @@ def display_alex_page(container=None):
         legend=dict(orientation='h', y=-0.05),
     )
     draw.plotly_chart(fig, width='stretch')
+
+    # ── Last 6 hours history table (most recent first) ──
+    if pts:
+        rows = []
+        van_tz = pytz.timezone('America/Vancouver')
+        for p in reversed(pts):  # newest at top
+            try:
+                dt_local = (
+                    datetime.fromtimestamp(int(p['ts']), tz=pytz.UTC)
+                            .astimezone(van_tz)
+                )
+                time_str = dt_local.strftime('%I:%M:%S %p')
+            except Exception:
+                time_str = '—'
+            rows.append({
+                'Time (PDT)': time_str,
+                'Age': _format_age(p.get('ts'), now_van),
+                'Latitude':  f"{p['lat']:.5f}",
+                'Longitude': f"{p['lon']:.5f}",
+                'Speed (kph)': f"{p['speed']:.1f}" if p.get('speed') is not None else '–',
+            })
+        draw.markdown("**Last 6 hours · positions**")
+        try:
+            draw.dataframe(pd.DataFrame(rows))
+        except Exception as e:
+            draw.warning(f"History table render failed: {e}")
+    else:
+        draw.caption("No position fixes recorded in the last 6 hours.")
