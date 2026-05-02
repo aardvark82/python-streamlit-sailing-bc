@@ -350,10 +350,11 @@ def drawMapWithBuoy(container=None, buoy=None, wind_kts=None,
 
     fig = go.Figure(go.Scattermapbox(
         lat=[lat], lon=[lon],
-        mode='text',  # glyph replaces the dot
+        mode='markers+text',
+        marker=dict(size=14, color=color, opacity=0.95),
         text=[label],
-        textposition='middle center',
-        textfont=dict(size=18, color=color),
+        textposition='bottom center',
+        textfont=dict(size=16, color=color),
         hovertemplate=(
             f"<b>Buoy {buoy}</b><br>"
             f"Wind: {(direction + ' ') if direction else ''}{kts_text}"

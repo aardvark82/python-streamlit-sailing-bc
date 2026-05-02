@@ -411,17 +411,21 @@ def display_alex_page(container=None):
         station_hovers.append(hover)
         station_colors.append(_color_for_speed(speed_for_color))
 
-    # Plotly Scattermapbox.textfont.color is a single value per trace, not an
-    # array, so render one trace per station to preserve per-point colors.
+    # Plotly Scattermapbox.textfont.color is scalar per trace, so render one
+    # trace per station to preserve per-point colors. Use markers+text rather
+    # than text-only — pure 'mode=text' doesn't reliably render on the
+    # open-street-map basemap. The colored dot anchors the label and
+    # reinforces the speed bucket visually.
     for slat, slon, slabel, shover, scolor in zip(
         station_lats, station_lons, station_labels, station_hovers, station_colors
     ):
         fig.add_trace(go.Scattermapbox(
             lat=[slat], lon=[slon],
-            mode='text',
+            mode='markers+text',
+            marker=dict(size=12, color=scolor, opacity=0.95),
             text=[slabel],
-            textposition='middle center',
-            textfont=dict(size=15, color=scolor),
+            textposition='bottom center',
+            textfont=dict(size=14, color=scolor),
             name='Marine stations',
             hovertemplate=shover,
             showlegend=False,
