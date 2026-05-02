@@ -424,21 +424,33 @@ def display_alex_page(container=None):
             hovertemplate=station_hovers,
         ))
 
-    # Current marker (red, on top)
+    # Current marker — Google Maps-style blue dot with white halo.
+    # Coordinates rendered below the marker.
     if lat is not None and lon is not None:
         speed_str = f"{speed:.1f}" if speed is not None else "?"
+
+        # White halo (drawn first so the blue dot sits on top of it)
+        fig.add_trace(go.Scattermapbox(
+            lat=[lat], lon=[lon],
+            mode='markers',
+            marker=dict(size=22, color='#ffffff', opacity=0.95),
+            hoverinfo='skip',
+            showlegend=False,
+        ))
+        # Blue inner dot (Google Maps blue) + coords label below
         fig.add_trace(go.Scattermapbox(
             lat=[lat], lon=[lon],
             mode='markers+text',
-            marker=dict(size=18, color='#e74c3c'),
-            text=[f"📍 {last_seen_str}"],
-            textposition='top center',
-            textfont=dict(size=12, color='#e74c3c'),
+            marker=dict(size=14, color='#4285F4'),
+            text=[f"{lat:.5f}, {lon:.5f}"],
+            textposition='bottom center',
+            textfont=dict(size=11, color='#1a73e8'),
             name='Current',
             hovertemplate=(
                 f"<b>{DEVICE_NAME}</b><br>"
                 f"Last seen: {last_seen_str}<br>"
-                f"Speed: {speed_str} kph<extra></extra>"
+                f"Speed: {speed_str} kph<br>"
+                f"{lat:.5f}, {lon:.5f}<extra></extra>"
             ),
         ))
 
