@@ -316,17 +316,62 @@ def parseJerichoWindHistory(container=None):
         st.dataframe(df.tail(24))
 
 
-def drawMapWithBuoy(container=None, buoy=None):
-    latlong = None
-    if buoy == '46146':
-        latlong = pd.DataFrame({'latitude': [49.34], 'longitude': [-123.72]})
-    if buoy == '46304':
-        latlong = pd.DataFrame({'latitude': [49.300], 'longitude': [-123.360]})
-    if buoy == 'WSB':
-        latlong = pd.DataFrame({'latitude': [49.330], 'longitude': [-123.2646]})
-    if buoy == 'WAS':
-        latlong = pd.DataFrame({'latitude': [49.49], 'longitude': [-123.3]})
-    container.map(latlong, zoom=10)
+def drawMapWithBuoy(container=None, buoy=None, wind_kts=None,
+                     direction=None, wave_m=None):
+    """Buoy location on a Scattermapbox, rendered as a unicode wind-arrow
+    glyph (1/2/3 arrows by intensity, pointing downwind) colored by the
+    same wind-speed buckets used everywhere else. Wave height appended
+    on a separate line when available."""
+    coords = {
+        '46146': (49.340,  -123.720),
+        '46304': (49.300,  -123.360),
+        'WSB':   (49.330,  -123.2646),
+        'WAS':   (49.490,  -123.300),
+    }
+    if buoy not in coords:
+        return
+    lat, lon = coords[buoy]
+
+    from wind_utils import _color_for_speed, wind_arrow_glyph
+    import plotly.graph_objects as go
+
+    try:
+        speed_for_color = float(wind_kts) if wind_kts is not None else 0
+    except (TypeError, ValueError):
+        speed_for_color = 0
+    color = _color_for_speed(speed_for_color)
+
+    arrows = wind_arrow_glyph(direction, wind_kts)
+    kts_text = f"{speed_for_color:.0f}kts" if wind_kts is not None else "—"
+    label_lines = [arrows, kts_text]
+    if wave_m is not None:
+        label_lines.append(f"{wave_m * 100:.0f}cm")
+    label = "\n".join(label_lines)
+
+    fig = go.Figure(go.Scattermapbox(
+        lat=[lat], lon=[lon],
+        mode='text',  # glyph replaces the dot
+        text=[label],
+        textposition='middle center',
+        textfont=dict(size=18, color=color),
+        hovertemplate=(
+            f"<b>Buoy {buoy}</b><br>"
+            f"Wind: {(direction + ' ') if direction else ''}{kts_text}"
+            + (f"<br>Wave: {wave_m * 100:.0f} cm" if wave_m is not None else "")
+            + "<extra></extra>"
+        ),
+    ))
+    fig.update_layout(
+        mapbox=dict(
+            style='open-street-map',
+            center=dict(lat=lat, lon=lon),
+            zoom=10,
+        ),
+        margin=dict(l=0, r=0, t=0, b=0),
+        height=420,
+        showlegend=False,
+    )
+    container.plotly_chart(fig, width='stretch')
 
 
 @st.cache_data(ttl=144600)
@@ -849,7 +894,11 @@ def refreshBuoy(buoy='46146', title='Halibut Bank - 46146', container=None,
     past_df = plot_merged_wind_chart(container, buoy, forecast_url, forecast_title)
     plot_wave_history_chart(container, past_df, buoy)
     with draw.expander("Map"):
-        drawMapWithBuoy(container=st, buoy=buoy)
+        drawMapWithBuoy(
+            container=st, buoy=buoy,
+            wind_kts=wind_speed, direction=direction,
+            wave_m=wave_val_for_record,
+        )
 
 
 # ──────────────────────────────────────────────

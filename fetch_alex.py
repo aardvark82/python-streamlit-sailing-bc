@@ -358,9 +358,10 @@ def display_alex_page(container=None):
         ))
 
     # ── Marine station overlay (wind / wave at nearby weather stations) ──
-    # Color the dot by wind speed using the same buckets as the wind arrows:
-    #   <5 blue, <10 green, <20 orange, <30 red, 30+ black.
-    from wind_utils import _color_for_speed
+    # Each station is rendered as a unicode wind-arrow glyph (1/2/3 arrows
+    # by intensity, pointing downwind) instead of a plain dot, colored by
+    # the same wind-speed buckets used elsewhere.
+    from wind_utils import _color_for_speed, wind_arrow_glyph
 
     station_lats, station_lons, station_labels, station_hovers, station_colors = [], [], [], [], []
     for s in MARINE_STATIONS:
@@ -383,19 +384,23 @@ def display_alex_page(container=None):
         d = summary.get('direction') or ''
         w_kts = summary.get('wind_kts')
         w_m = summary.get('wave_m')
-        wind_part = f"{w_kts:.0f}kts" if isinstance(w_kts, (int, float)) else (f"{w_kts}kts" if w_kts else "—")
-        label_parts = [s['name']]
-        if d:
-            label_parts.append(f"{d} {wind_part}")
-        else:
-            label_parts.append(wind_part)
+        try:
+            speed_for_color = float(w_kts) if w_kts is not None else 0
+        except (TypeError, ValueError):
+            speed_for_color = 0
+
+        arrows = wind_arrow_glyph(d, w_kts)
+        kts_text = f"{speed_for_color:.0f}kts" if w_kts is not None else "—"
+        # Glyph + speed (and wave height when available) on stacked lines.
+        # Mapbox text-field renders "\n" as a line break.
+        label_lines = [arrows, kts_text]
         if w_m is not None:
-            label_parts.append(f"{w_m * 100:.0f}cm")
-        label = " · ".join(label_parts)
+            label_lines.append(f"{w_m * 100:.0f}cm")
+        label = "\n".join(label_lines)
 
         hover = (
             f"<b>{s['name']}</b><br>"
-            f"Wind: {d + ' ' if d else ''}{wind_part}"
+            f"Wind: {d + ' ' if d else ''}{kts_text}"
             + (f"<br>Wave: {w_m * 100:.0f} cm" if w_m is not None else "")
             + "<extra></extra>"
         )
@@ -404,22 +409,15 @@ def display_alex_page(container=None):
         station_lons.append(s['lon'])
         station_labels.append(label)
         station_hovers.append(hover)
-        # Wind-bucket color overrides the per-station color so the user can
-        # spot the strongest spot at a glance.
-        try:
-            speed_for_color = float(w_kts) if w_kts is not None else 0
-        except (TypeError, ValueError):
-            speed_for_color = 0
         station_colors.append(_color_for_speed(speed_for_color))
 
     if station_lats:
         fig.add_trace(go.Scattermapbox(
             lat=station_lats, lon=station_lons,
-            mode='markers+text',
-            marker=dict(size=11, color=station_colors, opacity=0.9),
+            mode='text',  # arrow glyphs replace the dot entirely
             text=station_labels,
-            textposition='bottom center',
-            textfont=dict(size=11, color='#0f172a'),
+            textposition='middle center',
+            textfont=dict(size=15, color=station_colors),
             name='Marine stations',
             hovertemplate=station_hovers,
         ))

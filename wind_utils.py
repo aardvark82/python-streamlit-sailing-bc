@@ -94,6 +94,39 @@ def _color_for_speed(kts):
     return '#111111'       # dangerous   30+ — black
 
 
+# Unicode arrows pointing DOWNWIND (i.e. where the wind is blowing TO).
+# Wind 'from N' (degree 0) blows to the south, so its arrow is ↓.
+_DIRECTION_TO_DOWNWIND_ARROW = {
+    'N':   '↓', 'NNE': '↓', 'NE':  '↙', 'ENE': '↙',
+    'E':   '←', 'ESE': '←', 'SE':  '↖', 'SSE': '↖',
+    'S':   '↑', 'SSW': '↑', 'SW':  '↗', 'WSW': '↗',
+    'W':   '→', 'WNW': '→', 'NW':  '↘', 'NNW': '↘',
+}
+
+
+def wind_arrow_glyph(direction, kts):
+    """Return a string of unicode arrows where:
+       - the arrow CHARACTER points downwind based on `direction`
+       - the COUNT of arrows reflects intensity:
+           1 arrow: 0-10 kts
+           2 arrows: 10-20 kts
+           3 arrows: 20+ kts
+    Falls back to a small bullet '·' when direction can't be resolved."""
+    canonical = _normalize_direction(direction)
+    arrow = _DIRECTION_TO_DOWNWIND_ARROW.get(canonical, '·') if canonical else '·'
+    try:
+        v = float(kts) if kts is not None else 0
+    except (TypeError, ValueError):
+        v = 0
+    if v >= 20:
+        count = 3
+    elif v >= 10:
+        count = 2
+    else:
+        count = 1
+    return arrow * count
+
+
 def create_arrow_html(direction, wind_speed=''):
     """Render an SVG arrow HTML fragment.
 
