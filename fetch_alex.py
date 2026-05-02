@@ -411,15 +411,20 @@ def display_alex_page(container=None):
         station_hovers.append(hover)
         station_colors.append(_color_for_speed(speed_for_color))
 
-    if station_lats:
+    # Plotly Scattermapbox.textfont.color is a single value per trace, not an
+    # array, so render one trace per station to preserve per-point colors.
+    for slat, slon, slabel, shover, scolor in zip(
+        station_lats, station_lons, station_labels, station_hovers, station_colors
+    ):
         fig.add_trace(go.Scattermapbox(
-            lat=station_lats, lon=station_lons,
-            mode='text',  # arrow glyphs replace the dot entirely
-            text=station_labels,
+            lat=[slat], lon=[slon],
+            mode='text',
+            text=[slabel],
             textposition='middle center',
-            textfont=dict(size=15, color=station_colors),
+            textfont=dict(size=15, color=scolor),
             name='Marine stations',
-            hovertemplate=station_hovers,
+            hovertemplate=shover,
+            showlegend=False,
         ))
 
     # Current marker — Google Maps-style blue dot with white halo.
