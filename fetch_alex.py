@@ -153,6 +153,34 @@ def display_alex_page(container=None):
     speed = tele.get('position.speed')
     last_ts = tele.get('_ts') or tele.get('server.timestamp') or tele.get('timestamp')
 
+    # Teltonika reports the internal battery voltage; flespi may keep the raw
+    # millivolts or normalise to volts depending on device profile. Try a
+    # handful of common key names and convert mV → V if the number looks big.
+    def _read_voltage(*keys):
+        for k in keys:
+            v = tele.get(k)
+            if v is None:
+                continue
+            try:
+                f = float(v)
+            except (TypeError, ValueError):
+                continue
+            # Heuristic: anything > 100 is almost certainly millivolts.
+            return f / 1000.0 if f > 100 else f
+        return None
+
+    battery_v = _read_voltage(
+        'battery.voltage',
+        'battery.level',
+        'battery.current.voltage',
+    )
+    external_v = _read_voltage(
+        'external.powersource.voltage',
+        'external.power.voltage',
+        'power.supply.voltage',
+        'power.voltage',
+    )
+
     now_van = datetime.now(pytz.timezone('America/Vancouver'))
     last_seen_str = _format_age(last_ts, now_van) or "no recent fix"
 
@@ -160,11 +188,25 @@ def display_alex_page(container=None):
     # the position is (color-coded green/orange/red by age).
     display_last_updated_badge(draw, last_ts, label="Last seen")
 
-    # ── 3 boxes at top: latitude / speed / longitude ──
+    # ── Top metrics ──
+    # Row 1: Latitude / Speed / Longitude (the user-facing primary fix)
     c1, c2, c3 = draw.columns(3)
     c1.metric("Latitude",  f"{lat:.5f}"  if lat   is not None else "—")
     c2.metric("Speed (kph)", f"{speed:.1f}" if speed is not None else "—")
     c3.metric("Longitude", f"{lon:.5f}"  if lon   is not None else "—")
+
+    # Row 2: Internal battery + external power (boat 12V) when reported
+    bcol1, bcol2 = draw.columns(2)
+    bcol1.metric(
+        "🔋 Battery (V)",
+        f"{battery_v:.2f}" if battery_v is not None else "—",
+        help="Teltonika FMM13A internal backup battery voltage.",
+    )
+    bcol2.metric(
+        "⚡ External Power (V)",
+        f"{external_v:.2f}" if external_v is not None else "—",
+        help="External power source (e.g. boat 12V) feeding the tracker.",
+    )
 
     # ── Last 6h trail ──
     try:
