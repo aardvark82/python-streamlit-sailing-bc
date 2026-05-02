@@ -11,6 +11,7 @@ with the historical trail and the current marker.
 
 import io
 import json
+import math
 import re
 import time as time_module
 from datetime import datetime, timedelta
@@ -45,17 +46,34 @@ DEVICE_IMEI = "862094065008336"
 DEVICE_NAME = "Zodiac Pro 420"
 DEVICE_MODEL = "Teltonika FMM13A"
 
-# Bounding box per user spec:
-#   Gibsons BC (W) ↔ Indian Arm tip (E)
-#   Tsawwassen (S) ↔ Porteau Cove (N)
-BBOX = {
-    'south': 49.00,   # Tsawwassen
-    'north': 49.55,   # Porteau Cove
-    'west':  -123.51, # Gibsons
-    'east':  -122.86, # Indian Arm tip
-}
-CENTER_LAT = (BBOX['south'] + BBOX['north']) / 2
-CENTER_LON = (BBOX['west'] + BBOX['east']) / 2
+# Reference area — used as a fallback center if the boat has no fix and as
+# the anchor point for the auto-zoom calculation.
+WEST_VAN_LAT, WEST_VAN_LON = 49.327, -123.156
+CENTER_LAT, CENTER_LON = WEST_VAN_LAT, WEST_VAN_LON
+
+
+def _haversine_km(lat1, lon1, lat2, lon2):
+    """Great-circle distance between two lat/lon points in kilometers."""
+    R = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * R * math.asin(math.sqrt(a))
+
+
+def _zoom_for_distance(d_km):
+    """Pick a Mapbox zoom level whose visible width covers ~2x d_km, so the
+    boat sits at the center with West Vancouver comfortably in view."""
+    if d_km is None:
+        return 11.0
+    target_width_m = max(2 * d_km * 1000, 500)  # never go below ~500m of view
+    # Rough Mapbox zoom math: m/pixel ≈ 156543 * cos(lat) / 2^Z;
+    # for a ~800px viewport at Vancouver latitude (cos ≈ 0.66) the visible
+    # width at zoom 0 is 800 * 156543 * 0.66 ≈ 8.27e7 m.
+    width_at_z0 = 800 * 156543 * 0.66
+    z = math.log2(width_at_z0 / target_width_m)
+    return max(3.0, min(16.0, z))
 
 
 def _flespi_headers():
@@ -323,8 +341,15 @@ def display_alex_page(container=None):
     # Sort oldest-first so the line draws in chronological order
     pts.sort(key=lambda p: p.get('ts') or 0)
 
-    # ── Map zoom controls (±2 per click for snappier feel) ──
-    st.session_state.setdefault('alex_map_zoom', 9.4)
+    # ── Map zoom (auto-default + manual ±2 buttons) ──
+    # Default zoom is computed so the visible width is roughly 2x the boat-to-
+    # West-Van distance. User clicks of +/- override and persist for the
+    # rest of the session.
+    if lat is not None and lon is not None:
+        auto_zoom = _zoom_for_distance(_haversine_km(lat, lon, WEST_VAN_LAT, WEST_VAN_LON))
+    else:
+        auto_zoom = 11.0
+    st.session_state.setdefault('alex_map_zoom', auto_zoom)
     z1, z2, _ = draw.columns([0.4, 0.4, 4])
     if z1.button("🔍+", key='alex_zoom_in', help="Zoom map in"):
         st.session_state['alex_map_zoom'] = min(
@@ -472,11 +497,8 @@ def display_alex_page(container=None):
         mapbox=dict(
             style='open-street-map',
             center=dict(lat=center_lat, lon=center_lon),
-            zoom=st.session_state.get('alex_map_zoom', 9.4),
-            bounds=dict(
-                west=BBOX['west'], east=BBOX['east'],
-                south=BBOX['south'], north=BBOX['north'],
-            ),
+            zoom=st.session_state.get('alex_map_zoom', auto_zoom),
+            # No `bounds` — let the user pan freely.
         ),
         margin=dict(l=0, r=0, t=0, b=0),
         height=560,
