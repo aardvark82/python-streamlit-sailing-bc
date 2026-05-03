@@ -393,7 +393,9 @@ def display_tide_table_text(tide_df, container=None):
             'border-color': '#e1e4e8'
         }).hide(axis='index')
 
-        draw.dataframe(styled_df, width='stretch')
+        # NOTE: avoid width='stretch' — the installed Streamlit raises
+        # 'str object cannot be interpreted as an integer' on st.dataframe.
+        draw.dataframe(styled_df)
         draw.markdown("---")
 
 
