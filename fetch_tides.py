@@ -755,6 +755,8 @@ def display_point_atkinson_tides(container=None, title="🌊Tides for Point Atki
         if USE_SELENIUM:
             try:
                 _csv = seleniumGetTidesFromURL('https://www.tides.gc.ca/en/stations/07795')
+                # (Subsampling settings tuned below — keep enough resolution
+                #  AND enough date span to cover the next 24-48 hours.)
             except Exception as e:
                 # Bust any stale None cached from earlier broken runs and surface a clear error.
                 try:
@@ -775,12 +777,22 @@ def display_point_atkinson_tides(container=None, title="🌊Tides for Point Atki
                 )
                 return
 
+            # The CSV from tides.gc.ca is roughly 1-minute resolution × 7 days.
+            # Previous code subsampled every 20 lines AND truncated to the first
+            # 1/3 of the result — that capped the visible window to ~2.3 days
+            # and could drop a low tide that fell outside it.
+            # Now: keep the header + every 10th data row (≈10-min resolution)
+            # and DON'T truncate — gives the full 7-day window so the next
+            # 24h always has both extrema visible.
             csv_lines = _csv.splitlines()
-            csv_subsampled = '\n'.join(csv_lines[::20])
-            csv_lines2 = csv_subsampled.splitlines()
-            halfway_point = len(csv_lines2) // 3
-            csv_half_subsampled = '\n'.join(csv_lines2[:halfway_point])
-            data = processCSVResponseToJSONSelenium(draw, csv_half_subsampled)
+            if csv_lines:
+                header = csv_lines[0]
+                body = csv_lines[1:]
+                kept_body = body[::10]
+                csv_dense_full = '\n'.join([header] + kept_body)
+            else:
+                csv_dense_full = _csv
+            data = processCSVResponseToJSONSelenium(draw, csv_dense_full)
 
         if USE_CHAT_GPT:
             draw.badge("USE_CHAT_GPT")

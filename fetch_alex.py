@@ -535,7 +535,17 @@ def _fetch_jericho_summary():
     """Last reading from the Jericho Beach weather CSV. Cached 10 min."""
     try:
         url = "https://jsca.bc.ca/main/downld02.txt"
-        res = cached_fetch_url(url)
+        # jsca.bc.ca returns 415 to the default python-requests UA.
+        headers = {
+            'User-Agent': (
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                'AppleWebKit/537.36 (KHTML, like Gecko) '
+                'Chrome/120.0.0.0 Safari/537.36'
+            ),
+            'Accept': 'text/plain, text/csv, */*',
+        }
+        res = requests.get(url, headers=headers, timeout=25)
+        res.raise_for_status()
         csv_raw = res.content.decode('utf-8')
         lines = csv_raw.splitlines()
         csv_fixed = '\n'.join(lines[3:])

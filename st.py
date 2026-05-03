@@ -243,12 +243,31 @@ def page_kiosk():
         st.error(f"Failed to load kiosk mode: {e}")
 
 
+@st.cache_data(ttl=600, show_spinner=False)
+def _fetch_jericho_csv(url):
+    """Fetch the Jericho CSV with explicit browser-like headers.
+    The default python-requests UA / accept combo started returning 415
+    Unsupported Media Type on jsca.bc.ca."""
+    headers = {
+        'User-Agent': (
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+            'AppleWebKit/537.36 (KHTML, like Gecko) '
+            'Chrome/120.0.0.0 Safari/537.36'
+        ),
+        'Accept': 'text/plain, text/csv, */*',
+        'Accept-Language': 'en-US,en;q=0.9',
+    }
+    r = requests.get(url, headers=headers, timeout=25)
+    r.raise_for_status()
+    return r
+
+
 def parseJerichoWindHistory(container=None):
     container.subheader("Jericho Beach Wind History")
     draw = container or st
 
     url = "https://jsca.bc.ca/main/downld02.txt"
-    res = cached_fetch_url(url)
+    res = _fetch_jericho_csv(url)
 
     csv_raw = res.content.decode('utf-8')
     lines = csv_raw.splitlines()
