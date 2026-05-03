@@ -23,11 +23,11 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import Select
 
 # --- Tide data source configuration ---
-# Enable exactly one primary source. Selenium is the default and most reliable.
-USE_SELENIUM = True          # Fetch tide CSV via headless Chrome (recommended for Streamlit Cloud)
-USE_BEAUTIFULSOUP = False    # Scrape tide table HTML directly (no JS needed, but less data)
-USE_CHAT_GPT = False         # Send HTML to GPT-4o for parsing (costs API credits)
-USE_STORMGLASS = False       # Use Stormglass.io tide API (free tier limited)
+# Primary source is the DFO IWLS REST API (fetch_iwls_tide_extremes_pt_atkinson).
+# These flags gate the legacy fallback paths.
+USE_SELENIUM = True          # Selenium-driven CSV download fallback
+USE_BEAUTIFULSOUP = False    # HTML table scrape fallback
+USE_CHAT_GPT = False         # GPT-4o parsing of the page HTML
 
 CANADA_GOVERNMENT_TIDE_POINT_ATKINSON = "https://www.tides.gc.ca/en/stations/07795"
 
@@ -383,38 +383,6 @@ def fetch_tide_extremes_selenium():
         return None
 
 
-@st.cache_data(ttl=14400)
-def stormglassFetchTidesPointAtkinson():
-    """Fetch tide extremes from Stormglass API for Point Atkinson."""
-    try:
-        lat = 49.3304
-        lon = -123.2646
-
-        # Stormglass API key from secrets (never hardcode)
-        api_key = st.secrets["stormglass_key"]
-
-        base_url = "https://api.stormglass.io/v2/tide/extremes/point"
-        vancouver_tz = pytz.timezone('America/Vancouver')
-        now = datetime.now(vancouver_tz)
-        start_date = now - timedelta(days=1)
-        end_date = now + timedelta(days=2)
-
-        params = {
-            'lat': lat,
-            'lng': lon,
-            'start': start_date.strftime('%Y-%m-%d'),
-            'end': end_date.strftime('%Y-%m-%d')
-        }
-        headers = {'Authorization': api_key}
-
-        response = requests.get(base_url, params=params, headers=headers, timeout=10)
-        return response.json()
-
-    except Exception as e:
-        print(f"Error fetching tide data: {e}")
-        return None
-
-
 def process_tide_data(data, container=None, use_chat_gpt=False):
     """Parse tide data from various sources into a standard DataFrame."""
     predictions = []
@@ -429,11 +397,6 @@ def process_tide_data(data, container=None, use_chat_gpt=False):
                 'Time (PDT)& Date': dt,
                 'Height': float(prediction['height'])
             })
-
-    if USE_STORMGLASS:
-        for i in range(len(predictions)):
-            predictions[i]['Height'] = predictions[i]['Height'] + 2.64
-            predictions[i]['Time (PDT)& Date'] = predictions[i]['Time (PDT)& Date'] + pd.Timedelta(hours=0, minutes=18)
 
     tide_df = pd.DataFrame(predictions)
     tide_df = tide_df.sort_values('Time (PDT)& Date', ignore_index=True)
@@ -516,8 +479,6 @@ def create_natural_tide_chart(tide_df, container=None):
         draw.badge("From ChatGPT")
     elif USE_SELENIUM:
         draw.badge("From Selenium")
-    elif USE_STORMGLASS:
-        draw.badge("From Stormglass.io")
 
     tide_df = tide_df.rename(columns={'Time (PDT)& Date': 'datetime'})
     tide_df['datetime'] = tide_df['datetime'].apply(parse_tide_datetime)
@@ -721,18 +682,6 @@ def displayErrorWithResponseIfNeeded(container=None, response=None):
     return None
 
 
-def processResponseToJSONStormglass(container=None, response=None):
-    displayErrorWithResponseIfNeeded(container, response)
-    if isinstance(response, (dict, list)):
-        return response
-    elif hasattr(response, 'json'):
-        return response.json()
-    else:
-        if container:
-            container.error("Invalid response format")
-        return None
-
-
 def find_local_extrema(df):
     """Keep only local maxima and minima from a supersampled tide CSV.
 
@@ -928,17 +877,6 @@ def display_point_atkinson_tides(container=None, title="🌊Tides for Point Atki
             draw.badge("USE_CHAT_GPT")
             response = openAIFetchTidesForURL("https://www.tides.gc.ca/en/stations/07795")
             data = processResponseToJSONOpenAI(draw, response)
-
-        if USE_STORMGLASS:
-            draw.badge("USE_STORMGLASS")
-            response = stormglassFetchTidesPointAtkinson()
-            if 'errors' in response:
-                if 'key' in response['errors']:
-                    error_msg = response['errors']['key']
-                    if error_msg == 'API quota exceeded':
-                        draw.error("Stormglass API quota exceeded.")
-            else:
-                data = processResponseToJSONStormglass(draw, response)
 
     if data:
         with st.spinner("Building tide chart…"):
