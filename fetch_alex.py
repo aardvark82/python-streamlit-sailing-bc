@@ -46,6 +46,12 @@ DEVICE_IMEI = "862094065008336"
 DEVICE_NAME = "Zodiac Pro 420"
 DEVICE_MODEL = "Teltonika FMM13A"
 
+# 1NCE SIM identifiers for the FMM13A
+ONENCE_BASE = "https://api.1nce.com/management-api/v1"
+SIM_ICCID = "8988228066622971526"
+SIM_IMSI = "901405122971526"
+SIM_MSISDN = "882285123112021"
+
 # Reference area — used as a fallback center if the boat has no fix and as
 # the anchor point for the auto-zoom calculation.
 WEST_VAN_LAT, WEST_VAN_LON = 49.327, -123.156
@@ -200,6 +206,88 @@ def _fetch_device_traffic_bytes(device_id, _cache_buster=3):
         except Exception as e:
             debug['tried'].append({'url': url, 'error': str(e)})
     return None, debug
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_1nce_sim_usage(iccid, _cache_buster=1):
+    """Query 1NCE 'Get SIM usage' endpoint. Output is limited to the last
+    6 months per the docs. Returns (total_bytes, monthly_breakdown_list,
+    raw_debug). Cached 1 hour."""
+    debug = {'tried': []}
+    try:
+        token = st.secrets["1nce_bearer_token"]
+    except (KeyError, FileNotFoundError):
+        return None, [], {'error': '1nce_bearer_token missing in secrets'}
+
+    url = f"{ONENCE_BASE}/sims/{iccid}/usage"
+    headers = {
+        'Authorization': f'Bearer {token}',
+        'Accept': 'application/json',
+    }
+    try:
+        r = requests.get(url, headers=headers, timeout=20)
+        debug['tried'].append({'url': url, 'status': r.status_code})
+        if r.status_code != 200:
+            try:
+                debug['body'] = r.json()
+            except Exception:
+                debug['body'] = r.text[:500]
+            return None, [], debug
+
+        data = r.json()
+        debug['raw'] = data
+
+        # Response could be a top-level list, or {result: [...]}, or
+        # {usage_records: [...]}. Normalise to a list.
+        if isinstance(data, list):
+            records = data
+        elif isinstance(data, dict):
+            records = (data.get('result') or data.get('usage_records')
+                       or data.get('records') or data.get('items')
+                       or data.get('usage') or [])
+            if not records and any(
+                k in data for k in ('volume', 'total', 'tx', 'rx', 'data')
+            ):
+                # Single aggregate object — wrap as list of one
+                records = [data]
+        else:
+            records = []
+
+        breakdown = []
+        total_bytes = 0
+        for rec in records:
+            if not isinstance(rec, dict):
+                continue
+            # Try several common field names for byte counters
+            vol = rec.get('volume') or {}
+            total = (
+                vol.get('total') if isinstance(vol, dict) else None
+                or rec.get('total') or rec.get('total_volume')
+                or rec.get('data') or rec.get('bytes')
+            )
+            tx = vol.get('tx') if isinstance(vol, dict) else rec.get('tx')
+            rx = vol.get('rx') if isinstance(vol, dict) else rec.get('rx')
+            try:
+                total_v = float(total) if total is not None else 0.0
+            except (TypeError, ValueError):
+                total_v = 0.0
+
+            period = (rec.get('month') or rec.get('period')
+                      or rec.get('date') or rec.get('start_date')
+                      or rec.get('billing_month') or '?')
+
+            breakdown.append({
+                'period': str(period),
+                'total': total_v,
+                'tx': float(tx) if tx is not None else None,
+                'rx': float(rx) if rx is not None else None,
+            })
+            total_bytes += total_v
+
+        return int(total_bytes), breakdown, debug
+    except Exception as e:
+        debug['tried'].append({'url': url, 'error': str(e)})
+        return None, [], debug
 
 
 @st.cache_data(ttl=180, show_spinner=False)
@@ -666,3 +754,41 @@ def display_alex_page(container=None):
         )
         with draw.expander("🔍 flespi device raw response (for debugging)"):
             draw.json(device_debug)
+
+    # ── 1NCE SIM usage (last 6 months max) ──
+    try:
+        sim_total_bytes, sim_breakdown, sim_debug = _fetch_1nce_sim_usage(SIM_ICCID)
+    except Exception as e:
+        sim_total_bytes, sim_breakdown, sim_debug = None, [], {'error': str(e)}
+
+    if sim_total_bytes is not None:
+        kb = sim_total_bytes / 1024
+        if kb >= 1024 * 1024:
+            sim_str = f"{kb / (1024 * 1024):.2f} GB"
+        elif kb >= 1024:
+            sim_str = f"{kb / 1024:.2f} MB"
+        else:
+            sim_str = f"{kb:.1f} KB"
+        draw.caption(
+            f"📶 1NCE SIM ({SIM_ICCID}) — last 6 months: **{sim_str}**"
+        )
+        if sim_breakdown:
+            try:
+                draw.dataframe(pd.DataFrame([
+                    {
+                        'Period': b['period'],
+                        'Total (KB)': f"{b['total'] / 1024:.1f}" if b['total'] else '–',
+                        'TX (KB)': f"{b['tx'] / 1024:.1f}" if b['tx'] is not None else '–',
+                        'RX (KB)': f"{b['rx'] / 1024:.1f}" if b['rx'] is not None else '–',
+                    }
+                    for b in sim_breakdown
+                ]))
+            except Exception:
+                pass
+    else:
+        draw.caption(
+            f"📶 1NCE SIM usage: not available "
+            f"(see debug below — ICCID {SIM_ICCID})"
+        )
+        with draw.expander("🔍 1NCE raw response (for debugging)"):
+            draw.json(sim_debug)
