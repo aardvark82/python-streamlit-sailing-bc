@@ -259,59 +259,33 @@ def _fetch_device_traffic_bytes(device_id, _cache_buster=4):
 def _coerce_float(v):
     if v is None:
         return None
-    if isinstance(v, (int, float)):
-        return float(v)
     try:
         return float(v)
     except (TypeError, ValueError):
         return None
 
 
-def _read_total_bytes(rec):
-    """Pick the most plausible 'bytes used' value from a 1NCE usage record.
-    Tries volume.total → top-level fields → sum of tx+rx as a last resort."""
-    if not isinstance(rec, dict):
-        return None, None, None
-
-    # 1. nested volume object (Data Streamer schema)
-    vol = rec.get('volume')
-    if isinstance(vol, dict):
-        total = _coerce_float(vol.get('total'))
-        tx = _coerce_float(vol.get('tx'))
-        rx = _coerce_float(vol.get('rx'))
-        if total is None and (tx is not None or rx is not None):
-            total = (tx or 0.0) + (rx or 0.0)
-        if total is not None:
-            return total, tx, rx
-
-    # 2. flat top-level fields — try every reasonable key
-    for key in ('total_volume', 'total_bytes', 'total_data',
-                'data_volume', 'data', 'bytes', 'volume_total',
-                'usage', 'used_bytes', 'used'):
-        v = _coerce_float(rec.get(key))
-        if v is not None:
-            tx = _coerce_float(rec.get('tx') or rec.get('volume_tx')
-                                or rec.get('tx_bytes') or rec.get('uplink'))
-            rx = _coerce_float(rec.get('rx') or rec.get('volume_rx')
-                                or rec.get('rx_bytes') or rec.get('downlink'))
-            return v, tx, rx
-
-    # 3. tx + rx fallback
-    tx = _coerce_float(rec.get('tx') or rec.get('volume_tx')
-                        or rec.get('tx_bytes') or rec.get('uplink'))
-    rx = _coerce_float(rec.get('rx') or rec.get('volume_rx')
-                        or rec.get('rx_bytes') or rec.get('downlink'))
-    if tx is not None or rx is not None:
-        return (tx or 0.0) + (rx or 0.0), tx, rx
-
-    return None, None, None
+_UNIT_TO_BYTES = {
+    'B': 1, 'BYTE': 1, 'BYTES': 1,
+    'KB': 1024,
+    'MB': 1024 * 1024,
+    'GB': 1024 * 1024 * 1024,
+    'TB': 1024 ** 4,
+}
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def _fetch_1nce_sim_usage(iccid, _cache_buster=2):
-    """Query 1NCE 'Get SIM usage' endpoint. Output is limited to the last
-    6 months per the docs. Returns (total_bytes, monthly_breakdown_list,
-    raw_debug). Cached 1 hour."""
+def _fetch_1nce_sim_usage(iccid, _cache_buster=3):
+    """Query 1NCE 'Get SIM usage' endpoint. The output is limited to the
+    last 6 months per the docs. Response shape (real, observed):
+        {"stats": [
+            {"date": "2026-05-03", "data": {"volume":"0.033158","volume_tx":"...",
+                                            "volume_rx":"...","traffic_type":{"unit":"MB"}},
+                                  "sms":  {...}},
+            ...,
+            {"date": "TOTAL", "data": {...}, "sms": {...}}
+        ]}
+    Returns (total_bytes, daily_breakdown_list, raw_debug). Cached 1 hour."""
     debug = {'tried': []}
     try:
         token = st.secrets["1nce_bearer_token"]
@@ -333,45 +307,48 @@ def _fetch_1nce_sim_usage(iccid, _cache_buster=2):
                 debug['body'] = r.text[:500]
             return None, [], debug
 
-        data = r.json()
+        data = r.json() or {}
         debug['raw'] = data
 
-        # Normalise the various known wrappers into a flat list of records
-        if isinstance(data, list):
-            records = data
-        elif isinstance(data, dict):
-            records = (data.get('result') or data.get('usage_records')
-                       or data.get('records') or data.get('items')
-                       or data.get('usage') or [])
-            if not records:
-                # Single aggregate object — treat the whole dict as one record
-                records = [data]
-        else:
-            records = []
+        stats = data.get('stats') or data.get('result') or data.get('usage_records') or []
+        if isinstance(stats, dict):
+            stats = [stats]
 
         breakdown = []
-        total_bytes = 0.0
-        any_value = False
-        for rec in records:
-            total_v, tx_v, rx_v = _read_total_bytes(rec)
-            if total_v is None:
+        total_bytes = None
+        for entry in stats:
+            if not isinstance(entry, dict):
                 continue
-            any_value = True
-            period = (rec.get('month') or rec.get('period')
-                      or rec.get('date') or rec.get('start_date')
-                      or rec.get('billing_month')
-                      or rec.get('year_month') or '?')
-            breakdown.append({
-                'period': str(period),
-                'total': total_v,
-                'tx': tx_v,
-                'rx': rx_v,
-            })
-            total_bytes += total_v
+            date = str(entry.get('date') or '?')
+            d = entry.get('data') or {}
+            if not isinstance(d, dict):
+                continue
+            unit = ((d.get('traffic_type') or {}).get('unit') or 'MB').upper()
+            scale = _UNIT_TO_BYTES.get(unit, 1024 * 1024)
+            vol = _coerce_float(d.get('volume')) or 0.0
+            tx = _coerce_float(d.get('volume_tx'))
+            rx = _coerce_float(d.get('volume_rx'))
 
-        if not any_value:
+            bytes_total = vol * scale
+            bytes_tx = tx * scale if tx is not None else None
+            bytes_rx = rx * scale if rx is not None else None
+
+            if date == 'TOTAL':
+                total_bytes = int(bytes_total)
+            else:
+                breakdown.append({
+                    'period': date,
+                    'total': bytes_total,
+                    'tx': bytes_tx,
+                    'rx': bytes_rx,
+                })
+
+        # Fallback if there's no TOTAL row: sum the per-day totals.
+        if total_bytes is None and breakdown:
+            total_bytes = int(sum(b['total'] for b in breakdown))
+        if total_bytes is None:
             return None, [], debug
-        return int(total_bytes), breakdown, debug
+        return total_bytes, breakdown, debug
     except Exception as e:
         debug['tried'].append({'url': url, 'error': str(e)})
         return None, [], debug
