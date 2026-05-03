@@ -675,7 +675,7 @@ def plot_merged_wind_chart(container, buoy_id, forecast_url, forecast_title):
             x=df['timestamp'], y=df['wind_speed'],
             mode='markers', name='Observed (Buoy)',
             marker=dict(
-                symbol='arrow-up', size=14, angle=df['rotation'],
+                symbol='arrow-bar-up', size=14, angle=df['rotation'],
                 color='#1f77b4', line=dict(width=1, color='DarkSlateGrey'),
             ),
             customdata=df['direction'],
@@ -710,7 +710,7 @@ def plot_merged_wind_chart(container, buoy_id, forecast_url, forecast_title):
                 x=dir_df['timestamp'], y=dir_df['wind speed'],
                 mode='markers', name='Forecast Direction',
                 marker=dict(
-                    symbol='arrow-up', size=14, angle=dir_df['rotation'],
+                    symbol='arrow-bar-up', size=14, angle=dir_df['rotation'],
                     color='#ff7f0e', line=dict(width=1, color='DarkSlateGrey'),
                 ),
                 customdata=dir_df['wind direction'],

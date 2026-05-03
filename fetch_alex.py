@@ -886,6 +886,22 @@ def display_alex_page(container=None):
         height=560,
         legend=dict(orientation='h', y=-0.05),
     )
+
+    # Bottom-right "Last update" overlay so the freshness is glance-readable
+    # straight from the map view without having to look up at the badge.
+    fig.add_annotation(
+        xref='paper', yref='paper',
+        x=0.99, y=0.02,
+        xanchor='right', yanchor='bottom',
+        text=f"Last update: {last_seen_str}",
+        showarrow=False,
+        font=dict(size=11, color='#0f172a'),
+        bgcolor='rgba(255,255,255,0.85)',
+        bordercolor='#cbd5e1',
+        borderwidth=1,
+        borderpad=4,
+    )
+
     draw.plotly_chart(fig, width='stretch')
 
     # ── Last 6 hours history table (most recent first) ──
