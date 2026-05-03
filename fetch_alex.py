@@ -9,6 +9,7 @@ Renders a Plotly Mapbox map (open-street-map style — no Mapbox token needed)
 with the historical trail and the current marker.
 """
 
+import base64
 import io
 import json
 import math
@@ -274,6 +275,81 @@ _UNIT_TO_BYTES = {
 }
 
 
+def _get_1nce_access_token(force_refresh=False):
+    """Return a valid 1NCE OAuth access token, auto-refreshing when it
+    expires. Cached in st.session_state with the expiry timestamp.
+    Falls back to a static '1nce_bearer_token' secret when OAuth
+    credentials aren't configured.
+
+    Returns (token_or_None, debug_dict). The debug dict includes the
+    auth source ('oauth_cached' / 'oauth_fresh' / 'oauth_failed' /
+    'static_bearer' / 'no_credentials') for surfacing in the UI."""
+    client_id = None
+    client_secret = None
+    for k in ('1nce_client_id', '1nce_client_secret'):
+        try:
+            _ = st.secrets[k]
+        except (KeyError, FileNotFoundError):
+            _ = None
+        if k.endswith('id'):
+            client_id = _
+        else:
+            client_secret = _
+
+    if client_id and client_secret:
+        cached = st.session_state.get('_1nce_token')
+        cached_exp = st.session_state.get('_1nce_token_expires_at', 0)
+        now = time_module.time()
+        if not force_refresh and cached and now < cached_exp - 60:
+            return cached, {
+                'source': 'oauth_cached',
+                'expires_in_seconds': int(cached_exp - now),
+            }
+
+        url = f"{ONENCE_BASE.replace('/v1', '')}/oauth/token"
+        # /management-api/oauth/token (no v1) is the documented endpoint.
+        creds_b64 = base64.b64encode(
+            f"{client_id}:{client_secret}".encode()
+        ).decode()
+        headers = {
+            'Authorization': f'Basic {creds_b64}',
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Accept': 'application/json',
+        }
+        try:
+            r = requests.post(
+                url, headers=headers,
+                data='grant_type=client_credentials',
+                timeout=15,
+            )
+            r.raise_for_status()
+            data = r.json() or {}
+            token = data.get('access_token')
+            ttl = int(data.get('expires_in', 3600))
+            if token:
+                st.session_state['_1nce_token'] = token
+                st.session_state['_1nce_token_expires_at'] = now + ttl
+                return token, {
+                    'source': 'oauth_fresh',
+                    'expires_in_seconds': ttl,
+                    'token_url': url,
+                }
+            return None, {
+                'source': 'oauth_failed',
+                'error': 'no access_token in response',
+                'body': data,
+            }
+        except Exception as e:
+            print(f"1NCE OAuth refresh failed: {e}")
+            return None, {'source': 'oauth_failed', 'error': str(e), 'token_url': url}
+
+    # Fallback: static bearer token
+    try:
+        return st.secrets['1nce_bearer_token'], {'source': 'static_bearer'}
+    except (KeyError, FileNotFoundError):
+        return None, {'source': 'no_credentials'}
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def _fetch_1nce_sim_usage(iccid, _cache_buster=3):
     """Query 1NCE 'Get SIM usage' endpoint. The output is limited to the
@@ -287,10 +363,15 @@ def _fetch_1nce_sim_usage(iccid, _cache_buster=3):
         ]}
     Returns (total_bytes, daily_breakdown_list, raw_debug). Cached 1 hour."""
     debug = {'tried': []}
-    try:
-        token = st.secrets["1nce_bearer_token"]
-    except (KeyError, FileNotFoundError):
-        return None, [], {'error': '1nce_bearer_token missing in secrets'}
+    token, auth_debug = _get_1nce_access_token()
+    debug['auth'] = auth_debug
+    if not token:
+        debug['error'] = (
+            'No 1NCE token available — set 1nce_client_id + '
+            '1nce_client_secret (preferred) or 1nce_bearer_token (legacy) '
+            'in secrets.toml.'
+        )
+        return None, [], debug
 
     url = f"{ONENCE_BASE}/sims/{iccid}/usage"
     headers = {
@@ -300,6 +381,14 @@ def _fetch_1nce_sim_usage(iccid, _cache_buster=3):
     try:
         r = requests.get(url, headers=headers, timeout=20)
         debug['tried'].append({'url': url, 'status': r.status_code})
+        # If token expired between issuance and use, force a refresh and retry once.
+        if r.status_code in (401, 403):
+            token, auth_debug2 = _get_1nce_access_token(force_refresh=True)
+            debug['auth_retry'] = auth_debug2
+            if token:
+                headers['Authorization'] = f'Bearer {token}'
+                r = requests.get(url, headers=headers, timeout=20)
+                debug['tried'].append({'url': url, 'status': r.status_code, 'note': 'retry_after_refresh'})
         if r.status_code != 200:
             try:
                 debug['body'] = r.json()
@@ -893,8 +982,20 @@ def display_iot_usage_page(container=None):
             sim_str = f"{kb / 1024:.2f} MB"
         else:
             sim_str = f"{kb:.1f} KB"
+
+        auth_info = (sim_debug or {}).get('auth') or {}
+        auth_source = auth_info.get('source', '?')
+        auth_note = ''
+        if auth_source == 'oauth_cached':
+            ttl = auth_info.get('expires_in_seconds', 0)
+            mins = ttl // 60
+            auth_note = f' · 🔐 OAuth (cached, {mins}min until refresh)'
+        elif auth_source == 'oauth_fresh':
+            auth_note = f' · 🔐 OAuth (refreshed)'
+        elif auth_source == 'static_bearer':
+            auth_note = ' · 🔑 static bearer token'
         draw.caption(
-            f"📶 1NCE SIM ({SIM_ICCID}) — last 6 months: **{sim_str}**"
+            f"📶 1NCE SIM ({SIM_ICCID}) — last 6 months: **{sim_str}**{auth_note}"
         )
         if sim_breakdown:
             try:
