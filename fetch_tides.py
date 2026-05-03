@@ -472,6 +472,25 @@ def create_natural_tide_chart(tide_df, container=None):
     if tide_df['Height'].isnull().any():
         tide_df['Height'] = tide_df['Height'].fillna(method='ffill')
 
+    # ── Clip to a 48-hour window centered on now (with a small buffer
+    # before/after so the cubic spline tails are well-defined). The chart
+    # x-axis is set to exactly [now, now + 48h] further down. ──
+    vancouver_tz = pytz.timezone('America/Vancouver')
+    current_time = datetime.now(vancouver_tz)
+    window_start = current_time - pd.Timedelta(hours=6)
+    window_end = current_time + pd.Timedelta(hours=48)
+    spline_buffer_end = window_end + pd.Timedelta(hours=6)
+
+    full_window_df = tide_df  # keep a reference for the daily range metric
+    tide_df = tide_df[
+        (tide_df['datetime'] >= window_start)
+        & (tide_df['datetime'] <= spline_buffer_end)
+    ].reset_index(drop=True)
+
+    if len(tide_df) < 2:
+        draw.error("Not enough tide extrema in the next 48 hours to draw the chart.")
+        return
+
     smooth_tide_df = create_smooth_tides(tide_df)
 
     min_time = tide_df['datetime'].min()
@@ -481,7 +500,6 @@ def create_natural_tide_chart(tide_df, container=None):
         draw.error("Invalid time range in tide data")
         return
 
-    vancouver_tz = pytz.timezone('America/Vancouver')
     full_index = pd.date_range(start=min_time, end=max_time, freq='15min')
     if full_index.tz is None:
         full_index = full_index.tz_localize(vancouver_tz)
@@ -498,7 +516,8 @@ def create_natural_tide_chart(tide_df, container=None):
     # ── Compute metrics BEFORE rendering, so they can sit above the chart.
     # On mobile this means the user sees Current Tide / Next Tide / Daily Range
     # immediately at the top, with the full-width chart underneath.
-    current_time = datetime.now(vancouver_tz)
+    # current_time was already set at the top of the function for the
+    # 48-hour window clip.
 
     try:
         smooth_x_seconds = np.array(
@@ -540,8 +559,12 @@ def create_natural_tide_chart(tide_df, container=None):
         except (IndexError, KeyError):
             pass
 
-    if 'Height' in tide_df.columns:
-        daily_range_str = f"{tide_df['Height'].max() - tide_df['Height'].min():.2f}m"
+    # Daily range uses the FULL upstream extrema set so 'Daily Tide Range'
+    # reflects today's actual high-low spread, not just the 48h slice
+    # (which may not contain a full cycle if it's still early in the day).
+    range_source = full_window_df if 'Height' in full_window_df.columns else tide_df
+    if 'Height' in range_source.columns and not range_source.empty:
+        daily_range_str = f"{range_source['Height'].max() - range_source['Height'].min():.2f}m"
     else:
         daily_range_str = "No data available"
 
@@ -580,13 +603,21 @@ def create_natural_tide_chart(tide_df, container=None):
     ))
 
     fig.update_layout(
-        title={'text': 'Tide Levels at Point Atkinson', 'y': 0.95, 'x': 0.5, 'xanchor': 'center', 'yanchor': 'top'},
+        title={'text': 'Tide Levels at Point Atkinson — next 48 h',
+               'y': 0.95, 'x': 0.5, 'xanchor': 'center', 'yanchor': 'top'},
         xaxis_title="Time",
         yaxis_title="Height (meters)",
         hovermode='x unified',
         plot_bgcolor='white',
         paper_bgcolor='white',
-        xaxis=dict(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)', zeroline=False),
+        xaxis=dict(
+            showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)',
+            zeroline=False,
+            # Clip visible window to the next 48 h so the chart focuses on
+            # what the user actually plans for, even though the spline +
+            # extrema dataset extends a few hours past the end for stability.
+            range=[current_time, current_time + pd.Timedelta(hours=48)],
+        ),
         yaxis=dict(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)',
                    zeroline=True, zerolinewidth=2, zerolinecolor='rgba(128,128,128,0.5)')
     )
