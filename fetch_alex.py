@@ -279,12 +279,13 @@ _UNIT_TO_BYTES = {
 def _get_1nce_access_token(force_refresh=False):
     """Return a valid 1NCE OAuth access token, auto-refreshing when it
     expires. Cached in st.session_state with the expiry timestamp.
-    Falls back to a static '1nce_bearer_token' secret when OAuth
-    credentials aren't configured.
+
+    Reads 1nce_client_id + 1nce_client_secret from st.secrets and exchanges
+    them for an access token via the OAuth client-credentials flow.
 
     Returns (token_or_None, debug_dict). The debug dict includes the
     auth source ('oauth_cached' / 'oauth_fresh' / 'oauth_failed' /
-    'static_bearer' / 'no_credentials') for surfacing in the UI."""
+    'no_credentials') for surfacing in the UI."""
     client_id = None
     client_secret = None
     for k in ('1nce_client_id', '1nce_client_secret'):
@@ -387,17 +388,17 @@ def _get_1nce_access_token(force_refresh=False):
             'hint': (
                 "1NCE returned BadCredentials. Check (1) values are not "
                 "swapped, (2) no leading/trailing whitespace, (3) you're "
-                "using the OAuth API credentials from Profile → API "
-                "(not the legacy bearer token) — they're typically named "
-                "'API Username' and 'API Password' in the portal."
+                "using the OAuth API credentials from Profile → API."
             ),
         }
 
-    # Fallback: static bearer token
-    try:
-        return st.secrets['1nce_bearer_token'], {'source': 'static_bearer'}
-    except (KeyError, FileNotFoundError):
-        return None, {'source': 'no_credentials'}
+    return None, {
+        'source': 'no_credentials',
+        'hint': (
+            "Set 1nce_client_id and 1nce_client_secret in "
+            ".streamlit/secrets.toml."
+        ),
+    }
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -417,9 +418,8 @@ def _fetch_1nce_sim_usage(iccid, _cache_buster=4):
     debug['auth'] = auth_debug
     if not token:
         debug['error'] = (
-            'No 1NCE token available — set 1nce_client_id + '
-            '1nce_client_secret (preferred) or 1nce_bearer_token (legacy) '
-            'in secrets.toml.'
+            'No 1NCE token available — set 1nce_client_id and '
+            '1nce_client_secret in secrets.toml.'
         )
         return None, [], debug
 
@@ -1051,9 +1051,7 @@ def display_iot_usage_page(container=None):
             mins = ttl // 60
             auth_note = f' · 🔐 OAuth (cached, {mins}min until refresh)'
         elif auth_source == 'oauth_fresh':
-            auth_note = f' · 🔐 OAuth (refreshed)'
-        elif auth_source == 'static_bearer':
-            auth_note = ' · 🔑 static bearer token'
+            auth_note = ' · 🔐 OAuth (refreshed)'
         draw.caption(
             f"📶 1NCE SIM ({SIM_ICCID}) — last 6 months: **{sim_str}**{auth_note}"
         )
