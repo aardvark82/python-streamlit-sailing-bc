@@ -45,7 +45,6 @@ FLESPI_BASE = "https://flespi.io/gw"
 DEVICE_IMEI = "862094065008336"
 DEVICE_NAME = "Zodiac Pro 420"
 DEVICE_MODEL = "Teltonika FMM13A"
-FLESPI_CHANNEL_ID = 138022
 
 # Reference area — used as a fallback center if the boat has no fix and as
 # the anchor point for the auto-zoom calculation.
@@ -161,26 +160,20 @@ def _walk_for_bytes(obj, depth=0):
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def _fetch_channel_traffic_bytes(channel_id, device_id=None, _cache_buster=2):
-    """Fetch lifetime received traffic for the flespi channel feeding this
-    device, falling back to device-level message counters if the token lacks
-    channel-read scope.
+def _fetch_device_traffic_bytes(device_id, _cache_buster=3):
+    """Fetch lifetime received traffic for the flespi DEVICE (not the channel).
+    Hits /gw/devices/{id} and a couple of related sub-resources, recursing
+    into the JSON to find the first byte-counter field.
     Returns (bytes_or_None, raw_dict_for_debug). Cached 10 minutes.
-    `_cache_buster` is bumped manually to invalidate stale 403 results when
-    the token's ACL has been widened."""
+    Bump `_cache_buster` to invalidate stale entries."""
+    if device_id is None:
+        return None, {'error': 'no device id'}
     candidate_urls = [
-        # Channel-level endpoints (need 'channels: GET' ACL on the token)
-        f"{FLESPI_BASE}/channels/{channel_id}",
-        f"{FLESPI_BASE}/channels/{channel_id}/connections",
-        f"{FLESPI_BASE}/channels/{channel_id}/messages?count=0",
+        f"{FLESPI_BASE}/devices/{device_id}",
+        f"{FLESPI_BASE}/devices/{device_id}/connections",
+        f"{FLESPI_BASE}/devices/{device_id}/messages?count=0",
+        f"{FLESPI_BASE}/devices/{device_id}/logs?count=0",
     ]
-    if device_id is not None:
-        # Device-level endpoints — typically accessible with device token
-        candidate_urls.extend([
-            f"{FLESPI_BASE}/devices/{device_id}",
-            f"{FLESPI_BASE}/devices/{device_id}/connections",
-        ])
-
     debug = {'tried': [], 'permission_denied': False}
     for url in candidate_urls:
         try:
@@ -627,54 +620,49 @@ def display_alex_page(container=None):
         "[flespi.io](https://flespi.io) when needed."
     )
 
-    # ── Lifetime traffic for the flespi ingest channel ──
-    # Tiny retry button — handy after granting/changing the token's ACL,
-    # since the cached 403 will otherwise persist for 10 min.
+    # ── Lifetime traffic for the flespi DEVICE ──
+    # Pulled from /gw/devices/{id}* endpoints rather than channels — the
+    # token consistently has device scope and the device payload exposes
+    # per-device counters directly.
     rt_col, _spacer = draw.columns([0.3, 4])
     if rt_col.button("🔄", key='alex_retry_traffic',
-                      help="Re-fetch flespi channel traffic (clears the 10-min cache)"):
+                      help="Re-fetch flespi device traffic (clears the 10-min cache)"):
         try:
-            _fetch_channel_traffic_bytes.clear()
+            _fetch_device_traffic_bytes.clear()
         except Exception:
             pass
 
     try:
-        channel_bytes, channel_debug = _fetch_channel_traffic_bytes(
-            FLESPI_CHANNEL_ID, device_id=device_id,
-        )
+        device_bytes, device_debug = _fetch_device_traffic_bytes(device_id)
     except Exception as e:
-        print(f"Channel traffic display failed: {e}")
-        channel_bytes, channel_debug = None, {'error': str(e)}
+        print(f"Device traffic display failed: {e}")
+        device_bytes, device_debug = None, {'error': str(e)}
 
-    if channel_bytes is not None:
-        kb = channel_bytes / 1024
+    if device_bytes is not None:
+        kb = device_bytes / 1024
         if kb >= 1024 * 1024:
             traffic_str = f"{kb / (1024 * 1024):.2f} GB"
         elif kb >= 1024:
             traffic_str = f"{kb / 1024:.2f} MB"
         else:
             traffic_str = f"{kb:.1f} KB"
-        source = channel_debug.get('matched_url', '')
-        from_label = (
-            f"channel #{FLESPI_CHANNEL_ID}"
-            if 'channels' in source else f"device {DEVICE_IMEI}"
-        )
         draw.caption(
-            f"📡 Total traffic on flespi {from_label}: **{traffic_str}** "
-            f"(from `{channel_debug.get('matched_field', '?')}`)"
+            f"📡 Total traffic on flespi device {DEVICE_IMEI}: "
+            f"**{traffic_str}** "
+            f"(from `{device_debug.get('matched_field', '?')}`)"
         )
-    elif channel_debug.get('permission_denied'):
+    elif device_debug.get('permission_denied'):
         draw.caption(
-            f"🔒 Flespi token lacks 'channels: GET' ACL — can't read total "
-            f"traffic for channel #{FLESPI_CHANNEL_ID}. Add the channel ACL "
-            f"to the token at [flespi.io](https://flespi.io) → Tokens → edit."
+            f"🔒 Flespi token lacks device-read ACL — can't read total "
+            f"traffic for device {DEVICE_IMEI}. Widen the token at "
+            f"[flespi.io](https://flespi.io) → Tokens → edit."
         )
         with draw.expander("🔍 flespi raw debug"):
-            draw.json(channel_debug)
+            draw.json(device_debug)
     else:
         draw.caption(
-            f"📡 Total traffic for channel #{FLESPI_CHANNEL_ID}: "
+            f"📡 Total traffic for device {DEVICE_IMEI}: "
             f"not reported by API — raw response below."
         )
-        with draw.expander("🔍 flespi channel raw response (for debugging)"):
-            draw.json(channel_debug)
+        with draw.expander("🔍 flespi device raw response (for debugging)"):
+            draw.json(device_debug)
