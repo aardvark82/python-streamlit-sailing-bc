@@ -82,16 +82,13 @@ def _extract_wind_speed_kts(wind_speed):
 
 
 def _color_for_speed(kts):
-    """Return an arrow fill color based on knots."""
-    if kts < 5:
-        return '#4a90e2'   # calm        <5 — blue
+    """Return a wind-color based on knots — three buckets only.
+    No blue, no black: every wind dot reads as either green / orange / red."""
     if kts < 10:
-        return '#27ae60'   # light       5-10 — green
+        return '#27ae60'   # low      <10 kts — green
     if kts < 20:
-        return '#f39c12'   # moderate    10-20 — orange
-    if kts < 30:
-        return '#e74c3c'   # strong      20-30 — red
-    return '#111111'       # dangerous   30+ — black
+        return '#f39c12'   # mid      10-20 kts — orange
+    return '#e74c3c'       # high     20+ kts — red
 
 
 # Unicode arrows pointing DOWNWIND (i.e. where the wind is blowing TO).
