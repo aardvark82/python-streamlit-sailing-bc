@@ -321,38 +321,57 @@ def _get_1nce_access_token(force_refresh=False):
         creds_b64 = base64.b64encode(
             f"{client_id}:{client_secret}".encode()
         ).decode()
-        headers = {
-            'Authorization': f'Basic {creds_b64}',
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'Accept': 'application/json',
+        # Modern 1NCE expects JSON body; the older spec used form-encoded.
+        # Try JSON first, fall back to form-encoded on 400/415.
+        attempts = [
+            ('json', {
+                'Authorization': f'Basic {creds_b64}',
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+            }, {'json': {'grant_type': 'client_credentials'}}),
+            ('form', {
+                'Authorization': f'Basic {creds_b64}',
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Accept': 'application/json',
+            }, {'data': 'grant_type=client_credentials'}),
+        ]
+        last_err = None
+        for shape, headers, kwargs in attempts:
+            try:
+                r = requests.post(url, headers=headers, timeout=15, **kwargs)
+                if r.status_code == 200:
+                    data = r.json() or {}
+                    token = data.get('access_token') or data.get('accessToken')
+                    ttl = int(data.get('expires_in') or data.get('expiresIn') or 3600)
+                    if token:
+                        st.session_state[token_key] = token
+                        st.session_state[exp_key] = now + ttl
+                        return token, {
+                            'source': 'oauth_fresh',
+                            'expires_in_seconds': ttl,
+                            'token_url': url,
+                            'auth_hash': auth_hash,
+                            'body_shape': shape,
+                        }
+                    last_err = {'shape': shape, 'status': 200, 'note': 'no access_token in body', 'body': data}
+                    continue
+                # On 400/415, try the next body shape
+                try:
+                    body = r.json()
+                except Exception:
+                    body = r.text[:500]
+                last_err = {'shape': shape, 'status': r.status_code, 'body': body}
+                if r.status_code in (400, 415):
+                    continue
+                break
+            except Exception as e:
+                print(f"1NCE OAuth attempt ({shape}) failed: {e}")
+                last_err = {'shape': shape, 'error': str(e)}
+        return None, {
+            'source': 'oauth_failed',
+            'token_url': url,
+            'last_attempt': last_err,
         }
-        try:
-            r = requests.post(
-                url, headers=headers,
-                data='grant_type=client_credentials',
-                timeout=15,
-            )
-            r.raise_for_status()
-            data = r.json() or {}
-            token = data.get('access_token')
-            ttl = int(data.get('expires_in', 3600))
-            if token:
-                st.session_state[token_key] = token
-                st.session_state[exp_key] = now + ttl
-                return token, {
-                    'source': 'oauth_fresh',
-                    'expires_in_seconds': ttl,
-                    'token_url': url,
-                    'auth_hash': auth_hash,
-                }
-            return None, {
-                'source': 'oauth_failed',
-                'error': 'no access_token in response',
-                'body': data,
-            }
-        except Exception as e:
-            print(f"1NCE OAuth refresh failed: {e}")
-            return None, {'source': 'oauth_failed', 'error': str(e), 'token_url': url}
 
     # Fallback: static bearer token
     try:
