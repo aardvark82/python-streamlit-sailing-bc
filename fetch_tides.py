@@ -670,23 +670,56 @@ def processResponseToJSONStormglass(container=None, response=None):
 
 
 def find_local_extrema(df):
-    """Keep only local maxima and minima from supersampled tide CSV."""
-    height_array = df['height'].values
+    """Keep only local maxima and minima from a supersampled tide CSV.
 
-    maxima_indices = []
-    for i in range(1, len(height_array) - 1):
-        if height_array[i - 1] < height_array[i] > height_array[i + 1]:
-            maxima_indices.append(i)
+    Pt Atkinson is mixed semi-diurnal: 2 highs + 2 lows per day with
+    significant inequality. The smaller of each pair sometimes appears as
+    a shoulder rather than a sharp peak, and a strict 'a < b > c' check
+    can miss it when sampling resolution is coarse. Use scipy.find_peaks
+    with a prominence threshold so subtle local extrema still register.
+    """
+    height_array = np.asarray(df['height'].values, dtype=float)
+    n = len(height_array)
+    if n < 3:
+        df_empty = df.iloc[0:0].copy()
+        df_empty['type'] = []
+        return df_empty
 
-    minima_indices = []
-    for i in range(1, len(height_array) - 1):
-        if height_array[i - 1] > height_array[i] < height_array[i + 1]:
-            minima_indices.append(i)
+    try:
+        from scipy.signal import find_peaks
+        # Tide range at Pt Atkinson is up to ~5m. Set prominence so even
+        # the smaller mixed-semi-diurnal peak (~10cm above its trough or
+        # neighbouring high) registers, while pure noise/numerical wiggle
+        # is rejected.
+        prom = 0.05  # 5 cm
+        # Distance hint: peaks are at least ~3 hours apart even for the
+        # closest-spaced mixed-tide peaks. Translate that to samples.
+        # Estimate sample step: take the median gap from the first column.
+        first_col = df.columns[0]
+        try:
+            ts = pd.to_datetime(df[first_col]).astype('int64') // 10**9
+            step_s = float(np.median(np.diff(ts.values)))
+            distance = max(1, int(3 * 3600 / step_s)) if step_s > 0 else 1
+        except Exception:
+            distance = 1
 
-    extrema_indices = sorted(maxima_indices + minima_indices)
+        max_idx, _ = find_peaks(height_array, prominence=prom, distance=distance)
+        min_idx, _ = find_peaks(-height_array, prominence=prom, distance=distance)
+    except Exception:
+        # Fallback to the original strict comparison if scipy fails
+        max_idx = np.array([
+            i for i in range(1, n - 1)
+            if height_array[i - 1] < height_array[i] > height_array[i + 1]
+        ], dtype=int)
+        min_idx = np.array([
+            i for i in range(1, n - 1)
+            if height_array[i - 1] > height_array[i] < height_array[i + 1]
+        ], dtype=int)
+
+    max_set = set(int(i) for i in max_idx)
+    extrema_indices = sorted(set(int(i) for i in max_idx) | set(int(i) for i in min_idx))
     df_extrema = df.iloc[extrema_indices].copy()
-    df_extrema['type'] = ['high' if i in maxima_indices else 'low' for i in extrema_indices]
-
+    df_extrema['type'] = ['high' if i in max_set else 'low' for i in extrema_indices]
     return df_extrema
 
 
