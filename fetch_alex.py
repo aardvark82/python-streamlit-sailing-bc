@@ -161,23 +161,37 @@ def _walk_for_bytes(obj, depth=0):
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def _fetch_channel_traffic_bytes(channel_id):
-    """Fetch lifetime received traffic for a flespi channel.
+def _fetch_channel_traffic_bytes(channel_id, device_id=None):
+    """Fetch lifetime received traffic for the flespi channel feeding this
+    device, falling back to device-level message counters if the token lacks
+    channel-read scope.
     Returns (bytes_or_None, raw_dict_for_debug). Cached 10 minutes."""
-    # Two possible endpoints — channel object first, then a stats sub-resource.
     candidate_urls = [
+        # Channel-level endpoints (need 'channels: GET' ACL on the token)
         f"{FLESPI_BASE}/channels/{channel_id}",
         f"{FLESPI_BASE}/channels/{channel_id}/connections",
         f"{FLESPI_BASE}/channels/{channel_id}/messages?count=0",
     ]
-    debug = {'tried': []}
+    if device_id is not None:
+        # Device-level endpoints — typically accessible with device token
+        candidate_urls.extend([
+            f"{FLESPI_BASE}/devices/{device_id}",
+            f"{FLESPI_BASE}/devices/{device_id}/connections",
+        ])
+
+    debug = {'tried': [], 'permission_denied': False}
     for url in candidate_urls:
         try:
             r = requests.get(url, headers=_flespi_headers(), timeout=15)
-            debug['tried'].append({'url': url, 'status': r.status_code})
+            entry = {'url': url, 'status': r.status_code}
+            if r.status_code == 403:
+                debug['permission_denied'] = True
             if r.status_code != 200:
+                debug['tried'].append(entry)
                 continue
             data = r.json() or {}
+            entry['response_keys'] = list(data.keys()) if isinstance(data, dict) else None
+            debug['tried'].append(entry)
             debug['last_response'] = data
             items = data.get('result') or [data]
             for ch in items:
@@ -186,6 +200,7 @@ def _fetch_channel_traffic_bytes(channel_id):
                 bytes_val, path = _walk_for_bytes(ch)
                 if bytes_val is not None:
                     debug['matched_field'] = path
+                    debug['matched_url'] = url
                     return bytes_val, debug
         except Exception as e:
             debug['tried'].append({'url': url, 'error': str(e)})
@@ -612,7 +627,9 @@ def display_alex_page(container=None):
 
     # ── Lifetime traffic for the flespi ingest channel ──
     try:
-        channel_bytes, channel_debug = _fetch_channel_traffic_bytes(FLESPI_CHANNEL_ID)
+        channel_bytes, channel_debug = _fetch_channel_traffic_bytes(
+            FLESPI_CHANNEL_ID, device_id=device_id,
+        )
     except Exception as e:
         print(f"Channel traffic display failed: {e}")
         channel_bytes, channel_debug = None, {'error': str(e)}
@@ -625,11 +642,23 @@ def display_alex_page(container=None):
             traffic_str = f"{kb / 1024:.2f} MB"
         else:
             traffic_str = f"{kb:.1f} KB"
+        source = channel_debug.get('matched_url', '')
+        from_label = (
+            f"channel #{FLESPI_CHANNEL_ID}"
+            if 'channels' in source else f"device {DEVICE_IMEI}"
+        )
         draw.caption(
-            f"📡 Total traffic received on flespi channel "
-            f"#{FLESPI_CHANNEL_ID}: **{traffic_str}** "
+            f"📡 Total traffic on flespi {from_label}: **{traffic_str}** "
             f"(from `{channel_debug.get('matched_field', '?')}`)"
         )
+    elif channel_debug.get('permission_denied'):
+        draw.caption(
+            f"🔒 Flespi token lacks 'channels: GET' ACL — can't read total "
+            f"traffic for channel #{FLESPI_CHANNEL_ID}. Add the channel ACL "
+            f"to the token at [flespi.io](https://flespi.io) → Tokens → edit."
+        )
+        with draw.expander("🔍 flespi raw debug"):
+            draw.json(channel_debug)
     else:
         draw.caption(
             f"📡 Total traffic for channel #{FLESPI_CHANNEL_ID}: "
