@@ -779,12 +779,20 @@ def display_point_atkinson_tides(container=None, title="🌊Tides for Point Atki
                 )
                 return
 
-            # Pass the entire CSV to the parser — no subsampling, no
-            # truncation. Pt Atkinson is mixed semi-diurnal: two unequal
-            # highs and two unequal lows per day, and the smaller pair were
-            # being missed when the data was thinned to every 10–20 minutes.
-            # find_local_extrema is O(N); 10k rows runs in milliseconds.
-            data = processCSVResponseToJSONSelenium(draw, _csv)
+            # Subsample to every 3 minutes (≈3-5x finer than the original
+            # 20-minute thinning). Fine enough to catch each of the four
+            # daily extrema at Pt Atkinson (mixed semi-diurnal); coarse
+            # enough that processCSVResponseToJSONSelenium (which doesn't
+            # like the full ~10k-row file) keeps working.
+            csv_lines = _csv.splitlines()
+            if len(csv_lines) > 1:
+                header = csv_lines[0]
+                body = csv_lines[1:]
+                kept = body[::3]
+                csv_subsampled = '\n'.join([header] + kept)
+            else:
+                csv_subsampled = _csv
+            data = processCSVResponseToJSONSelenium(draw, csv_subsampled)
 
         if USE_CHAT_GPT:
             draw.badge("USE_CHAT_GPT")
