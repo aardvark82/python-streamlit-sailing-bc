@@ -45,6 +45,7 @@ FLESPI_BASE = "https://flespi.io/gw"
 DEVICE_IMEI = "862094065008336"
 DEVICE_NAME = "Zodiac Pro 420"
 DEVICE_MODEL = "Teltonika FMM13A"
+FLESPI_CHANNEL_ID = 138022
 
 # Reference area — used as a fallback center if the boat has no fix and as
 # the anchor point for the auto-zoom calculation.
@@ -131,6 +132,44 @@ def _fetch_messages_last_n_hours(device_id, hours=6):
     r = requests.get(url, headers=_flespi_headers(), params=params, timeout=20)
     r.raise_for_status()
     return (r.json() or {}).get('result') or []
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _fetch_channel_traffic_bytes(channel_id):
+    """Fetch lifetime received traffic for a flespi channel.
+    Returns int (bytes) or None. Cached 10 minutes — counters are slow-moving."""
+    url = f"{FLESPI_BASE}/channels/{channel_id}"
+    try:
+        r = requests.get(url, headers=_flespi_headers(), timeout=15)
+        r.raise_for_status()
+        data = r.json() or {}
+        items = data.get('result') or [data]
+        if not items:
+            return None
+        ch = items[0] if isinstance(items[0], dict) else {}
+        # Try a handful of common field names for total received bytes
+        for field in ('traffic_in', 'traffic_in_total', 'traffic_received',
+                      'bytes_received', 'bytes_received_total',
+                      'bytes_in', 'rx', 'rx_bytes'):
+            v = ch.get(field)
+            if v is not None:
+                try:
+                    return int(v)
+                except (TypeError, ValueError):
+                    continue
+        # Sometimes wrapped under a nested 'stats' dict
+        stats = ch.get('stats') or {}
+        for field in ('traffic_in', 'bytes_received', 'rx_bytes'):
+            v = stats.get(field)
+            if v is not None:
+                try:
+                    return int(v)
+                except (TypeError, ValueError):
+                    continue
+        return None
+    except Exception as e:
+        print(f"flespi channel {channel_id} traffic fetch failed: {e}")
+        return None
 
 
 @st.cache_data(ttl=180, show_spinner=False)
@@ -550,3 +589,27 @@ def display_alex_page(container=None):
         "🔑 Flespi token expires **May 1, 2027** — generate a new one at "
         "[flespi.io](https://flespi.io) when needed."
     )
+
+    # ── Lifetime traffic for the flespi ingest channel ──
+    try:
+        channel_bytes = _fetch_channel_traffic_bytes(FLESPI_CHANNEL_ID)
+    except Exception as e:
+        print(f"Channel traffic display failed: {e}")
+        channel_bytes = None
+    if channel_bytes is not None:
+        kb = channel_bytes / 1024
+        if kb >= 1024 * 1024:
+            traffic_str = f"{kb / (1024 * 1024):.2f} GB"
+        elif kb >= 1024:
+            traffic_str = f"{kb / 1024:.2f} MB"
+        else:
+            traffic_str = f"{kb:.1f} KB"
+        draw.caption(
+            f"📡 Total traffic received on flespi channel "
+            f"#{FLESPI_CHANNEL_ID}: **{traffic_str}**"
+        )
+    else:
+        draw.caption(
+            f"📡 Total traffic for channel #{FLESPI_CHANNEL_ID}: not reported "
+            f"by API."
+        )
