@@ -289,13 +289,16 @@ def _get_1nce_access_token(force_refresh=False):
     client_secret = None
     for k in ('1nce_client_id', '1nce_client_secret'):
         try:
-            _ = st.secrets[k]
+            v = st.secrets[k]
         except (KeyError, FileNotFoundError):
-            _ = None
+            v = None
+        # Strip whitespace and surrounding quotes — common copy-paste pitfalls.
+        if isinstance(v, str):
+            v = v.strip().strip('"').strip("'")
         if k.endswith('id'):
-            client_id = _
+            client_id = v
         else:
-            client_secret = _
+            client_secret = v
 
     if client_id and client_secret:
         # Make the session-state cache key depend on the creds so any change
@@ -367,10 +370,27 @@ def _get_1nce_access_token(force_refresh=False):
             except Exception as e:
                 print(f"1NCE OAuth attempt ({shape}) failed: {e}")
                 last_err = {'shape': shape, 'error': str(e)}
+        # Mask creds for debug visibility — show length and first/last 3 chars
+        # so the user can spot truncated copies, swapped fields, etc.
+        def _mask(s):
+            if not s:
+                return None
+            return f"len={len(s)} starts={s[:3]}… ends=…{s[-3:]}"
         return None, {
             'source': 'oauth_failed',
             'token_url': url,
             'last_attempt': last_err,
+            'creds_seen': {
+                'client_id': _mask(client_id),
+                'client_secret': _mask(client_secret),
+            },
+            'hint': (
+                "1NCE returned BadCredentials. Check (1) values are not "
+                "swapped, (2) no leading/trailing whitespace, (3) you're "
+                "using the OAuth API credentials from Profile → API "
+                "(not the legacy bearer token) — they're typically named "
+                "'API Username' and 'API Password' in the portal."
+            ),
         }
 
     # Fallback: static bearer token
