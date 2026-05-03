@@ -767,22 +767,24 @@ def display_alex_page(container=None):
     # focused on live tracking.
 
 
+def _bytes_to_kb(b):
+    """Bytes → KB string with one decimal, '—' if value is None."""
+    if b is None:
+        return "—"
+    return f"{b / 1024:.1f}"
+
+
 def display_iot_usage_page(container=None):
     """Standalone sidebar page bundling everything IoT-data-usage related:
-       - device identifier caption
-       - flespi token expiry reminder
-       - flespi device traffic counter (lifetime, from /logs)
+       - 2 KB metric cards at the top: Flespi Data, 1NCE Data
+       - device identifier caption + flespi token expiry reminder
+       - flespi device traffic counter (lifetime, from /logs) detail
        - 1NCE SIM data usage for the last 6 months + per-day breakdown
     Independent of the live tracker — has its own secret check + flespi
     device ID resolution so it works even when the Alex page hasn't been
     loaded this session."""
     draw = container or st
     draw.subheader("📡 IoT Data usage")
-    draw.caption(f"_{DEVICE_NAME} · {DEVICE_MODEL} · IMEI {DEVICE_IMEI}_")
-    draw.info(
-        "🔑 Flespi token expires **May 1, 2027** — generate a new one at "
-        "[flespi.io](https://flespi.io) when needed."
-    )
 
     # Resolve flespi device id (cached 10 min)
     try:
@@ -799,7 +801,40 @@ def display_iot_usage_page(container=None):
         draw.error(f"No flespi device found for IMEI {DEVICE_IMEI}")
         return
 
-    # ── Flespi device traffic ──
+    # ── Pull both numbers up front so the top-of-page cards can show them ──
+    try:
+        device_bytes, device_debug = _fetch_device_traffic_bytes(device_id)
+    except Exception as e:
+        print(f"IoT page: device traffic fetch failed: {e}")
+        device_bytes, device_debug = None, {'error': str(e)}
+
+    try:
+        sim_total_bytes, sim_breakdown, sim_debug = _fetch_1nce_sim_usage(SIM_ICCID)
+    except Exception as e:
+        sim_total_bytes, sim_breakdown, sim_debug = None, [], {'error': str(e)}
+
+    # ── Two metric cards at the top ──
+    mc1, mc2 = draw.columns(2)
+    mc1.metric(
+        "📡 Flespi Data (KB)",
+        _bytes_to_kb(device_bytes),
+        help="Lifetime received bytes on the flespi device "
+             f"(IMEI {DEVICE_IMEI}), summed across connection-close "
+             "events in /logs.",
+    )
+    mc2.metric(
+        "📶 1NCE Data (KB)",
+        _bytes_to_kb(sim_total_bytes),
+        help=f"1NCE SIM (ICCID {SIM_ICCID}) data volume, last 6 months.",
+    )
+
+    draw.caption(f"_{DEVICE_NAME} · {DEVICE_MODEL} · IMEI {DEVICE_IMEI}_")
+    draw.info(
+        "🔑 Flespi token expires **May 1, 2027** — generate a new one at "
+        "[flespi.io](https://flespi.io) when needed."
+    )
+
+    # ── Flespi device traffic detail ──
     draw.markdown("---")
     draw.markdown("**Flespi device traffic**")
     rt_col, _spacer = draw.columns([0.3, 4])
@@ -809,12 +844,6 @@ def display_iot_usage_page(container=None):
             _fetch_device_traffic_bytes.clear()
         except Exception:
             pass
-
-    try:
-        device_bytes, device_debug = _fetch_device_traffic_bytes(device_id)
-    except Exception as e:
-        print(f"IoT page: device traffic fetch failed: {e}")
-        device_bytes, device_debug = None, {'error': str(e)}
 
     if device_bytes is not None:
         kb = device_bytes / 1024
@@ -845,7 +874,7 @@ def display_iot_usage_page(container=None):
         with draw.expander("🔍 flespi device raw response (for debugging)"):
             draw.json(device_debug)
 
-    # ── 1NCE SIM usage ──
+    # ── 1NCE SIM usage detail ──
     draw.markdown("---")
     draw.markdown("**1NCE SIM usage (last 6 months)**")
     sim_rt_col, _spacer2 = draw.columns([0.3, 4])
@@ -855,11 +884,6 @@ def display_iot_usage_page(container=None):
             _fetch_1nce_sim_usage.clear()
         except Exception:
             pass
-
-    try:
-        sim_total_bytes, sim_breakdown, sim_debug = _fetch_1nce_sim_usage(SIM_ICCID)
-    except Exception as e:
-        sim_total_bytes, sim_breakdown, sim_debug = None, [], {'error': str(e)}
 
     if sim_total_bytes is not None:
         kb = sim_total_bytes / 1024
