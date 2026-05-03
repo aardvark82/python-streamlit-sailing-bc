@@ -161,11 +161,13 @@ def _walk_for_bytes(obj, depth=0):
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def _fetch_channel_traffic_bytes(channel_id, device_id=None):
+def _fetch_channel_traffic_bytes(channel_id, device_id=None, _cache_buster=2):
     """Fetch lifetime received traffic for the flespi channel feeding this
     device, falling back to device-level message counters if the token lacks
     channel-read scope.
-    Returns (bytes_or_None, raw_dict_for_debug). Cached 10 minutes."""
+    Returns (bytes_or_None, raw_dict_for_debug). Cached 10 minutes.
+    `_cache_buster` is bumped manually to invalidate stale 403 results when
+    the token's ACL has been widened."""
     candidate_urls = [
         # Channel-level endpoints (need 'channels: GET' ACL on the token)
         f"{FLESPI_BASE}/channels/{channel_id}",
@@ -626,6 +628,16 @@ def display_alex_page(container=None):
     )
 
     # ── Lifetime traffic for the flespi ingest channel ──
+    # Tiny retry button — handy after granting/changing the token's ACL,
+    # since the cached 403 will otherwise persist for 10 min.
+    rt_col, _spacer = draw.columns([0.3, 4])
+    if rt_col.button("🔄", key='alex_retry_traffic',
+                      help="Re-fetch flespi channel traffic (clears the 10-min cache)"):
+        try:
+            _fetch_channel_traffic_bytes.clear()
+        except Exception:
+            pass
+
     try:
         channel_bytes, channel_debug = _fetch_channel_traffic_bytes(
             FLESPI_CHANNEL_ID, device_id=device_id,
