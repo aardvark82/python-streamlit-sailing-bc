@@ -33,15 +33,15 @@ CANADA_GOVERNMENT_TIDE_POINT_ATKINSON = "https://www.tides.gc.ca/en/stations/077
 
 # DFO IWLS public API — same backend that powers tides.gc.ca. Direct
 # HTTP, no Selenium, no Chrome — works identically on Streamlit Cloud.
-# Pt Atkinson station Mongo ID; obtained from the station index endpoint.
+# Pt Atkinson Mongo ID, verified by hitting /stations?code=07795:
 IWLS_API_BASE = "https://api-iwls.dfo-mpo.gc.ca/api/v1"
-IWLS_PT_ATKINSON_STATION_ID = "5cebf1df3d0f4a073c4bb8d7"
+IWLS_PT_ATKINSON_STATION_ID = "5cebf1de3d0f4a073c4bb94c"
 
 download_dir = os.path.abspath("temp_downloads")
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch_iwls_tide_extremes_pt_atkinson(days_ahead=7, days_back=1):
+def fetch_iwls_tide_extremes_pt_atkinson(days_ahead=7, days_back=1, _cache_buster=2):
     """Pull tide hi/lo extremes for Pt Atkinson directly from the DFO
     IWLS REST API. Returns the list-of-dicts shape that the rest of the
     pipeline (process_tide_data, create_natural_tide_chart) accepts:
