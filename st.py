@@ -273,9 +273,12 @@ def parseJerichoWindHistory(container=None):
     lines = csv_raw.splitlines()
     csv_fixed = '\n'.join(lines[3:])
 
-    df = pd.read_csv(io.StringIO(csv_fixed), header=None, sep=r'\s+')
-
-    df.columns = [
+    # The Davis weather station CSV is whitespace-separated with up to 30
+    # columns and the occasional truncated row. Force the column names so
+    # pandas doesn't infer-and-fail on a row whose width differs from the
+    # first data line, and use engine='python' + on_bad_lines='skip' to
+    # skip any row that doesn't fit instead of aborting the parse.
+    column_names = [
         'Date', 'Time', 'Temp Out', 'Temp Hi', 'Temp Low', 'Hum Out',
         'Dew Pt.', 'Wind Speed', 'Wind Dir', 'Wind Run', 'Wind Hi Speed',
         'Wind Hi Dir', 'Wind Chill', 'Heat Index', 'THW Index', 'Bar',
@@ -283,6 +286,14 @@ def parseJerichoWindHistory(container=None):
         'In Dew', 'In Heat', 'In EMC', 'In Air Density', 'Wind Samp',
         'Wind TX', 'IS Recept.', 'Arc Int',
     ]
+    df = pd.read_csv(
+        io.StringIO(csv_fixed),
+        header=None,
+        names=column_names,
+        sep=r'\s+',
+        engine='python',
+        on_bad_lines='skip',
+    )
 
     # Combine date and time columns
     df['datetime'] = pd.to_datetime(df['Date'] + ' ' + df['Time'], utc=False)

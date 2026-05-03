@@ -549,7 +549,12 @@ def _fetch_jericho_summary():
         csv_raw = res.content.decode('utf-8')
         lines = csv_raw.splitlines()
         csv_fixed = '\n'.join(lines[3:])
-        df = pd.read_csv(io.StringIO(csv_fixed), header=None, sep=r'\s+')
+        # Tolerate ragged rows (variable column count) — see parseJerichoWindHistory.
+        df = pd.read_csv(
+            io.StringIO(csv_fixed),
+            header=None, sep=r'\s+',
+            engine='python', on_bad_lines='skip',
+        )
         last = df.iloc[-1]
         # Column positions: 7 = Wind Speed, 8 = Wind Dir, 10 = Wind Hi Speed
         wind_speed = float(last.iloc[7]) if pd.notna(last.iloc[7]) else None
