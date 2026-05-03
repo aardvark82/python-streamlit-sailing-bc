@@ -779,19 +779,15 @@ def display_point_atkinson_tides(container=None, title="🌊Tides for Point Atki
                 )
                 return
 
-            # Subsample to every 3 minutes (≈3-5x finer than the original
-            # 20-minute thinning). Fine enough to catch each of the four
-            # daily extrema at Pt Atkinson (mixed semi-diurnal); coarse
-            # enough that processCSVResponseToJSONSelenium (which doesn't
-            # like the full ~10k-row file) keeps working.
+            # Same subsampling shape that the parser is known to handle
+            # (csv_lines[::20] = every 20 minutes, line 0 = header) but
+            # without the previous [:halfway_point] truncation, so we keep
+            # the FULL 7-day window. Every-20-min resolution is fine enough
+            # to catch every Pt Atkinson high/low even on the smaller of
+            # the two daily pairs (the rate of change near a peak is
+            # several cm per 20 min, well above floating-point noise).
             csv_lines = _csv.splitlines()
-            if len(csv_lines) > 1:
-                header = csv_lines[0]
-                body = csv_lines[1:]
-                kept = body[::3]
-                csv_subsampled = '\n'.join([header] + kept)
-            else:
-                csv_subsampled = _csv
+            csv_subsampled = '\n'.join(csv_lines[::20])
             data = processCSVResponseToJSONSelenium(draw, csv_subsampled)
 
         if USE_CHAT_GPT:
