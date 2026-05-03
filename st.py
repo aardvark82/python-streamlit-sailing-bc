@@ -32,7 +32,7 @@ from wind_utils import create_arrow_html
 from fetch_gonogo import display_gonogo_sidebar, display_gonogo_page, display_kiosk_page
 from fetch_whales import display_whales_page
 from fetch_whales2 import display_whales2_page
-from fetch_alex import display_alex_page
+from fetch_alex import display_alex_page, display_iot_usage_page
 from pathlib import Path
 
 # Read version from VERSION file
@@ -188,6 +188,13 @@ def page_alex():
         display_alex_page(container=st)
     except Exception as e:
         st.error(f"Failed to load Alex Location: {e}")
+
+
+def page_iot_usage():
+    try:
+        display_iot_usage_page(container=st)
+    except Exception as e:
+        st.error(f"Failed to load IoT Usage: {e}")
 
 
 def page_forecast():
@@ -925,6 +932,7 @@ _pg_pamrocks = st.Page(page_pamrocks, title="Pam Rocks", icon="🔵")
 _pg_whales = st.Page(page_whales, title="Whale boats", icon="🐋")
 _pg_whales2 = st.Page(page_whales2, title="Whale boats 2", icon="🐋")
 _pg_alex = st.Page(page_alex, title="Alex Location", icon="📍")
+_pg_iot = st.Page(page_iot_usage, title="IoT Usage", icon="📡")
 _pg_forecast = st.Page(page_forecast, title="Marine Forecast", icon="🌊")
 _pg_tides = st.Page(page_tides, title="Tides", icon="🌊")
 _pg_beach = st.Page(page_beach, title="Beach", icon="🏖️")
@@ -946,7 +954,7 @@ pages = {
     "Live Data": [_pg_alex, _pg_pamrocks, _pg_whales, _pg_whales2, _pg_jericho, _pg_english_bay, _pg_atkinson, _pg_halibut],
     "Forecast & Tides": [_pg_forecast, _pg_tides, _pg_beach],
     "Regional Weather": [_pg_squamish, _pg_lionsbay],
-    "Display": [_pg_kiosk],
+    "Display": [_pg_kiosk, _pg_iot],
 }
 
 pg = st.navigation(pages)

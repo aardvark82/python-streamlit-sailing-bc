@@ -762,108 +762,134 @@ def display_alex_page(container=None):
     else:
         draw.caption("No position fixes recorded in the last 6 hours.")
 
-    # ── IoT Data usage tab — bundles device info, API key reminder,
-    # flespi traffic counter, 1NCE SIM usage. Hidden behind a tab at the
-    # bottom so the live tracking is the page's primary focus. ──
-    iot_tab, = draw.tabs(["📡 IoT Data usage"])
-    with iot_tab:
-        st.caption(f"_{DEVICE_NAME} · {DEVICE_MODEL} · IMEI {DEVICE_IMEI}_")
-        st.info(
-            "🔑 Flespi token expires **May 1, 2027** — generate a new one at "
-            "[flespi.io](https://flespi.io) when needed."
+    # The IoT Data usage / API key / SIM usage panels live on their own
+    # sidebar page now (display_iot_usage_page below) so this page stays
+    # focused on live tracking.
+
+
+def display_iot_usage_page(container=None):
+    """Standalone sidebar page bundling everything IoT-data-usage related:
+       - device identifier caption
+       - flespi token expiry reminder
+       - flespi device traffic counter (lifetime, from /logs)
+       - 1NCE SIM data usage for the last 6 months + per-day breakdown
+    Independent of the live tracker — has its own secret check + flespi
+    device ID resolution so it works even when the Alex page hasn't been
+    loaded this session."""
+    draw = container or st
+    draw.subheader("📡 IoT Data usage")
+    draw.caption(f"_{DEVICE_NAME} · {DEVICE_MODEL} · IMEI {DEVICE_IMEI}_")
+    draw.info(
+        "🔑 Flespi token expires **May 1, 2027** — generate a new one at "
+        "[flespi.io](https://flespi.io) when needed."
+    )
+
+    # Resolve flespi device id (cached 10 min)
+    try:
+        st.secrets["flespi_api_key"]
+    except (KeyError, FileNotFoundError):
+        draw.error("`flespi_api_key` is missing from `.streamlit/secrets.toml`.")
+        return
+    try:
+        device_id = _resolve_device_id_by_imei(DEVICE_IMEI)
+    except Exception as e:
+        draw.error(f"Failed to resolve device by IMEI {DEVICE_IMEI}: {e}")
+        return
+    if device_id is None:
+        draw.error(f"No flespi device found for IMEI {DEVICE_IMEI}")
+        return
+
+    # ── Flespi device traffic ──
+    draw.markdown("---")
+    draw.markdown("**Flespi device traffic**")
+    rt_col, _spacer = draw.columns([0.3, 4])
+    if rt_col.button("🔄", key='iot_retry_traffic',
+                      help="Re-fetch flespi device traffic (clears the 10-min cache)"):
+        try:
+            _fetch_device_traffic_bytes.clear()
+        except Exception:
+            pass
+
+    try:
+        device_bytes, device_debug = _fetch_device_traffic_bytes(device_id)
+    except Exception as e:
+        print(f"IoT page: device traffic fetch failed: {e}")
+        device_bytes, device_debug = None, {'error': str(e)}
+
+    if device_bytes is not None:
+        kb = device_bytes / 1024
+        if kb >= 1024 * 1024:
+            traffic_str = f"{kb / (1024 * 1024):.2f} GB"
+        elif kb >= 1024:
+            traffic_str = f"{kb / 1024:.2f} MB"
+        else:
+            traffic_str = f"{kb:.1f} KB"
+        draw.caption(
+            f"📡 Total traffic on flespi device {DEVICE_IMEI}: "
+            f"**{traffic_str}** "
+            f"(from `{device_debug.get('matched_field', '?')}`)"
+        )
+    elif device_debug.get('permission_denied'):
+        draw.caption(
+            f"🔒 Flespi token lacks device-read ACL — can't read total "
+            f"traffic for device {DEVICE_IMEI}. Widen the token at "
+            f"[flespi.io](https://flespi.io) → Tokens → edit."
+        )
+        with draw.expander("🔍 flespi raw debug"):
+            draw.json(device_debug)
+    else:
+        draw.caption(
+            f"📡 Total traffic for device {DEVICE_IMEI}: "
+            f"not reported by API — raw response below."
+        )
+        with draw.expander("🔍 flespi device raw response (for debugging)"):
+            draw.json(device_debug)
+
+    # ── 1NCE SIM usage ──
+    draw.markdown("---")
+    draw.markdown("**1NCE SIM usage (last 6 months)**")
+    sim_rt_col, _spacer2 = draw.columns([0.3, 4])
+    if sim_rt_col.button("🔄", key='iot_retry_sim',
+                          help="Re-fetch 1NCE SIM usage (clears the 1-hour cache)"):
+        try:
+            _fetch_1nce_sim_usage.clear()
+        except Exception:
+            pass
+
+    try:
+        sim_total_bytes, sim_breakdown, sim_debug = _fetch_1nce_sim_usage(SIM_ICCID)
+    except Exception as e:
+        sim_total_bytes, sim_breakdown, sim_debug = None, [], {'error': str(e)}
+
+    if sim_total_bytes is not None:
+        kb = sim_total_bytes / 1024
+        if kb >= 1024 * 1024:
+            sim_str = f"{kb / (1024 * 1024):.2f} GB"
+        elif kb >= 1024:
+            sim_str = f"{kb / 1024:.2f} MB"
+        else:
+            sim_str = f"{kb:.1f} KB"
+        draw.caption(
+            f"📶 1NCE SIM ({SIM_ICCID}) — last 6 months: **{sim_str}**"
+        )
+        if sim_breakdown:
+            try:
+                draw.dataframe(pd.DataFrame([
+                    {
+                        'Period': b['period'],
+                        'Total (KB)': f"{b['total'] / 1024:.1f}" if b['total'] else '–',
+                        'TX (KB)': f"{b['tx'] / 1024:.1f}" if b['tx'] is not None else '–',
+                        'RX (KB)': f"{b['rx'] / 1024:.1f}" if b['rx'] is not None else '–',
+                    }
+                    for b in sim_breakdown
+                ]))
+            except Exception:
+                pass
+    else:
+        draw.caption(
+            f"📶 1NCE SIM usage: parsing returned 0 records — "
+            f"check the raw response below."
         )
 
-        st.markdown("---")
-        st.markdown("**Flespi device traffic**")
-
-        rt_col, _spacer = st.columns([0.3, 4])
-        if rt_col.button("🔄", key='alex_retry_traffic',
-                          help="Re-fetch flespi device traffic (clears the 10-min cache)"):
-            try:
-                _fetch_device_traffic_bytes.clear()
-            except Exception:
-                pass
-
-        try:
-            device_bytes, device_debug = _fetch_device_traffic_bytes(device_id)
-        except Exception as e:
-            print(f"Device traffic display failed: {e}")
-            device_bytes, device_debug = None, {'error': str(e)}
-
-        if device_bytes is not None:
-            kb = device_bytes / 1024
-            if kb >= 1024 * 1024:
-                traffic_str = f"{kb / (1024 * 1024):.2f} GB"
-            elif kb >= 1024:
-                traffic_str = f"{kb / 1024:.2f} MB"
-            else:
-                traffic_str = f"{kb:.1f} KB"
-            st.caption(
-                f"📡 Total traffic on flespi device {DEVICE_IMEI}: "
-                f"**{traffic_str}** "
-                f"(from `{device_debug.get('matched_field', '?')}`)"
-            )
-        elif device_debug.get('permission_denied'):
-            st.caption(
-                f"🔒 Flespi token lacks device-read ACL — can't read total "
-                f"traffic for device {DEVICE_IMEI}. Widen the token at "
-                f"[flespi.io](https://flespi.io) → Tokens → edit."
-            )
-            with st.expander("🔍 flespi raw debug"):
-                st.json(device_debug)
-        else:
-            st.caption(
-                f"📡 Total traffic for device {DEVICE_IMEI}: "
-                f"not reported by API — raw response below."
-            )
-            with st.expander("🔍 flespi device raw response (for debugging)"):
-                st.json(device_debug)
-
-        st.markdown("---")
-        st.markdown("**1NCE SIM usage (last 6 months)**")
-
-        sim_rt_col, _spacer2 = st.columns([0.3, 4])
-        if sim_rt_col.button("🔄", key='alex_retry_sim',
-                              help="Re-fetch 1NCE SIM usage (clears the 1-hour cache)"):
-            try:
-                _fetch_1nce_sim_usage.clear()
-            except Exception:
-                pass
-
-        try:
-            sim_total_bytes, sim_breakdown, sim_debug = _fetch_1nce_sim_usage(SIM_ICCID)
-        except Exception as e:
-            sim_total_bytes, sim_breakdown, sim_debug = None, [], {'error': str(e)}
-
-        if sim_total_bytes is not None:
-            kb = sim_total_bytes / 1024
-            if kb >= 1024 * 1024:
-                sim_str = f"{kb / (1024 * 1024):.2f} GB"
-            elif kb >= 1024:
-                sim_str = f"{kb / 1024:.2f} MB"
-            else:
-                sim_str = f"{kb:.1f} KB"
-            st.caption(
-                f"📶 1NCE SIM ({SIM_ICCID}) — last 6 months: **{sim_str}**"
-            )
-            if sim_breakdown:
-                try:
-                    st.dataframe(pd.DataFrame([
-                        {
-                            'Period': b['period'],
-                            'Total (KB)': f"{b['total'] / 1024:.1f}" if b['total'] else '–',
-                            'TX (KB)': f"{b['tx'] / 1024:.1f}" if b['tx'] is not None else '–',
-                            'RX (KB)': f"{b['rx'] / 1024:.1f}" if b['rx'] is not None else '–',
-                        }
-                        for b in sim_breakdown
-                    ]))
-                except Exception:
-                    pass
-        else:
-            st.caption(
-                f"📶 1NCE SIM usage: parsing returned 0 records — "
-                f"check the raw response below."
-            )
-
-        with st.expander("🔍 1NCE raw response (for debugging)"):
-            st.json(sim_debug)
+    with draw.expander("🔍 1NCE raw response (for debugging)"):
+        draw.json(sim_debug)
