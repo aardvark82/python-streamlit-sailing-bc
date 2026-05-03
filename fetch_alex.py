@@ -342,11 +342,18 @@ def display_alex_page(container=None):
     pts.sort(key=lambda p: p.get('ts') or 0)
 
     # ── Map zoom (auto-default + manual ±2 buttons) ──
-    # Default zoom is computed so the visible width is roughly 2x the boat-to-
-    # West-Van distance. User clicks of +/- override and persist for the
-    # rest of the session.
+    # Default zoom = whatever it takes to fit the boat AND every marine
+    # weather station on screen, with a small margin. User clicks of +/-
+    # override and persist for the rest of the session.
     if lat is not None and lon is not None:
-        auto_zoom = _zoom_for_distance(_haversine_km(lat, lon, WEST_VAN_LAT, WEST_VAN_LON))
+        anchor_points = [(WEST_VAN_LAT, WEST_VAN_LON)] + [
+            (s['lat'], s['lon']) for s in MARINE_STATIONS
+        ]
+        max_dist_km = max(
+            _haversine_km(lat, lon, alat, alon) for alat, alon in anchor_points
+        )
+        # 15% padding so the outermost station never sits exactly on the edge.
+        auto_zoom = _zoom_for_distance(max_dist_km * 1.15)
     else:
         auto_zoom = 11.0
     st.session_state.setdefault('alex_map_zoom', auto_zoom)
