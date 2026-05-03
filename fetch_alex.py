@@ -10,6 +10,7 @@ with the historical trail and the current marker.
 """
 
 import base64
+import hashlib
 import io
 import json
 import math
@@ -297,13 +298,22 @@ def _get_1nce_access_token(force_refresh=False):
             client_secret = _
 
     if client_id and client_secret:
-        cached = st.session_state.get('_1nce_token')
-        cached_exp = st.session_state.get('_1nce_token_expires_at', 0)
+        # Make the session-state cache key depend on the creds so any change
+        # to client_id / client_secret in secrets.toml automatically forces
+        # a fresh token instead of serving a stale one.
+        auth_hash = hashlib.md5(
+            f"{client_id}|{client_secret}".encode()
+        ).hexdigest()[:8]
+        token_key = f'_1nce_token_{auth_hash}'
+        exp_key = f'_1nce_token_expires_at_{auth_hash}'
+        cached = st.session_state.get(token_key)
+        cached_exp = st.session_state.get(exp_key, 0)
         now = time_module.time()
         if not force_refresh and cached and now < cached_exp - 60:
             return cached, {
                 'source': 'oauth_cached',
                 'expires_in_seconds': int(cached_exp - now),
+                'auth_hash': auth_hash,
             }
 
         url = f"{ONENCE_BASE.replace('/v1', '')}/oauth/token"
@@ -327,12 +337,13 @@ def _get_1nce_access_token(force_refresh=False):
             token = data.get('access_token')
             ttl = int(data.get('expires_in', 3600))
             if token:
-                st.session_state['_1nce_token'] = token
-                st.session_state['_1nce_token_expires_at'] = now + ttl
+                st.session_state[token_key] = token
+                st.session_state[exp_key] = now + ttl
                 return token, {
                     'source': 'oauth_fresh',
                     'expires_in_seconds': ttl,
                     'token_url': url,
+                    'auth_hash': auth_hash,
                 }
             return None, {
                 'source': 'oauth_failed',
@@ -351,7 +362,7 @@ def _get_1nce_access_token(force_refresh=False):
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def _fetch_1nce_sim_usage(iccid, _cache_buster=3):
+def _fetch_1nce_sim_usage(iccid, _cache_buster=4):
     """Query 1NCE 'Get SIM usage' endpoint. The output is limited to the
     last 6 months per the docs. Response shape (real, observed):
         {"stats": [
