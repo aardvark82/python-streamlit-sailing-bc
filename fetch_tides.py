@@ -779,22 +779,12 @@ def display_point_atkinson_tides(container=None, title="🌊Tides for Point Atki
                 )
                 return
 
-            # The CSV from tides.gc.ca is roughly 1-minute resolution × 7 days.
-            # Previous code subsampled every 20 lines AND truncated to the first
-            # 1/3 of the result — that capped the visible window to ~2.3 days
-            # and could drop a low tide that fell outside it.
-            # Now: keep the header + every 10th data row (≈10-min resolution)
-            # and DON'T truncate — gives the full 7-day window so the next
-            # 24h always has both extrema visible.
-            csv_lines = _csv.splitlines()
-            if csv_lines:
-                header = csv_lines[0]
-                body = csv_lines[1:]
-                kept_body = body[::10]
-                csv_dense_full = '\n'.join([header] + kept_body)
-            else:
-                csv_dense_full = _csv
-            data = processCSVResponseToJSONSelenium(draw, csv_dense_full)
+            # Pass the entire CSV to the parser — no subsampling, no
+            # truncation. Pt Atkinson is mixed semi-diurnal: two unequal
+            # highs and two unequal lows per day, and the smaller pair were
+            # being missed when the data was thinned to every 10–20 minutes.
+            # find_local_extrema is O(N); 10k rows runs in milliseconds.
+            data = processCSVResponseToJSONSelenium(draw, _csv)
 
         if USE_CHAT_GPT:
             draw.badge("USE_CHAT_GPT")
