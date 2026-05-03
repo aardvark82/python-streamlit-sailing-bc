@@ -134,42 +134,62 @@ def _fetch_messages_last_n_hours(device_id, hours=6):
     return (r.json() or {}).get('result') or []
 
 
+def _walk_for_bytes(obj, depth=0):
+    """Recursively search a JSON dict for a counter field that looks like
+    a 'bytes received' total. Returns (value, key_path) on first hit."""
+    BYTE_KEYS = (
+        'traffic_in', 'traffic_in_total', 'traffic_received', 'traffic_total',
+        'bytes_received', 'bytes_received_total',
+        'bytes_in', 'bytes_total', 'bytes',
+        'rx', 'rx_bytes', 'received_bytes', 'received',
+    )
+    if depth > 5 or not isinstance(obj, dict):
+        return None, None
+    for k, v in obj.items():
+        if k in BYTE_KEYS and isinstance(v, (int, float)) and v >= 0:
+            return int(v), k
+    for k, v in obj.items():
+        if isinstance(v, dict):
+            sub, path = _walk_for_bytes(v, depth + 1)
+            if sub is not None:
+                return sub, f"{k}.{path}"
+        elif isinstance(v, list) and v and isinstance(v[0], dict):
+            sub, path = _walk_for_bytes(v[0], depth + 1)
+            if sub is not None:
+                return sub, f"{k}[0].{path}"
+    return None, None
+
+
 @st.cache_data(ttl=600, show_spinner=False)
 def _fetch_channel_traffic_bytes(channel_id):
     """Fetch lifetime received traffic for a flespi channel.
-    Returns int (bytes) or None. Cached 10 minutes — counters are slow-moving."""
-    url = f"{FLESPI_BASE}/channels/{channel_id}"
-    try:
-        r = requests.get(url, headers=_flespi_headers(), timeout=15)
-        r.raise_for_status()
-        data = r.json() or {}
-        items = data.get('result') or [data]
-        if not items:
-            return None
-        ch = items[0] if isinstance(items[0], dict) else {}
-        # Try a handful of common field names for total received bytes
-        for field in ('traffic_in', 'traffic_in_total', 'traffic_received',
-                      'bytes_received', 'bytes_received_total',
-                      'bytes_in', 'rx', 'rx_bytes'):
-            v = ch.get(field)
-            if v is not None:
-                try:
-                    return int(v)
-                except (TypeError, ValueError):
+    Returns (bytes_or_None, raw_dict_for_debug). Cached 10 minutes."""
+    # Two possible endpoints — channel object first, then a stats sub-resource.
+    candidate_urls = [
+        f"{FLESPI_BASE}/channels/{channel_id}",
+        f"{FLESPI_BASE}/channels/{channel_id}/connections",
+        f"{FLESPI_BASE}/channels/{channel_id}/messages?count=0",
+    ]
+    debug = {'tried': []}
+    for url in candidate_urls:
+        try:
+            r = requests.get(url, headers=_flespi_headers(), timeout=15)
+            debug['tried'].append({'url': url, 'status': r.status_code})
+            if r.status_code != 200:
+                continue
+            data = r.json() or {}
+            debug['last_response'] = data
+            items = data.get('result') or [data]
+            for ch in items:
+                if not isinstance(ch, dict):
                     continue
-        # Sometimes wrapped under a nested 'stats' dict
-        stats = ch.get('stats') or {}
-        for field in ('traffic_in', 'bytes_received', 'rx_bytes'):
-            v = stats.get(field)
-            if v is not None:
-                try:
-                    return int(v)
-                except (TypeError, ValueError):
-                    continue
-        return None
-    except Exception as e:
-        print(f"flespi channel {channel_id} traffic fetch failed: {e}")
-        return None
+                bytes_val, path = _walk_for_bytes(ch)
+                if bytes_val is not None:
+                    debug['matched_field'] = path
+                    return bytes_val, debug
+        except Exception as e:
+            debug['tried'].append({'url': url, 'error': str(e)})
+    return None, debug
 
 
 @st.cache_data(ttl=180, show_spinner=False)
@@ -592,10 +612,11 @@ def display_alex_page(container=None):
 
     # ── Lifetime traffic for the flespi ingest channel ──
     try:
-        channel_bytes = _fetch_channel_traffic_bytes(FLESPI_CHANNEL_ID)
+        channel_bytes, channel_debug = _fetch_channel_traffic_bytes(FLESPI_CHANNEL_ID)
     except Exception as e:
         print(f"Channel traffic display failed: {e}")
-        channel_bytes = None
+        channel_bytes, channel_debug = None, {'error': str(e)}
+
     if channel_bytes is not None:
         kb = channel_bytes / 1024
         if kb >= 1024 * 1024:
@@ -606,10 +627,13 @@ def display_alex_page(container=None):
             traffic_str = f"{kb:.1f} KB"
         draw.caption(
             f"📡 Total traffic received on flespi channel "
-            f"#{FLESPI_CHANNEL_ID}: **{traffic_str}**"
+            f"#{FLESPI_CHANNEL_ID}: **{traffic_str}** "
+            f"(from `{channel_debug.get('matched_field', '?')}`)"
         )
     else:
         draw.caption(
-            f"📡 Total traffic for channel #{FLESPI_CHANNEL_ID}: not reported "
-            f"by API."
+            f"📡 Total traffic for channel #{FLESPI_CHANNEL_ID}: "
+            f"not reported by API — raw response below."
         )
+        with draw.expander("🔍 flespi channel raw response (for debugging)"):
+            draw.json(channel_debug)
