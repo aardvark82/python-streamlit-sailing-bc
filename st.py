@@ -710,8 +710,7 @@ def plot_merged_wind_chart(container, buoy_id, forecast_url, forecast_title):
     # Blue "Now" vertical line — use add_shape + add_annotation manually because
     # add_vline with tz-aware datetime has historically hit Plotly's
     # "int + datetime" bug on some versions.
-    now_hour = now_van.hour % 12 or 12
-    now_label = f"Now · {now_van.strftime('%a')} {now_hour}:{now_van.strftime('%M %p')} PDT"
+    now_label = f"Now · {now_van.strftime('%a %H:%M')} PDT"
     now_x = pd.Timestamp(now_van)
     fig.add_shape(
         type="line",

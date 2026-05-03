@@ -115,7 +115,7 @@ def _build_beach_windows(ecoli_status_value, hours=24, step_hours=2):
     vancouver_tz = pytz.timezone('America/Vancouver')
     now = datetime.now(vancouver_tz)
 
-    # Anchor to the next even-numbered hour so labels read 8AM / 10AM / ... cleanly
+    # Anchor to the next even-numbered hour so labels read 08:00 / 10:00 / …
     start = now.replace(minute=0, second=0, microsecond=0)
     if start.hour % step_hours:
         start = start + timedelta(hours=step_hours - (start.hour % step_hours))
@@ -141,13 +141,10 @@ def _build_beach_windows(ecoli_status_value, hours=24, step_hours=2):
         else:
             day_label = slot.strftime('%a')
 
-        hour12 = slot.hour % 12 or 12
-        ampm = 'AM' if slot.hour < 12 else 'PM'
-
         windows.append({
             'time_dt': slot,
             'day': day_label,
-            'time_label': f'{hour12}{ampm}',
+            'time_label': slot.strftime('%H:%M'),
             'tide_height': height,
             'tide_dir': direction,
             'status': status,
@@ -253,7 +250,7 @@ def display_beach_quality_for_sandy_cove(draw=None, title=''):
     # Prominent measurement date — harmonised colored staleness badge
     from utils import display_last_updated_badge
     display_last_updated_badge(draw, time_measurement, label="Sampled")
-    draw.caption(time_measurement.strftime('%A, %B %d %Y at %I:%M %p'))
+    draw.caption(time_measurement.strftime('%A, %B %d %Y at %H:%M'))
 
     # Legend
     draw.markdown(

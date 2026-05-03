@@ -382,7 +382,7 @@ def display_tide_table_text(tide_df, container=None):
 
     if not tide_df.empty:
         display_df = tide_df.copy()
-        display_df['Time'] = display_df['datetime'].dt.strftime('%I:%M %p')
+        display_df['Time'] = display_df['datetime'].dt.strftime('%H:%M')
         display_df['Date'] = display_df['datetime'].dt.strftime('%A, %b %d')
         display_df['Height (m)'] = display_df['Height'].round(2)
 
@@ -592,7 +592,7 @@ def create_natural_tide_chart(tide_df, container=None):
         y=tide_df['Height'],
         mode='markers+text',
         name='Measured Points',
-        text=[f"{t.strftime('%I:%M %p')}<br><b>{h:.2f}m</b>" for t, h in
+        text=[f"{t.strftime('%H:%M')}<br><b>{h:.2f}m</b>" for t, h in
               zip(tide_df['datetime'], tide_df['Height'])],
         textposition=['top center' if i % 2 == 0 else 'bottom center'
                       for i in range(len(tide_df))],

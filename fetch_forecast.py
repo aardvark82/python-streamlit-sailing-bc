@@ -43,7 +43,7 @@ def _openAIFetchForecastForURL_cached(url, time_bucket):
 
     vancouver_tz = pytz.timezone('America/Vancouver')
     now_pacific = datetime.now(vancouver_tz)
-    now_str = now_pacific.strftime('%A %I:%M %p %Z')
+    now_str = now_pacific.strftime('%A %H:%M %Z')
     is_evening = now_pacific.hour >= 19  # 7 PM Pacific
 
     chat_gpt_msg = (

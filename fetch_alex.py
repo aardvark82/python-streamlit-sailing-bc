@@ -893,7 +893,7 @@ def display_alex_page(container=None):
                     datetime.fromtimestamp(int(p['ts']), tz=pytz.UTC)
                             .astimezone(van_tz)
                 )
-                time_str = dt_local.strftime('%I:%M:%S %p')
+                time_str = dt_local.strftime('%H:%M:%S')
             except Exception:
                 time_str = '—'
             rows.append({

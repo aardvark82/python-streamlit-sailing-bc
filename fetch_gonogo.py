@@ -140,13 +140,8 @@ def _get_tide_data():
 
 
 def _fmt_tide_time(dt):
-    """Format tide time as e.g. '8am', '12pm', '3pm' (cross-platform)."""
-    hour = dt.hour % 12 or 12
-    ampm = 'am' if dt.hour < 12 else 'pm'
-    minute = dt.minute
-    if minute:
-        return f"{hour}:{minute:02d}{ampm}"
-    return f"{hour}{ampm}"
+    """Format tide time in 24-hour format, e.g. '08:00', '13:45'."""
+    return f"{dt.hour:02d}:{dt.minute:02d}"
 
 
 def _nearest_tides_in_window(tide_df, window_start, window_end):
@@ -350,7 +345,7 @@ def _gather_current_factors():
 
 
 def _analyze_5day_windows(weather_data):
-    """Find boating windows at 8AM, Noon, 4PM for each day, including tide."""
+    """Find boating windows at 08:00, 12:00, 16:00 for each day, including tide."""
     if not weather_data or not weather_data.hourly_forecast:
         return []
 
@@ -365,7 +360,7 @@ def _analyze_5day_windows(weather_data):
     for day_offset in range(0, 6):
         day = today + timedelta(days=day_offset)
 
-        for period_name, center_h in [('8AM', 8), ('Noon', 12), ('4PM', 16)]:
+        for period_name, center_h in [('08:00', 8), ('12:00', 12), ('16:00', 16)]:
             target = day.replace(hour=center_h)
 
             # Skip past times
@@ -662,7 +657,7 @@ def display_gonogo_page(container=None, page_links=None):
 
 def _draw_weekly_chart(draw, windows):
     """Draw a heatmap-style chart: days x time slots, colored green/orange/red."""
-    # Build grid: rows = time slots (8AM, Noon, 4PM), columns = days
+    # Build grid: rows = time slots (08:00, 12:00, 16:00), columns = days
     days = []
     seen = set()
     for w in windows:
@@ -670,7 +665,7 @@ def _draw_weekly_chart(draw, windows):
             days.append(w['day'])
             seen.add(w['day'])
 
-    periods = ['8AM', 'Noon', '4PM']
+    periods = ['08:00', '12:00', '16:00']
 
     # Build matrices for the heatmap
     z = []          # numeric values for color
@@ -889,7 +884,7 @@ def display_kiosk_page(home_page=None):
 
     # Current time
     st.markdown(
-        f'<div class="kiosk-time">{now.strftime("%A %B %d, %I:%M %p")}</div>',
+        f'<div class="kiosk-time">{now.strftime("%A %B %d, %H:%M")}</div>',
         unsafe_allow_html=True,
     )
 
@@ -987,7 +982,7 @@ def _draw_kiosk_chart(windows):
             days.append(w['day'])
             seen.add(w['day'])
 
-    periods = ['8AM', 'Noon', '4PM']
+    periods = ['08:00', '12:00', '16:00']
 
     z = []
     for period in periods:
