@@ -165,51 +165,150 @@ def _walk_for_bytes(obj, depth=0):
     return None, None
 
 
+def _sum_logs_recv(records):
+    """Flespi /devices/{id}/logs returns an array of events. Each connection
+    close (event_code == 301) carries 'recv' and 'send' byte counters.
+    Sum 'recv' across every 301 event to approximate lifetime received
+    traffic from this log window."""
+    total = 0
+    matched = 0
+    for rec in records:
+        if not isinstance(rec, dict):
+            continue
+        if rec.get('event_code') != 301:
+            continue
+        v = rec.get('recv')
+        if isinstance(v, (int, float)) and v >= 0:
+            total += int(v)
+            matched += 1
+    return total, matched
+
+
 @st.cache_data(ttl=600, show_spinner=False)
-def _fetch_device_traffic_bytes(device_id, _cache_buster=3):
-    """Fetch lifetime received traffic for the flespi DEVICE (not the channel).
-    Hits /gw/devices/{id} and a couple of related sub-resources, recursing
-    into the JSON to find the first byte-counter field.
-    Returns (bytes_or_None, raw_dict_for_debug). Cached 10 minutes.
-    Bump `_cache_buster` to invalidate stale entries."""
+def _fetch_device_traffic_bytes(device_id, _cache_buster=4):
+    """Fetch lifetime received traffic for the flespi DEVICE.
+
+    Tried strategies, in order:
+      1. /devices/{id}                — flat fields (rarely populated)
+      2. /devices/{id}/messages?count=0 — aggregate counter (rarely populated)
+      3. /devices/{id}/logs            — sum 'recv' across event_code 301
+                                         (connection-close) entries
+    The logs strategy is the workhorse — connection events carry per-session
+    recv/send byte counts and the log retention is months.
+    Returns (bytes_or_None, raw_dict_for_debug). Cached 10 minutes."""
     if device_id is None:
         return None, {'error': 'no device id'}
-    candidate_urls = [
-        f"{FLESPI_BASE}/devices/{device_id}",
-        f"{FLESPI_BASE}/devices/{device_id}/connections",
-        f"{FLESPI_BASE}/devices/{device_id}/messages?count=0",
-        f"{FLESPI_BASE}/devices/{device_id}/logs?count=0",
-    ]
+
     debug = {'tried': [], 'permission_denied': False}
-    for url in candidate_urls:
+
+    def _record_entry(url, status, **extra):
+        e = {'url': url, 'status': status}
+        e.update(extra)
+        debug['tried'].append(e)
+        return e
+
+    # --- Strategy 1 & 2: flat-field byte counters ---
+    for url in (
+        f"{FLESPI_BASE}/devices/{device_id}",
+        f"{FLESPI_BASE}/devices/{device_id}/messages?count=0",
+    ):
         try:
             r = requests.get(url, headers=_flespi_headers(), timeout=15)
-            entry = {'url': url, 'status': r.status_code}
             if r.status_code == 403:
                 debug['permission_denied'] = True
+            _record_entry(url, r.status_code)
             if r.status_code != 200:
-                debug['tried'].append(entry)
                 continue
             data = r.json() or {}
-            entry['response_keys'] = list(data.keys()) if isinstance(data, dict) else None
-            debug['tried'].append(entry)
-            debug['last_response'] = data
-            items = data.get('result') or [data]
-            for ch in items:
-                if not isinstance(ch, dict):
+            debug.setdefault('last_response_flat', data)
+            for item in data.get('result') or [data]:
+                if not isinstance(item, dict):
                     continue
-                bytes_val, path = _walk_for_bytes(ch)
-                if bytes_val is not None:
+                bytes_val, path = _walk_for_bytes(item)
+                if bytes_val is not None and bytes_val > 0:
                     debug['matched_field'] = path
                     debug['matched_url'] = url
                     return bytes_val, debug
         except Exception as e:
-            debug['tried'].append({'url': url, 'error': str(e)})
+            _record_entry(url, 'exception', error=str(e))
+
+    # --- Strategy 3: sum recv across connection-close events in /logs ---
+    logs_url = f"{FLESPI_BASE}/devices/{device_id}/logs?count=1000"
+    try:
+        r = requests.get(logs_url, headers=_flespi_headers(), timeout=20)
+        if r.status_code == 403:
+            debug['permission_denied'] = True
+        _record_entry(logs_url, r.status_code)
+        if r.status_code == 200:
+            data = r.json() or {}
+            records = data.get('result') or []
+            total_recv, matched_count = _sum_logs_recv(records)
+            debug['logs_close_events'] = matched_count
+            debug['logs_total_records'] = len(records)
+            if matched_count > 0:
+                debug['matched_field'] = f"sum(recv) over {matched_count} close events"
+                debug['matched_url'] = logs_url
+                return total_recv, debug
+            debug['last_response_logs_sample'] = records[:3]
+    except Exception as e:
+        _record_entry(logs_url, 'exception', error=str(e))
+
     return None, debug
 
 
+def _coerce_float(v):
+    if v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _read_total_bytes(rec):
+    """Pick the most plausible 'bytes used' value from a 1NCE usage record.
+    Tries volume.total → top-level fields → sum of tx+rx as a last resort."""
+    if not isinstance(rec, dict):
+        return None, None, None
+
+    # 1. nested volume object (Data Streamer schema)
+    vol = rec.get('volume')
+    if isinstance(vol, dict):
+        total = _coerce_float(vol.get('total'))
+        tx = _coerce_float(vol.get('tx'))
+        rx = _coerce_float(vol.get('rx'))
+        if total is None and (tx is not None or rx is not None):
+            total = (tx or 0.0) + (rx or 0.0)
+        if total is not None:
+            return total, tx, rx
+
+    # 2. flat top-level fields — try every reasonable key
+    for key in ('total_volume', 'total_bytes', 'total_data',
+                'data_volume', 'data', 'bytes', 'volume_total',
+                'usage', 'used_bytes', 'used'):
+        v = _coerce_float(rec.get(key))
+        if v is not None:
+            tx = _coerce_float(rec.get('tx') or rec.get('volume_tx')
+                                or rec.get('tx_bytes') or rec.get('uplink'))
+            rx = _coerce_float(rec.get('rx') or rec.get('volume_rx')
+                                or rec.get('rx_bytes') or rec.get('downlink'))
+            return v, tx, rx
+
+    # 3. tx + rx fallback
+    tx = _coerce_float(rec.get('tx') or rec.get('volume_tx')
+                        or rec.get('tx_bytes') or rec.get('uplink'))
+    rx = _coerce_float(rec.get('rx') or rec.get('volume_rx')
+                        or rec.get('rx_bytes') or rec.get('downlink'))
+    if tx is not None or rx is not None:
+        return (tx or 0.0) + (rx or 0.0), tx, rx
+
+    return None, None, None
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
-def _fetch_1nce_sim_usage(iccid, _cache_buster=1):
+def _fetch_1nce_sim_usage(iccid, _cache_buster=2):
     """Query 1NCE 'Get SIM usage' endpoint. Output is limited to the last
     6 months per the docs. Returns (total_bytes, monthly_breakdown_list,
     raw_debug). Cached 1 hour."""
@@ -237,53 +336,41 @@ def _fetch_1nce_sim_usage(iccid, _cache_buster=1):
         data = r.json()
         debug['raw'] = data
 
-        # Response could be a top-level list, or {result: [...]}, or
-        # {usage_records: [...]}. Normalise to a list.
+        # Normalise the various known wrappers into a flat list of records
         if isinstance(data, list):
             records = data
         elif isinstance(data, dict):
             records = (data.get('result') or data.get('usage_records')
                        or data.get('records') or data.get('items')
                        or data.get('usage') or [])
-            if not records and any(
-                k in data for k in ('volume', 'total', 'tx', 'rx', 'data')
-            ):
-                # Single aggregate object — wrap as list of one
+            if not records:
+                # Single aggregate object — treat the whole dict as one record
                 records = [data]
         else:
             records = []
 
         breakdown = []
-        total_bytes = 0
+        total_bytes = 0.0
+        any_value = False
         for rec in records:
-            if not isinstance(rec, dict):
+            total_v, tx_v, rx_v = _read_total_bytes(rec)
+            if total_v is None:
                 continue
-            # Try several common field names for byte counters
-            vol = rec.get('volume') or {}
-            total = (
-                vol.get('total') if isinstance(vol, dict) else None
-                or rec.get('total') or rec.get('total_volume')
-                or rec.get('data') or rec.get('bytes')
-            )
-            tx = vol.get('tx') if isinstance(vol, dict) else rec.get('tx')
-            rx = vol.get('rx') if isinstance(vol, dict) else rec.get('rx')
-            try:
-                total_v = float(total) if total is not None else 0.0
-            except (TypeError, ValueError):
-                total_v = 0.0
-
+            any_value = True
             period = (rec.get('month') or rec.get('period')
                       or rec.get('date') or rec.get('start_date')
-                      or rec.get('billing_month') or '?')
-
+                      or rec.get('billing_month')
+                      or rec.get('year_month') or '?')
             breakdown.append({
                 'period': str(period),
                 'total': total_v,
-                'tx': float(tx) if tx is not None else None,
-                'rx': float(rx) if rx is not None else None,
+                'tx': tx_v,
+                'rx': rx_v,
             })
             total_bytes += total_v
 
+        if not any_value:
+            return None, [], debug
         return int(total_bytes), breakdown, debug
     except Exception as e:
         debug['tried'].append({'url': url, 'error': str(e)})
@@ -756,6 +843,14 @@ def display_alex_page(container=None):
             draw.json(device_debug)
 
     # ── 1NCE SIM usage (last 6 months max) ──
+    sim_rt_col, _spacer2 = draw.columns([0.3, 4])
+    if sim_rt_col.button("🔄", key='alex_retry_sim',
+                          help="Re-fetch 1NCE SIM usage (clears the 1-hour cache)"):
+        try:
+            _fetch_1nce_sim_usage.clear()
+        except Exception:
+            pass
+
     try:
         sim_total_bytes, sim_breakdown, sim_debug = _fetch_1nce_sim_usage(SIM_ICCID)
     except Exception as e:
@@ -787,8 +882,11 @@ def display_alex_page(container=None):
                 pass
     else:
         draw.caption(
-            f"📶 1NCE SIM usage: not available "
-            f"(see debug below — ICCID {SIM_ICCID})"
+            f"📶 1NCE SIM usage: parsing returned 0 records — "
+            f"check the raw response below."
         )
-        with draw.expander("🔍 1NCE raw response (for debugging)"):
-            draw.json(sim_debug)
+
+    # Always surface the raw 1NCE response in an expander so the parser can
+    # be aligned to the actual schema if it ever drifts.
+    with draw.expander("🔍 1NCE raw response (for debugging)"):
+        draw.json(sim_debug)
