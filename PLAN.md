@@ -78,12 +78,12 @@ VERSION file is auto-bumped on each meaningful commit (currently 126).
 
 Active surface: `openAIFetchForecastForURL` — full-HTML in, CSV table out. Time-bucketed 30-min cache. ~4 300 tokens/call ≈ $0.013/call. Cold full-page-traversal session = ~3 calls (~$0.04). Daily ceiling ~12 calls (~$0.16).
 
-`openAIFetchTidesForURL` exists but is gated by `USE_CHAT_GPT=False` — never executes.
+`openAIFetchTidesForURL` was deleted (along with `processResponseToJSONOpenAI`, `displayErrorWithResponseIfNeeded`, and the `USE_CHAT_GPT` flag) — the IWLS API path replaced it.
 
 ## How to resume in a new session
 
 Paste this prompt verbatim:
 
-> Read `HANDOFF.md` in the repo root for context. Working dir is `C:\Users\acker\Dev\20250430 python-streamlit-sailing-bc`. Auto-bump VERSION on important commits. Commit directly to main. Reply briefly when iterating.
+> Read `PLAN.md` in the repo root for context. Working dir is `C:\Users\acker\Dev\20250430 python-streamlit-sailing-bc`. Auto-bump VERSION on important commits. Commit directly to main. Reply briefly when iterating.
 
 Then state your next task. The new session will have full context with minimal tokens consumed.

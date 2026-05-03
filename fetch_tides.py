@@ -27,7 +27,6 @@ from selenium.webdriver.support.ui import Select
 # These flags gate the legacy fallback paths.
 USE_SELENIUM = True          # Selenium-driven CSV download fallback
 USE_BEAUTIFULSOUP = False    # HTML table scrape fallback
-USE_CHAT_GPT = False         # GPT-4o parsing of the page HTML
 
 CANADA_GOVERNMENT_TIDE_POINT_ATKINSON = "https://www.tides.gc.ca/en/stations/07795"
 
@@ -288,73 +287,6 @@ def seleniumGetTidesFromURL(url):
                 pass
 
 
-@st.cache_data(ttl=1800)
-def openAIFetchTidesForURL(url):
-    """Send tide HTML to GPT-4o for parsing into structured JSON."""
-    openai_api_key = st.secrets["OpenAI_key"]
-    if openai_api_key is None:
-        raise ValueError("OpenAI API key is not set in environment variables.")
-
-    chat_gpt_msg = '''
-    Return just the JSON
-
-    https://www.tides.gc.ca/en/stations/07795. The content of the URL HTML is pasted below.
-    Return it in a JSON format that copies the following structure but use the new values from the URL):
-    data = {'data': [{'height': 0.5114702042385154, 'time': '2025-05-02T11:16:00+00:00', 'type': 'low'},
-                     {'height': 0.8861352612764213, 'time': '2025-05-02T15:04:00+00:00', 'type': 'high'},
-                     {'height': -2.339105387160864, 'time': '2025-05-02T22:49:00+00:00', 'type': 'low'},
-                     {'height': 1.5511464556228052, 'time': '2025-05-03T06:52:00+00:00', 'type': 'high'},
-                     {'height': 0.4471043324619499, 'time': '2025-05-03T12:40:00+00:00', 'type': 'low'},
-                     {'height': 0.6249055747798654, 'time': '2025-05-03T15:55:00+00:00', 'type': 'high'},
-                     {'height': -2.0247559153700725, 'time': '2025-05-03T23:44:00+00:00', 'type': 'low'},
-                     {'height': 1.4711212002069232, 'time': '2025-05-04T07:51:00+00:00', 'type': 'high'},
-                     {'height': 0.2401116280506163, 'time': '2025-05-04T14:23:00+00:00', 'type': 'low'},
-                     {'height': 0.3448168313068383, 'time': '2025-05-04T17:10:00+00:00', 'type': 'high'},
-                     {'height': -1.6944775406122297, 'time': '2025-05-05T00:43:00+00:00', 'type': 'low'},
-                     {'height': 1.4152651862548065, 'time': '2025-05-05T08:44:00+00:00', 'type': 'high'}]}
-
-                     '''
-
-    def beautifulSoupFetchTidesSectionForChatGPTForURL(url):
-        try:
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-            response = requests.get(url, headers=headers, timeout=25)
-            response.raise_for_status()
-            soup = BeautifulSoup(response.content, 'html.parser')
-            hourly_table = soup.find('table', class_='hourlytable')
-            return str(hourly_table) if hourly_table else "Predictions section not found"
-        except requests.RequestException as e:
-            return f"Error fetching data: {str(e)}"
-
-    html = beautifulSoupFetchTidesSectionForChatGPTForURL(url)
-    chat_gpt_msg = chat_gpt_msg + "This is the HTML " + html
-
-    url_api = "https://api.openai.com/v1/chat/completions"
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {openai_api_key}"
-    }
-    data = {
-        "model": "gpt-4o",
-        "messages": [
-            {"role": "system", "content": "You are an expert meteorologist."},
-            {"role": "user", "content": chat_gpt_msg}
-        ]
-    }
-
-    response = requests.post(url_api, headers=headers, json=data)
-
-    if response.status_code == 200:
-        return response
-    elif response.status_code == 429:
-        return response
-    else:
-        print("Error:", response.status_code, response.text)
-        return response
-
-
 @st.cache_data(ttl=14400)
 def fetch_tide_extremes_selenium():
     """Fetch tide extremes via Selenium and return list of dicts with Height/Time/type.
@@ -383,7 +315,7 @@ def fetch_tide_extremes_selenium():
         return None
 
 
-def process_tide_data(data, container=None, use_chat_gpt=False):
+def process_tide_data(data, container=None):
     """Parse tide data from various sources into a standard DataFrame."""
     predictions = []
 
@@ -474,11 +406,6 @@ def create_natural_tide_chart(tide_df, container=None):
     import plotly.graph_objects as go
 
     draw = container or st
-
-    if USE_CHAT_GPT:
-        draw.badge("From ChatGPT")
-    elif USE_SELENIUM:
-        draw.badge("From Selenium")
 
     tide_df = tide_df.rename(columns={'Time (PDT)& Date': 'datetime'})
     tide_df['datetime'] = tide_df['datetime'].apply(parse_tide_datetime)
@@ -659,29 +586,6 @@ def create_natural_tide_chart(tide_df, container=None):
         display_tide_table_text(tide_df=tide_df, container=st)
 
 
-def displayErrorWithResponseIfNeeded(container=None, response=None):
-    if not response:
-        container.warning("No response.")
-        return None
-
-    if isinstance(response, dict):
-        if hasattr(response, 'status_code'):
-            if response.status_code == 402:
-                container.warning("API quota exceeded. Using cached data if available.")
-                return None
-            if response.status_code == 500:
-                container.warning("Internal Server Error. Try again later.")
-                return None
-            if response.status_code == 503:
-                container.warning("Service Unavailable. Please try again later.")
-                return None
-            if response.status_code != 200:
-                container.error(f"Failed to fetch tide data. Status code: {response.status_code}")
-                return None
-
-    return None
-
-
 def find_local_extrema(df):
     """Keep only local maxima and minima from a supersampled tide CSV.
 
@@ -783,32 +687,6 @@ def processCSVResponseToJSONSelenium(container=None, _csv=None):
     return json_result
 
 
-def processResponseToJSONOpenAI(container=None, response=None):
-    """Parse ChatGPT response into JSON tide data."""
-    import json
-
-    displayErrorWithResponseIfNeeded(container, response)
-
-    if USE_CHAT_GPT:
-        data_txt = response.json()['choices'][0]['message']['content']
-        data_txt = data_txt.strip()
-
-        if data_txt.startswith('```json'):
-            data_txt = data_txt.replace('```json', '', 1)
-        if data_txt.startswith('```'):
-            data_txt = data_txt.replace('```', '', 1)
-        if data_txt.endswith('```'):
-            data_txt = data_txt[:-3]
-        data_txt = data_txt.strip()
-
-        try:
-            return json.loads(data_txt)
-        except json.JSONDecodeError as e:
-            print(f"Error parsing JSON: {e}")
-            print("Raw content:", data_txt)
-    return None
-
-
 def display_point_atkinson_tides(container=None, title="🌊Tides for Point Atkinson"):
     """Main entry point: fetch and display tide data for Point Atkinson."""
     draw = container or st
@@ -873,14 +751,9 @@ def display_point_atkinson_tides(container=None, title="🌊Tides for Point Atki
             csv_subsampled = '\n'.join(csv_lines[::20])
             data = processCSVResponseToJSONSelenium(draw, csv_subsampled)
 
-        if USE_CHAT_GPT:
-            draw.badge("USE_CHAT_GPT")
-            response = openAIFetchTidesForURL("https://www.tides.gc.ca/en/stations/07795")
-            data = processResponseToJSONOpenAI(draw, response)
-
     if data:
         with st.spinner("Building tide chart…"):
-            tide_data = process_tide_data(data, draw, use_chat_gpt=USE_CHAT_GPT)
+            tide_data = process_tide_data(data, draw)
             if not isinstance(data, type(None)):
                 create_natural_tide_chart(tide_data, draw)
             else:
