@@ -31,7 +31,71 @@ USE_STORMGLASS = False       # Use Stormglass.io tide API (free tier limited)
 
 CANADA_GOVERNMENT_TIDE_POINT_ATKINSON = "https://www.tides.gc.ca/en/stations/07795"
 
+# DFO IWLS public API — same backend that powers tides.gc.ca. Direct
+# HTTP, no Selenium, no Chrome — works identically on Streamlit Cloud.
+# Pt Atkinson station Mongo ID; obtained from the station index endpoint.
+IWLS_API_BASE = "https://api-iwls.dfo-mpo.gc.ca/api/v1"
+IWLS_PT_ATKINSON_STATION_ID = "5cebf1df3d0f4a073c4bb8d7"
+
 download_dir = os.path.abspath("temp_downloads")
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_iwls_tide_extremes_pt_atkinson(days_ahead=7, days_back=1):
+    """Pull tide hi/lo extremes for Pt Atkinson directly from the DFO
+    IWLS REST API. Returns the list-of-dicts shape that the rest of the
+    pipeline (process_tide_data, create_natural_tide_chart) accepts:
+        [{'Height': float, 'Time (PDT)& Date': iso8601, 'type': 'high'|'low'}, ...]
+    Returns None on failure."""
+    try:
+        now_utc = datetime.utcnow()
+        start = (now_utc - timedelta(days=days_back)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        end = (now_utc + timedelta(days=days_ahead)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        url = f"{IWLS_API_BASE}/stations/{IWLS_PT_ATKINSON_STATION_ID}/data"
+        params = {
+            'time-series-code': 'wlp-hilo',  # water level predictions, hi-lo only
+            'from': start,
+            'to': end,
+        }
+        r = requests.get(url, params=params, timeout=20,
+                          headers={'Accept': 'application/json'})
+        r.raise_for_status()
+        data = r.json() or []
+        if not isinstance(data, list) or not data:
+            return None
+        out = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            ts = item.get('eventDate') or item.get('event_date')
+            val = item.get('value')
+            qual = (item.get('timeSeriesCode') or item.get('timeseriescode') or '').lower()
+            if ts is None or val is None:
+                continue
+            # IWLS doesn't tag hi vs lo directly — derive from neighbours.
+            out.append({
+                'Height': float(val),
+                'Time (PDT)& Date': ts,
+                'type': 'high',  # placeholder, fixed below
+            })
+        if not out:
+            return None
+        # Sort by time and label as high/low based on local trend.
+        out.sort(key=lambda d: d['Time (PDT)& Date'])
+        for i in range(len(out)):
+            prev = out[i - 1]['Height'] if i > 0 else None
+            nxt = out[i + 1]['Height'] if i + 1 < len(out) else None
+            h = out[i]['Height']
+            if prev is not None and nxt is not None:
+                out[i]['type'] = 'high' if h > prev and h > nxt else 'low'
+            elif nxt is not None:
+                out[i]['type'] = 'high' if h > nxt else 'low'
+            elif prev is not None:
+                out[i]['type'] = 'high' if h > prev else 'low'
+        return out
+    except Exception as e:
+        print(f"IWLS tide fetch failed: {e}")
+        return None
 
 
 def cached_fetch_url(url):
@@ -810,21 +874,28 @@ def display_point_atkinson_tides(container=None, title="🌊Tides for Point Atki
         unsafe_allow_html=True,
     )
 
-    # Selenium fetch can take 5–10 seconds — st.spinner is the simplest cross-version
-    # way to show a loading indicator (no progress arithmetic, no kwargs that may
-    # differ across Streamlit releases).
-    with st.spinner("Loading tide data — launching headless Chrome…"):
-        if USE_BEAUTIFULSOUP:
-            draw.badge("USE_BEAUTIFULSOUP")
-            data = beautifulSoupFetchTidesForURL("https://www.tides.gc.ca/en/stations/07795")
+    with st.spinner("Loading tide data…"):
+        # ── Primary path: direct DFO IWLS API call ──
+        # Pure HTTP — works identically locally and on Streamlit Cloud
+        # (no Chrome / chromedriver / file-download permissions required).
+        # Returns hi/lo extrema directly so we skip CSV parsing + extrema
+        # detection entirely.
+        try:
+            data = fetch_iwls_tide_extremes_pt_atkinson()
+        except Exception as e:
+            print(f"IWLS tide fetch raised: {e}")
+            data = None
 
-        if USE_SELENIUM:
+        if data:
+            data_source = 'iwls_api'
+        else:
+            data_source = None
+
+        # ── Fallback: Selenium-driven CSV download (only if IWLS failed) ──
+        if not data and USE_SELENIUM:
             try:
                 _csv = seleniumGetTidesFromURL('https://www.tides.gc.ca/en/stations/07795')
-                # (Subsampling settings tuned below — keep enough resolution
-                #  AND enough date span to cover the next 24-48 hours.)
             except Exception as e:
-                # Bust any stale None cached from earlier broken runs and surface a clear error.
                 try:
                     seleniumGetTidesFromURL.clear()
                 except Exception:
@@ -833,13 +904,12 @@ def display_point_atkinson_tides(container=None, title="🌊Tides for Point Atki
                 _csv = None
 
             if not _csv:
-                # Cache returned None from a previous failure — clear it so next refresh retries.
                 try:
                     seleniumGetTidesFromURL.clear()
                 except Exception:
                     pass
                 draw.warning(
-                    "Tide CSV is empty. The cache has been cleared — refresh the page to retry."
+                    "Tide CSV is empty. Refresh the page to retry."
                 )
                 return
 
