@@ -675,7 +675,7 @@ def plot_merged_wind_chart(container, buoy_id, forecast_url, forecast_title):
             x=df['timestamp'], y=df['wind_speed'],
             mode='markers', name='Observed (Buoy)',
             marker=dict(
-                symbol='arrow-bar-up', size=14, angle=df['rotation'],
+                symbol='arrow', size=16, angle=df['rotation'],
                 color='#1f77b4', line=dict(width=1, color='DarkSlateGrey'),
             ),
             customdata=df['direction'],
@@ -710,7 +710,7 @@ def plot_merged_wind_chart(container, buoy_id, forecast_url, forecast_title):
                 x=dir_df['timestamp'], y=dir_df['wind speed'],
                 mode='markers', name='Forecast Direction',
                 marker=dict(
-                    symbol='arrow-bar-up', size=14, angle=dir_df['rotation'],
+                    symbol='arrow', size=16, angle=dir_df['rotation'],
                     color='#ff7f0e', line=dict(width=1, color='DarkSlateGrey'),
                 ),
                 customdata=dir_df['wind direction'],
@@ -799,15 +799,24 @@ def plot_wave_history_chart(container, past_df, buoy_id):
     if df_waves.empty:
         return
 
-    import plotly.express as px
     df_waves['wave_height_cm'] = df_waves['wave_height'] * 100
     now_van = datetime.now(pytz.timezone('America/Vancouver'))
     three_days_ago = now_van - timedelta(days=3)
 
-    fig_wave = px.line(df_waves,
-                       x='timestamp', y='wave_height_cm',
-                       title=f'Wave Height Over Last 3 Days - Buoy {buoy_id}',
-                       labels={'wave_height_cm': 'Wave Height (cm)', 'timestamp': 'Time'})
+    fig_wave = go.Figure()
+    # lines+markers: each marker == one cached datapoint from Cloudflare KV.
+    fig_wave.add_trace(go.Scatter(
+        x=df_waves['timestamp'], y=df_waves['wave_height_cm'],
+        mode='lines+markers', name='Wave height',
+        line=dict(color='#1f77b4', width=2),
+        marker=dict(size=7, color='#1f77b4', line=dict(width=1, color='DarkSlateGrey')),
+        hovertemplate="%{x}<br>Wave: %{y:.0f} cm<extra></extra>",
+    ))
+    fig_wave.update_layout(
+        title=f'Wave Height Over Last 3 Days - Buoy {buoy_id}',
+        xaxis_title='Time', yaxis_title='Wave Height (cm)',
+        margin=dict(l=40, r=20, t=50, b=40),
+    )
     fig_wave.update_xaxes(range=[three_days_ago, now_van])
     fig_wave.update_yaxes(range=[0, 200])
     fig_wave.add_hline(y=33, line_dash="dot", line_color="green")
