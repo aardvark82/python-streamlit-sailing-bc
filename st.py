@@ -799,6 +799,7 @@ def plot_wave_history_chart(container, past_df, buoy_id):
     if df_waves.empty:
         return
 
+    import plotly.graph_objects as go
     df_waves['wave_height_cm'] = df_waves['wave_height'] * 100
     now_van = datetime.now(pytz.timezone('America/Vancouver'))
     three_days_ago = now_van - timedelta(days=3)
