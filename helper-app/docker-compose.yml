@@ -7,14 +7,13 @@ services:
     restart: unless-stopped
     ports:
       - "5111:5111"
+    # Load every line from .env directly into container env with its
+    # original case — Python side does case-insensitive lookup, so
+    # CLOUDFLARE_API_TOKEN / cloudflare_api_token / OpenAI_key all work.
+    env_file:
+      - .env
     environment:
-      # Cloudflare KV — same namespace as main Streamlit app
-      CLOUDFLARE_ACCOUNT_ID: "${CLOUDFLARE_ACCOUNT_ID}"
-      CLOUDFLARE_NAMESPACE_ID: "${CLOUDFLARE_NAMESPACE_ID}"
-      CLOUDFLARE_API_TOKEN: "${CLOUDFLARE_API_TOKEN}"
       # Fetch cadence (minutes). 60 = hourly.
       FETCH_INTERVAL_MIN: "60"
-      # Optional: inject OpenAI key via env instead of UI
-      # OPENAI_API_KEY: "${OPENAI_API_KEY}"
     volumes:
       - ./data:/data
