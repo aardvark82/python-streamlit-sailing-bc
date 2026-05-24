@@ -16,7 +16,18 @@ def cached_fetch_url(url):
 
 @st.cache_data(ttl=180)
 def cached_fetch_url_live(url):
-    """Short-TTL fetch for live data like buoy observations (3-minute cache)."""
+    """Short-TTL fetch for live data like boat location (3-minute cache)."""
+    response = requests.get(url, timeout=25)
+    response.raise_for_status()
+    return response
+
+
+@st.cache_data(ttl=900)
+def cached_fetch_url_buoy(url):
+    """15-min cache for buoy HTML scrapes. weather.gc.ca buoys update
+    hourly on the hour, so anything tighter is wasted external HTTP +
+    wasted KV writes (each scrape currently triggers a write attempt).
+    Helper-app's headless cron handles authoritative captures."""
     response = requests.get(url, timeout=25)
     response.raise_for_status()
     return response

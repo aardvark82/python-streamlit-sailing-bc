@@ -17,7 +17,7 @@ from urllib.parse import quote
 
 from streamlit_autorefresh import st_autorefresh
 
-from utils import cached_fetch_url, cached_fetch_url_live, prettydate, displayStreamlitDateTime
+from utils import cached_fetch_url, cached_fetch_url_live, cached_fetch_url_buoy, prettydate, displayStreamlitDateTime
 from fetch_forecast import (
     display_marine_forecast_for_url,
     display_summary_marine_forecast_for_url,
@@ -844,21 +844,30 @@ def record_buoy_data_history(buoy, container, wind_speed, direction, wave_height
     base_url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}"
     headers = {"Authorization": f"Bearer {api_token}"}
 
-    @st.cache_data(ttl=1800)
-    def store_buoy_data_cached(base_url, headers, buoy, timestamp, wind_speed, direction, wave_height):
+    # Cache key is INTENTIONALLY (buoy, timestamp) only — value args are
+    # passed via the underscore-prefixed _payload tuple so Streamlit's
+    # hasher ignores them. Old code keyed on values too, which meant any
+    # 1-kt drift between scrapes within the same slot blew the cache and
+    # fired three fresh KV writes. Now: exactly one write attempt per
+    # (buoy, slot) per process lifetime.
+    @st.cache_data(ttl=3600)
+    def store_buoy_data_cached(buoy, timestamp, _payload, _base_url, _headers):
+        wind_speed, direction, wave_height = _payload
         try:
             key_wind = f"{buoy}_wind_{timestamp}"
             key_dir = f"{buoy}_direction_{timestamp}"
             key_wave = f"{buoy}_wave_{timestamp}"
-            requests.put(f"{base_url}/values/{quote(key_wind, safe='')}", headers=headers, data=str(wind_speed))
-            requests.put(f"{base_url}/values/{quote(key_dir, safe='')}", headers=headers, data=str(direction))
+            requests.put(f"{_base_url}/values/{quote(key_wind, safe='')}", headers=_headers, data=str(wind_speed))
+            requests.put(f"{_base_url}/values/{quote(key_dir, safe='')}", headers=_headers, data=str(direction))
             if wave_height is not None:
-                requests.put(f"{base_url}/values/{quote(key_wave, safe='')}", headers=headers, data=str(wave_height))
+                requests.put(f"{_base_url}/values/{quote(key_wave, safe='')}", headers=_headers, data=str(wave_height))
         except Exception as e:
             print(f"Error storing data in Cloudflare KV: {e}")
         return 0
 
-    store_buoy_data_cached(base_url, headers, buoy, timestamp, wind_speed, direction, wave_height)
+    store_buoy_data_cached(buoy, timestamp,
+                           (wind_speed, direction, wave_height),
+                           base_url, headers)
 
 
 def refreshBuoy(buoy='46146', title='Halibut Bank - 46146', container=None,
@@ -866,8 +875,10 @@ def refreshBuoy(buoy='46146', title='Halibut Bank - 46146', container=None,
     draw = container or st
     url = f'https://www.weather.gc.ca/marine/weatherConditions-currentConditions_e.html?mapID=02&siteID=14305&stationID={buoy}'
 
-    # Live data — short 3-min cache so new observations surface quickly
-    res = cached_fetch_url_live(url)
+    # Buoys publish on the hour — 15-min cache avoids redundant scrapes
+    # AND redundant KV write attempts. Helper-app does the authoritative
+    # hourly capture; this page is a viewer.
+    res = cached_fetch_url_buoy(url)
     soup = BeautifulSoup(res.content, 'html.parser')
     table = soup.find('table', class_='table')
     time = soup.find('span', class_='issuedTime').string
@@ -957,6 +968,9 @@ def refreshBuoy(buoy='46146', title='Halibut Bank - 46146', container=None,
 with st.sidebar:
     st.badge(f"v{APP_VERSION}", color="blue")
     st.caption("Auto-refresh every 5 minutes")
+    st.link_button("🛠 Helper app", "http://192.168.5.84:5111/",
+                   help="Headless Flask companion — Log, Graph, Trends, Reconcile",
+                   use_container_width=True)
 
 display_gonogo_sidebar()
 
