@@ -74,9 +74,9 @@ VERSION file is auto-bumped on each meaningful commit (currently 126).
 - 1NCE response uses `vesselPosition` wrapper key (camelCase), not `vessel`. Reader unwraps both.
 - VesselAPI position endpoint: `/vessel/{mmsi}/position?filter.idType=mmsi`. Wrapper key: `vesselPosition`.
 
-## OpenAI usage summary (gpt-4o only)
+## OpenAI usage summary (gpt-5-mini only)
 
-Active surface: `openAIFetchForecastForURL` — full-HTML in, CSV table out. Time-bucketed 30-min cache. ~4 300 tokens/call ≈ $0.013/call. Cold full-page-traversal session = ~3 calls (~$0.04). Daily ceiling ~12 calls (~$0.16).
+Active surface: `openAIFetchForecastForURL` — full-HTML in, CSV table out. Time-bucketed 30-min cache. ~4 300 tokens/call ≈ $0.0016/call. Cold full-page-traversal session = ~3 calls (~$0.005). Daily ceiling ~12 calls (~$0.02). Switched from gpt-4o → gpt-5-mini in v132 (~8× cheaper, same extraction quality).
 
 `openAIFetchTidesForURL` was deleted (along with `processResponseToJSONOpenAI`, `displayErrorWithResponseIfNeeded`, and the `USE_CHAT_GPT` flag) — the IWLS API path replaced it.
 

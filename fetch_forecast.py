@@ -77,7 +77,7 @@ def _openAIFetchForecastForURL_cached(url, time_bucket):
     }
 
     data = {
-        "model": "gpt-4o",
+        "model": "gpt-5-mini",
         "messages": [
             {"role": "system", "content": "You are an expert meteorologist."},
             {"role": "user", "content": chat_gpt_msg}
