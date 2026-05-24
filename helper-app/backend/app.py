@@ -22,7 +22,7 @@ from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from . import settings, usage
+from . import db, reconcile, settings, usage
 from .buoy_fetcher import BUOYS, BUOY_BY_ID, fetch_buoy
 from .envutil import getenv_ci
 from .kv_client import read_history, write_reading, VAN_TZ, invalidate_history
@@ -274,6 +274,32 @@ def api_usage():
     return jsonify(usage.snapshot())
 
 
+@app.route("/api/reconcile")
+def api_reconcile_status():
+    return jsonify(reconcile.status(BUOYS))
+
+
+@app.route("/api/reconcile/sync_kv_to_db", methods=["POST"])
+def api_reconcile_kv_to_db():
+    bid = (request.get_json(silent=True) or {}).get("location")
+    if bid not in BUOY_BY_ID:
+        return jsonify(error="unknown location"), 400
+    return jsonify(reconcile.sync_kv_to_db(bid))
+
+
+@app.route("/api/reconcile/sync_db_to_kv", methods=["POST"])
+def api_reconcile_db_to_kv():
+    bid = (request.get_json(silent=True) or {}).get("location")
+    if bid not in BUOY_BY_ID:
+        return jsonify(error="unknown location"), 400
+    return jsonify(reconcile.sync_db_to_kv(bid))
+
+
+@app.route("/api/db/stats")
+def api_db_stats():
+    return jsonify(db.stats())
+
+
 @app.route("/api/health")
 def api_health():
     with _cycle_lock:
@@ -299,6 +325,7 @@ def start_scheduler():
 
 
 # Start on import so both `flask run` and `gunicorn` get the scheduler
+db.init()
 start_scheduler()
 
 

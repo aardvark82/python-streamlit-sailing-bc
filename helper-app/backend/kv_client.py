@@ -19,7 +19,7 @@ from typing import Optional
 import requests
 import pytz
 
-from . import usage
+from . import db, usage
 from .envutil import getenv_ci
 
 log = logging.getLogger("helper.kv")
@@ -66,23 +66,39 @@ def slot_timestamp(dt: Optional[datetime] = None) -> str:
 
 def write_reading(buoy_id: str, wind_speed: float, direction: Optional[str],
                   wave_height_m: Optional[float], ts: Optional[str] = None) -> str:
-    """Write the 3-key triplet for one observation. Returns the timestamp used."""
-    base, headers = _config()
+    """Dual-write one observation:
+    - SQLite always (local source of truth, drives dashboard reads)
+    - CF KV best-effort (so the main Streamlit app sees the value too)
+
+    If KV fails, the SQLite row is marked kv_synced=0 and Reconcile can
+    push it later. Returns the timestamp slot used.
+    """
     ts = ts or slot_timestamp()
+
+    # 1) Local write — must succeed; provisionally mark as not-yet-synced
+    db.upsert(buoy_id, ts, wind_speed, direction, wave_height_m, kv_synced=False)
+
+    # 2) KV write — best-effort
+    base, headers = _config()
     keys = {
         f"{buoy_id}_wind_{ts}": str(wind_speed),
         f"{buoy_id}_direction_{ts}": str(direction or "N/A"),
     }
     if wave_height_m is not None:
         keys[f"{buoy_id}_wave_{ts}"] = str(wave_height_m)
+
     def _put(kv):
         k, v = kv
         r = _session.put(f"{base}/values/{quote(k, safe='')}", headers=headers, data=v, timeout=15)
         r.raise_for_status()
         usage.record("write")
 
-    # Writes too — parallel, but only 3 keys per call so the impact is small.
-    list(_pool.map(_put, keys.items()))
+    try:
+        list(_pool.map(_put, keys.items()))
+        db.mark_kv_synced(buoy_id, ts)
+    except Exception as e:
+        log.warning("KV write for %s @ %s failed (kept in SQLite for later sync): %s",
+                    buoy_id, ts, e)
     return ts
 
 
@@ -165,18 +181,54 @@ def _list_recent_wind_keys(buoy_id: str, want_n: int, max_days_back: int = 7) ->
 def read_history(buoy_id: str, days_back: int = 14,
                  fields: tuple[str, ...] = ("wind", "direction", "wave"),
                  last_n: Optional[int] = None) -> list[dict]:
-    """Pull readings for `buoy_id` newer than `days_back` days, sorted oldest→newest.
+    """Dashboard read — now served from SQLite (no CF KV traffic).
 
-    Args:
-        fields: which value-keys to fetch. Skipping unused fields is a direct
-            multiplier on reads — Trends only needs ('wind','wave'), Graph too.
-            Defaults to all three for backward compatibility.
-        last_n: if set, only fetch the most recent N timestamps. /api/log uses
-            this to avoid pulling 2 days of data just to display 12 rows.
-
-    Returns: list of {timestamp(datetime), wind_speed, direction, wave_height}.
-    Missing fields surface as None.
+    `fields` is kept for API compatibility but ignored (SQLite read is one
+    SQL query regardless). `last_n` slices the tail.
     """
+    rows = db.read_history(buoy_id, days_back=days_back, last_n=last_n)
+    log.debug("read_history(db) %s days=%s last_n=%s → %d rows",
+              buoy_id, days_back, last_n, len(rows))
+    return rows
+
+
+# ── KV-only helpers (Reconcile) ────────────────────────────────────────
+
+def kv_list_timestamps(buoy_id: str) -> set[str]:
+    """All ts strings present in KV for `buoy_id` (parsed from wind_ keys)."""
+    keys = _list_keys(f"{buoy_id}_wind_")
+    out = set()
+    for k in keys:
+        ts_str = k.replace(f"{buoy_id}_wind_", "")
+        out.add(ts_str)
+    return out
+
+
+def kv_fetch_one(buoy_id: str, ts: str) -> dict:
+    """One triplet from KV (used by reconcile sync-from-kv backfill)."""
+    base, headers = _config()
+    keys = [f"{buoy_id}_wind_{ts}",
+            f"{buoy_id}_direction_{ts}",
+            f"{buoy_id}_wave_{ts}"]
+    values = _bulk_get(keys)
+    wind = values.get(keys[0])
+    direction = values.get(keys[1])
+    wave = values.get(keys[2])
+    try:
+        wind_f = float(wind) if wind is not None else None
+    except ValueError:
+        wind_f = None
+    try:
+        wave_f = float(wave) if wave is not None else None
+    except (ValueError, TypeError):
+        wave_f = None
+    return {"wind_speed": wind_f, "direction": direction, "wave_height_m": wave_f}
+
+
+# Legacy KV-based read_history (preserved for diagnostic/manual use).
+def _kv_read_history(buoy_id: str, days_back: int = 14,
+                 fields: tuple[str, ...] = ("wind", "direction", "wave"),
+                 last_n: Optional[int] = None) -> list[dict]:
     cache_key = (buoy_id, days_back, fields, last_n)
     now_ts = _time.time()
     with _hist_lock:

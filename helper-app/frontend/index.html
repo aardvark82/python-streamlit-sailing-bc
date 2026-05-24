@@ -159,12 +159,13 @@
             <button className={`nav-btn ${view === 'log' ? 'active' : ''}`} onClick={() => setView('log')}>Log</button>
             <button className={`nav-btn ${view === 'graph' ? 'active' : ''}`} onClick={() => setView('graph')}>Graph</button>
             <button className={`nav-btn ${view === 'trends' ? 'active' : ''}`} onClick={() => setView('trends')}>Trends</button>
+            <button className={`nav-btn ${view === 'reconcile' ? 'active' : ''}`} onClick={() => setView('reconcile')}>Reconcile</button>
             <div className="nav-section">Admin</div>
             <button className="nav-btn" onClick={triggerFetch}>Fetch now</button>
             <button className={`nav-btn ${view === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')}>Settings</button>
           </div>
           <div className="main">
-            {view !== 'settings' && view !== 'trends' && (
+            {view !== 'settings' && view !== 'trends' && view !== 'reconcile' && (
               <div className="location-tabs">
                 {locations.map(l => (
                   <button key={l.id} className={activeLoc === l.id ? 'active' : ''}
@@ -176,6 +177,7 @@
               {view === 'log' && activeLoc && <LogView locationId={activeLoc} />}
               {view === 'graph' && activeLoc && <GraphView locationId={activeLoc} />}
               {view === 'trends' && <TrendsView locations={locations} />}
+              {view === 'reconcile' && <ReconcileView locations={locations} />}
               {view === 'settings' && <SettingsView />}
             </ErrorBoundary>
           </div>
@@ -285,6 +287,116 @@
               </div>
             );
           })}
+        </div>
+      );
+    }
+
+    function ReconcileView({ locations }) {
+      const [data, setData] = useState(null);
+      const [loading, setLoading] = useState(false);
+      const [busy, setBusy] = useState({});  // {[bid_op]: true}
+      const [toast, setToast] = useState(null);
+
+      const load = async () => {
+        setLoading(true);
+        try {
+          const r = await fetch('/api/reconcile');
+          setData(await r.json());
+        } finally { setLoading(false); }
+      };
+      useEffect(() => { load(); }, []);
+
+      const sync = async (bid, dir) => {
+        const k = `${bid}_${dir}`;
+        setBusy(b => ({ ...b, [k]: true }));
+        try {
+          const url = dir === 'kv_to_db' ? '/api/reconcile/sync_kv_to_db' : '/api/reconcile/sync_db_to_kv';
+          const r = await fetch(url, { method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ location: bid }) });
+          const j = await r.json();
+          setToast(`${bid}: ${dir === 'kv_to_db' ? 'pulled ' + j.synced + ' from KV' : 'pushed ' + j.pushed + ' to KV'}`);
+          setTimeout(() => setToast(null), 3000);
+          load();
+        } finally {
+          setBusy(b => { const c = { ...b }; delete c[k]; return c; });
+        }
+      };
+
+      return (
+        <div>
+          <h2>Reconcile</h2>
+          <p className="muted">Compares local SQLite store with Cloudflare KV. Useful to verify the
+            helper-app's writes actually landed in KV (where the main Streamlit app reads from).
+            <br /><strong>Sync KV → DB</strong> backfills your local SQLite from KV.
+            &nbsp;<strong>Sync DB → KV</strong> pushes any locally-stored rows that never made it to KV.</p>
+          <button onClick={load} disabled={loading} style={{ marginBottom: 12 }}>
+            {loading ? 'Comparing…' : 'Refresh'}
+          </button>
+          {!data && <p className="muted">Loading…</p>}
+          {data && locations.map(loc => {
+            const r = data[loc.id];
+            if (!r) return null;
+            if (!r.ok) return (
+              <div className="card" key={loc.id} style={{ borderLeft: '4px solid #dc2626' }}>
+                <h3 style={{ marginTop: 0 }}>{loc.name}</h3>
+                <p style={{ color: '#dc2626' }}>Error: {r.error}</p>
+              </div>
+            );
+            const k = `${loc.id}_kv_to_db`;
+            const k2 = `${loc.id}_db_to_kv`;
+            return (
+              <div className="card" key={loc.id}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                  <h3 style={{ margin: 0 }}>{loc.name} <span className="muted" style={{ fontSize: '0.85rem' }}>({loc.id})</span></h3>
+                  <span className="muted" style={{ fontSize: '0.85rem' }}>matched: <strong>{r.matched}</strong></span>
+                </div>
+                <div className="trend-grid" style={{ marginTop: 12 }}>
+                  <div className="trend-cell">
+                    <h4>SQLite</h4>
+                    <div className="trend-stat"><strong>{r.db_count}</strong> rows</div>
+                  </div>
+                  <div className="trend-cell">
+                    <h4>Cloudflare KV</h4>
+                    <div className="trend-stat"><strong>{r.kv_count}</strong> keys</div>
+                  </div>
+                  <div className="trend-cell" style={{
+                      background: r.missing_in_kv_total > 0 ? '#fef2f2' : '#f8fafc',
+                      borderColor: r.missing_in_kv_total > 0 ? '#fca5a5' : '#e2e8f0' }}>
+                    <h4>Missing in KV</h4>
+                    <div className="trend-stat"><strong>{r.missing_in_kv_total}</strong></div>
+                    {r.missing_in_kv_total > 0 &&
+                      <button style={{ marginTop: 6, fontSize: '0.78rem', padding: '4px 8px' }}
+                              disabled={busy[k2]} onClick={() => sync(loc.id, 'db_to_kv')}>
+                        {busy[k2] ? 'Pushing…' : 'Push to KV →'}
+                      </button>}
+                  </div>
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  <div className="trend-cell" style={{
+                      background: r.missing_in_db_total > 0 ? '#fffbeb' : '#f8fafc',
+                      borderColor: r.missing_in_db_total > 0 ? '#fbbf24' : '#e2e8f0' }}>
+                    <h4>Missing in SQLite</h4>
+                    <div className="trend-stat"><strong>{r.missing_in_db_total}</strong> keys exist only in KV (likely from main Streamlit app)</div>
+                    {r.missing_in_db_total > 0 &&
+                      <button style={{ marginTop: 6, fontSize: '0.78rem', padding: '4px 8px' }}
+                              disabled={busy[k]} onClick={() => sync(loc.id, 'kv_to_db')}>
+                        {busy[k] ? 'Pulling…' : '← Pull from KV into SQLite'}
+                      </button>}
+                  </div>
+                </div>
+                {r.missing_in_kv.length > 0 && (
+                  <details style={{ marginTop: 10 }}>
+                    <summary className="muted" style={{ cursor: 'pointer' }}>Sample missing-in-KV timestamps</summary>
+                    <pre style={{ fontSize: '0.75rem', background: '#f8fafc', padding: 8, borderRadius: 4 }}>
+                      {r.missing_in_kv.slice(0, 20).join('\n')}
+                    </pre>
+                  </details>
+                )}
+              </div>
+            );
+          })}
+          {toast && <div className="toast">{toast}</div>}
         </div>
       );
     }
