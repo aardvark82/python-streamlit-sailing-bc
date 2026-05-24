@@ -1,5 +1,7 @@
+name: pysail-helper-app-5111
+
 services:
-  helper:
+  pysail-helper-app-5111:
     build: .
     container_name: pysail-helper-app-5111
     restart: unless-stopped
