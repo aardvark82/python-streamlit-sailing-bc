@@ -221,11 +221,12 @@ def api_settings_test():
         try:
             url = (f"https://api.cloudflare.com/client/v4/accounts/{account_id}"
                    f"/storage/kv/namespaces/{namespace_id}/keys")
+            # CF requires limit ≥ 10 on the /keys endpoint
             r = _rq.get(url, headers={"Authorization": f"Bearer {api_token}"},
-                        params={"limit": 1}, timeout=10)
+                        params={"limit": 10}, timeout=10)
             if r.status_code == 200 and r.json().get("success"):
                 count = len(r.json().get("result", []))
-                results["cloudflare"] = {"ok": True, "detail": f"KV reachable ({count} sample key)"}
+                results["cloudflare"] = {"ok": True, "detail": f"KV reachable ({count} sample keys)"}
             else:
                 results["cloudflare"] = {"ok": False, "detail": f"HTTP {r.status_code}: {r.text[:200]}"}
         except Exception as e:
