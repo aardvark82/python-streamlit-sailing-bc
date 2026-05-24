@@ -72,12 +72,12 @@ def _flush_locked():
         return
     day_key, month_key = _keys_today_month()
     d = _load()
+    daily = d.setdefault("daily", {}).setdefault(day_key, {})
+    monthly = d.setdefault("monthly", {}).setdefault(month_key, {})
     for op, n in _pending.items():
         field = f"{op}s"
-        d.setdefault("daily", {}).setdefault(day_key, {})[field] = \
-            d["daily"][day_key].get(field, 0) + n
-        d.setdefault("monthly", {}).setdefault(month_key, {})[field] = \
-            d["monthly"][month_key].get(field, 0) + n
+        daily[field] = daily.get(field, 0) + n
+        monthly[field] = monthly.get(field, 0) + n
     _save(d)
     _pending.clear()
     import time as _t
