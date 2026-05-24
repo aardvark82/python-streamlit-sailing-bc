@@ -32,6 +32,11 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(na
 log = logging.getLogger("helper")
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
+VERSION_PATH = Path(__file__).resolve().parent.parent / "VERSION"
+try:
+    APP_VERSION = VERSION_PATH.read_text().strip() or "dev"
+except OSError:
+    APP_VERSION = "dev"
 
 app = Flask(__name__, static_folder=str(FRONTEND_DIR), static_url_path="")
 
@@ -75,6 +80,11 @@ def run_fetch_cycle():
 @app.route("/")
 def index():
     return send_from_directory(str(FRONTEND_DIR), "index.html")
+
+
+@app.route("/api/version")
+def api_version():
+    return jsonify(version=APP_VERSION)
 
 
 @app.route("/api/locations")

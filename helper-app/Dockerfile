@@ -12,6 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/ ./backend/
 COPY frontend/ ./frontend/
+COPY VERSION ./VERSION
 
 RUN mkdir -p /data
 VOLUME ["/data"]
