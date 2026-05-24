@@ -237,7 +237,8 @@
         }
         Plotly.newPlot(ref.current, traces, {
           margin: { l: 50, r: 50, t: 30, b: 40 },
-          yaxis: { title: 'Wind (kts)' },
+          // Fixed 0-35 kt range so all locations are visually comparable
+          yaxis: { title: 'Wind (kts)', range: [0, 35], fixedrange: false },
           yaxis2: { title: 'Wave (cm)', overlaying: 'y', side: 'right' },
           legend: { orientation: 'h', y: -0.2 },
           height: 420,
