@@ -331,9 +331,28 @@
             helper-app's writes actually landed in KV (where the main Streamlit app reads from).
             <br /><strong>Sync KV → DB</strong> backfills your local SQLite from KV.
             &nbsp;<strong>Sync DB → KV</strong> pushes any locally-stored rows that never made it to KV.</p>
-          <button onClick={load} disabled={loading} style={{ marginBottom: 12 }}>
-            {loading ? 'Comparing…' : 'Refresh'}
-          </button>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+            <button onClick={load} disabled={loading}>
+              {loading ? 'Comparing…' : 'Refresh'}
+            </button>
+            <button onClick={async () => {
+              if (!confirm('Sync all buoys both directions? Pulls KV→DB then pushes DB→KV for each location. Can take a minute.')) return;
+              setBusy(b => ({ ...b, _all: true }));
+              try {
+                const r = await fetch('/api/reconcile/sync_all', { method: 'POST' });
+                const j = await r.json();
+                const pulled = Object.values(j.pulled || {}).reduce((a, v) => a + (typeof v === 'number' ? v : 0), 0);
+                const pushed = Object.values(j.pushed || {}).reduce((a, v) => a + (typeof v === 'number' ? v : 0), 0);
+                setToast(`Synced all: pulled ${pulled} from KV, pushed ${pushed} to KV`);
+                setTimeout(() => setToast(null), 4000);
+                load();
+              } finally {
+                setBusy(b => { const c = { ...b }; delete c._all; return c; });
+              }
+            }} disabled={busy._all} style={{ background: '#10b981' }}>
+              {busy._all ? 'Syncing all…' : '⇅ Sync all (both directions)'}
+            </button>
+          </div>
           {!data && <p className="muted">Loading…</p>}
           {data && locations.map(loc => {
             const r = data[loc.id];

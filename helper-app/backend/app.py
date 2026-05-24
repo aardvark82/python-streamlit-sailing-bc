@@ -295,6 +295,25 @@ def api_reconcile_db_to_kv():
     return jsonify(reconcile.sync_db_to_kv(bid))
 
 
+@app.route("/api/reconcile/sync_all", methods=["POST"])
+def api_reconcile_sync_all():
+    """Full bidirectional sync across every buoy. Pull-from-KV first
+    (cheap on the dashboard side), then push any local-only rows to KV."""
+    pulled = {}
+    pushed = {}
+    for meta in BUOYS:
+        bid = meta["id"]
+        try:
+            pulled[bid] = reconcile.sync_kv_to_db(bid)["synced"]
+        except Exception as e:
+            pulled[bid] = f"error: {e}"
+        try:
+            pushed[bid] = reconcile.sync_db_to_kv(bid)["pushed"]
+        except Exception as e:
+            pushed[bid] = f"error: {e}"
+    return jsonify(pulled=pulled, pushed=pushed)
+
+
 @app.route("/api/db/stats")
 def api_db_stats():
     return jsonify(db.stats())
