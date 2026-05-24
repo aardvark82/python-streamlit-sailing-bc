@@ -61,6 +61,12 @@ def run_fetch_cycle():
             log.exception("[%s] failed", bid)
         with _cycle_lock:
             _cycle_status[bid] = entry
+    # New data landed — drop trends cache so next view recomputes
+    try:
+        with _trends_lock:
+            _trends_cache.clear()
+    except NameError:
+        pass  # cache not yet defined at import time
     log.info("Fetch cycle complete")
 
 
@@ -107,15 +113,50 @@ def api_series():
     } for r in rows])
 
 
+# Trends cache — heaviest endpoint (~8k KV reads per "all,14d" call).
+# 10-min TTL is fine: trends look at a 14-day window so a click-to-click
+# delta is invisible. Cuts CF KV reads ~60× on repeated page loads.
+import time as _time
+_TRENDS_TTL_SEC = 600
+_trends_cache: dict[tuple, tuple[float, dict]] = {}
+_trends_lock = threading.Lock()
+
+
+def _cached_trends(bid: str, days: int):
+    key = (bid, days)
+    now = _time.time()
+    with _trends_lock:
+        hit = _trends_cache.get(key)
+        if hit and (now - hit[0]) < _TRENDS_TTL_SEC:
+            return hit[1], True  # cached
+    # Compute outside the lock so concurrent buoys aren't serialized
+    if bid == "all":
+        data = {b["id"]: summarize(read_history(b["id"], days_back=days)) for b in BUOYS}
+    else:
+        data = summarize(read_history(bid, days_back=days))
+    with _trends_lock:
+        _trends_cache[key] = (now, data)
+    return data, False
+
+
 @app.route("/api/trends")
 def api_trends():
     bid = request.args.get("location")
     days = int(request.args.get("days", 14))
-    if bid == "all":
-        return jsonify({b["id"]: summarize(read_history(b["id"], days_back=days)) for b in BUOYS})
-    if bid not in BUOY_BY_ID:
+    if bid != "all" and bid not in BUOY_BY_ID:
         return jsonify(error="unknown location"), 400
-    return jsonify(summarize(read_history(bid, days_back=days)))
+    data, cached = _cached_trends(bid, days)
+    resp = jsonify(data)
+    resp.headers["X-Cache"] = "HIT" if cached else "MISS"
+    return resp
+
+
+@app.route("/api/trends/clear", methods=["POST"])
+def api_trends_clear():
+    with _trends_lock:
+        n = len(_trends_cache)
+        _trends_cache.clear()
+    return jsonify(ok=True, cleared=n)
 
 
 @app.route("/api/settings", methods=["GET"])
