@@ -1,7 +1,7 @@
 services:
   helper:
     build: .
-    container_name: sailing-bc-helper
+    container_name: pysail-helper-app-5111
     restart: unless-stopped
     ports:
       - "5111:5111"
