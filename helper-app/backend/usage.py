@@ -37,6 +37,14 @@ _DATA_DIR = Path(getenv_ci("HELPER_DATA_DIR", "/data"))
 _USAGE_PATH = _DATA_DIR / "usage.json"
 _lock = threading.Lock()
 
+# In-memory pending counts + last-flush timestamp. record() now only
+# touches RAM + the cheap lock; disk I/O happens at most every
+# _FLUSH_INTERVAL_SEC or when explicitly flushed. This stops 50
+# parallel KV reads from serializing through a disk write per call.
+_pending: dict[str, int] = {}        # op → count not yet flushed
+_last_flush_at = 0.0
+_FLUSH_INTERVAL_SEC = 2.0
+
 
 def _load() -> dict:
     if not _USAGE_PATH.exists():
@@ -57,17 +65,40 @@ def _keys_today_month():
     return now.strftime("%Y-%m-%d"), now.strftime("%Y-%m")
 
 
-def record(op: str, n: int = 1):
-    """op ∈ {'read', 'write', 'list', 'delete'}"""
-    field = f"{op}s"
+def _flush_locked():
+    """Drain _pending into disk JSON. Caller must hold _lock."""
+    global _last_flush_at
+    if not _pending:
+        return
     day_key, month_key = _keys_today_month()
-    with _lock:
-        d = _load()
+    d = _load()
+    for op, n in _pending.items():
+        field = f"{op}s"
         d.setdefault("daily", {}).setdefault(day_key, {})[field] = \
             d["daily"][day_key].get(field, 0) + n
         d.setdefault("monthly", {}).setdefault(month_key, {})[field] = \
             d["monthly"][month_key].get(field, 0) + n
-        _save(d)
+    _save(d)
+    _pending.clear()
+    import time as _t
+    _last_flush_at = _t.time()
+
+
+def record(op: str, n: int = 1):
+    """op ∈ {'read', 'write', 'list', 'delete'}. Cheap — just bumps an
+    in-memory counter under a lock. Flush happens lazily at most every
+    _FLUSH_INTERVAL_SEC."""
+    import time as _t
+    with _lock:
+        _pending[op] = _pending.get(op, 0) + n
+        if (_t.time() - _last_flush_at) >= _FLUSH_INTERVAL_SEC:
+            _flush_locked()
+
+
+def flush():
+    """Force-flush pending counters to disk (called before snapshot reads)."""
+    with _lock:
+        _flush_locked()
 
 
 def _project_day(used: int, hours_elapsed: float) -> int:
@@ -84,6 +115,7 @@ def _project_month(used: int, days_elapsed: float, days_in_month: int) -> int:
 
 def snapshot() -> dict:
     """Return today, this-month, projections, and limit-comparison %."""
+    flush()  # make sure on-disk numbers reflect everything just done
     now = datetime.now(VAN_TZ)
     day_key, month_key = now.strftime("%Y-%m-%d"), now.strftime("%Y-%m")
     d = _load()
