@@ -311,39 +311,66 @@
       const [u, setU] = useState(null);
       const load = () => fetch('/api/usage').then(r => r.json()).then(setU);
       useEffect(load, []);
-      const bar = (used, limit, color) => {
-        const pct = Math.min(100, (used / Math.max(1, limit)) * 100);
-        const fillColor = pct > 90 ? '#dc2626' : (pct > 60 ? '#f59e0b' : color);
+
+      // Stacked bar: solid segment = actual usage so far, lighter segment =
+      // projected additional usage by end-of-window. Red overlay if the
+      // projection exceeds the limit.
+      const bar = (used, projected, limit, color) => {
+        const usedPct = Math.min(100, (used / Math.max(1, limit)) * 100);
+        const projPct = Math.min(100, (projected / Math.max(1, limit)) * 100);
+        const overshoot = projected > limit;
         return (
-          <div style={{ background: '#e2e8f0', borderRadius: 4, height: 8, overflow: 'hidden', marginTop: 4 }}>
-            <div style={{ width: `${pct}%`, height: '100%', background: fillColor }} />
+          <div style={{ background: '#e2e8f0', borderRadius: 4, height: 12, overflow: 'hidden',
+                          marginTop: 4, position: 'relative' }}>
+            {/* projected (lighter) layer underneath */}
+            <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${projPct}%`,
+                            background: overshoot ? '#fca5a5' : color, opacity: 0.45 }} />
+            {/* actual (solid) layer on top */}
+            <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${usedPct}%`,
+                            background: overshoot ? '#dc2626' : color }} />
           </div>
         );
       };
-      const row = (label, used, limit, color) => (
-        <div style={{ marginBottom: 12 }}>
+
+      const block = (label, k) => (
+        <div style={{ marginBottom: 14 }}>
           <div className="trend-stat">
-            <strong>{label}</strong>: {used.toLocaleString()} / {limit.toLocaleString()}
-            <span className="muted" style={{ marginLeft: 8 }}>
-              ({((used / Math.max(1, limit)) * 100).toFixed(1)}%)
-            </span>
+            <strong>{label}</strong>: {k.today_used.toLocaleString()} so far •
+            projected <strong>{k.today_projected.toLocaleString()}</strong> /
+            {k.today_limit.toLocaleString()} today
+            {k.today_will_exceed && <span className="badge badge-red" style={{ marginLeft: 6 }}>WILL EXCEED</span>}
           </div>
-          {bar(used, limit, color)}
+          {bar(k.today_used, k.today_projected, k.today_limit, '#3b82f6')}
+          <div className="trend-stat muted" style={{ marginTop: 4, fontSize: '0.78rem' }}>
+            Month: {k.month_used.toLocaleString()} → projected {k.month_projected.toLocaleString()} /
+            {k.month_limit.toLocaleString()}
+            {k.month_will_exceed && <span className="badge badge-red" style={{ marginLeft: 6 }}>WILL EXCEED</span>}
+          </div>
+          {bar(k.month_used, k.month_projected, k.month_limit, '#8b5cf6')}
         </div>
       );
+
       if (!u) return <p className="muted">Loading usage…</p>;
       return (
         <div>
           <h3 style={{ marginTop: 0 }}>API rate limits (Cloudflare KV free tier)</h3>
-          <p className="muted">Today ({u.today.date}, Vancouver time)</p>
-          {row('Reads',  u.today.reads,  u.limits.reads_per_day,  '#3b82f6')}
-          {row('Writes', u.today.writes, u.limits.writes_per_day, '#10b981')}
-          {row('Lists',  u.today.lists,  u.limits.lists_per_day,  '#8b5cf6')}
-          <p className="muted" style={{ marginTop: 16 }}>This month ({u.this_month.month})</p>
-          <div className="trend-stat">Reads: <strong>{u.this_month.reads.toLocaleString()}</strong></div>
-          <div className="trend-stat">Writes: <strong>{u.this_month.writes.toLocaleString()}</strong></div>
-          <div className="trend-stat">Lists: <strong>{u.this_month.lists.toLocaleString()}</strong></div>
-          <p className="muted" style={{ marginTop: 12, fontSize: '0.78rem' }}>{u.note}</p>
+          <p className="muted" style={{ marginBottom: 12 }}>
+            Today {u.today_date} ({u.hours_into_day}h in) — Month {u.month} (day {u.days_into_month.toFixed(1)} of {u.days_in_month}).
+            <br />
+            <span style={{ display: 'inline-block', width: 10, height: 10, background: '#3b82f6', borderRadius: 2, marginRight: 4 }} />
+            actual so far &nbsp;
+            <span style={{ display: 'inline-block', width: 10, height: 10, background: '#3b82f6', opacity: 0.45, borderRadius: 2, marginRight: 4 }} />
+            projected by end of window
+          </p>
+          {block('Reads',  u.reads)}
+          {block('Writes', u.writes)}
+          {block('Lists',  u.lists)}
+          <p className="muted" style={{ marginTop: 12, fontSize: '0.78rem' }}>
+            <strong>Free-tier daily limits</strong>: {u.limits_daily.reads_per_day.toLocaleString()} reads,
+            {' '}{u.limits_daily.writes_per_day.toLocaleString()} writes, {u.limits_daily.lists_per_day.toLocaleString()} lists.
+            Monthly comparison uses daily×{u.days_in_month} as implied ceiling (CF doesn't publish a separate monthly cap).
+          </p>
+          <p className="muted" style={{ fontSize: '0.78rem' }}>{u.note}</p>
           <button onClick={load} style={{ background: '#64748b', marginTop: 4 }}>Refresh</button>
         </div>
       );
