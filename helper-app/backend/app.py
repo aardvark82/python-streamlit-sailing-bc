@@ -25,7 +25,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from . import settings, usage
 from .buoy_fetcher import BUOYS, BUOY_BY_ID, fetch_buoy
 from .envutil import getenv_ci
-from .kv_client import read_history, write_reading, VAN_TZ
+from .kv_client import read_history, write_reading, VAN_TZ, invalidate_history
 from .trends import summarize
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -45,33 +45,41 @@ _cycle_status: dict[str, dict] = {}
 _cycle_lock = threading.Lock()
 
 
+def _fetch_one(meta):
+    """Single-buoy fetch+write. Runs in a worker thread for the parallel cycle."""
+    bid = meta["id"]
+    entry = {"buoy_id": bid, "name": meta["name"], "started_at": datetime.now(VAN_TZ).isoformat()}
+    try:
+        r = fetch_buoy(bid)
+        ts = write_reading(bid, r.wind_speed, r.direction, r.wave_height_m)
+        entry.update({
+            "ok": True, "ts": ts,
+            "wind_speed": r.wind_speed, "direction": r.direction,
+            "wave_m": r.wave_height_m,
+        })
+        log.info("[%s] %s — wrote %s kts %s waves=%s", bid, meta["name"],
+                 r.wind_speed, r.direction, r.wave_height_m)
+    except Exception as e:
+        entry.update({"ok": False, "error": str(e)})
+        log.exception("[%s] failed", bid)
+    with _cycle_lock:
+        _cycle_status[bid] = entry
+
+
 def run_fetch_cycle():
-    """Fetch all buoys, write to CF KV. Logs per-buoy success/error."""
+    """Fetch all buoys in parallel, write to CF KV. Logs per-buoy success/error."""
     log.info("Starting fetch cycle")
-    for meta in BUOYS:
-        bid = meta["id"]
-        entry = {"buoy_id": bid, "name": meta["name"], "started_at": datetime.now(VAN_TZ).isoformat()}
-        try:
-            r = fetch_buoy(bid)
-            ts = write_reading(bid, r.wind_speed, r.direction, r.wave_height_m)
-            entry.update({
-                "ok": True, "ts": ts,
-                "wind_speed": r.wind_speed, "direction": r.direction,
-                "wave_m": r.wave_height_m,
-            })
-            log.info("[%s] %s — wrote %s kts %s waves=%s", bid, meta["name"],
-                     r.wind_speed, r.direction, r.wave_height_m)
-        except Exception as e:
-            entry.update({"ok": False, "error": str(e)})
-            log.exception("[%s] failed", bid)
-        with _cycle_lock:
-            _cycle_status[bid] = entry
-    # New data landed — drop trends cache so next view recomputes
+    # 4 buoys, each ~1-2s for the gc.ca scrape — parallel cuts cycle time ~4×
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=len(BUOYS), thread_name_prefix="buoy") as ex:
+        list(ex.map(_fetch_one, BUOYS))
+    # Invalidate all caches — new data landed
     try:
         with _trends_lock:
             _trends_cache.clear()
     except NameError:
-        pass  # cache not yet defined at import time
+        pass
+    invalidate_history()
     log.info("Fetch cycle complete")
 
 
@@ -98,8 +106,8 @@ def api_log():
     limit = int(request.args.get("limit", 12))
     if bid not in BUOY_BY_ID:
         return jsonify(error="unknown location"), 400
-    rows = read_history(bid, days_back=2)
-    rows = rows[-limit:]
+    # last_n + days_back=1 → list 1 day, fetch only the last `limit` triplets
+    rows = read_history(bid, days_back=1, last_n=limit)
     return jsonify([{
         "timestamp": r["timestamp"].isoformat(),
         "wind_speed": r["wind_speed"],
@@ -114,7 +122,8 @@ def api_series():
     days = int(request.args.get("days", 3))
     if bid not in BUOY_BY_ID:
         return jsonify(error="unknown location"), 400
-    rows = read_history(bid, days_back=days)
+    # Graph view only plots wind + wave — skip direction reads
+    rows = read_history(bid, days_back=days, fields=("wind", "wave"))
     return jsonify([{
         "timestamp": r["timestamp"].isoformat(),
         "wind_speed": r["wind_speed"],
@@ -140,10 +149,11 @@ def _cached_trends(bid: str, days: int):
         if hit and (now - hit[0]) < _TRENDS_TTL_SEC:
             return hit[1], True  # cached
     # Compute outside the lock so concurrent buoys aren't serialized
+    # Trends only uses wind + wave averages — skip direction reads
     if bid == "all":
-        data = {b["id"]: summarize(read_history(b["id"], days_back=days)) for b in BUOYS}
+        data = {b["id"]: summarize(read_history(b["id"], days_back=days, fields=("wind", "wave"))) for b in BUOYS}
     else:
-        data = summarize(read_history(bid, days_back=days))
+        data = summarize(read_history(bid, days_back=days, fields=("wind", "wave")))
     with _trends_lock:
         _trends_cache[key] = (now, data)
     return data, False

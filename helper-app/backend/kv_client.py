@@ -118,19 +118,54 @@ def _bulk_get(keys: list[str]) -> dict[str, Optional[str]]:
     return dict(zip(keys, results))
 
 
-def read_history(buoy_id: str, days_back: int = 14) -> list[dict]:
-    """Pull triplets for `buoy_id` newer than `days_back` days, sorted oldest→newest.
-    Returns list of {timestamp(datetime), wind_speed, direction, wave_height}.
+# ── 60-second in-process cache for read_history ──────────────────────
+# Log → Graph → Log click bursts triple-fetched the same data.
+import time as _time
+_HIST_TTL_SEC = 60
+_hist_cache: dict[tuple, tuple[float, list]] = {}
+_hist_lock = __import__("threading").Lock()
 
-    Reads are batched: collect every key we'd need (wind+dir+wave for each
-    in-window timestamp), fire them through the 50-thread pool, then assemble.
-    Speedup vs sequential is ~30-50× on 14-day windows."""
+
+def invalidate_history(buoy_id: Optional[str] = None):
+    """Drop cached histories (called by the fetch cycle after writes)."""
+    with _hist_lock:
+        if buoy_id is None:
+            _hist_cache.clear()
+        else:
+            for k in list(_hist_cache.keys()):
+                if k[0] == buoy_id:
+                    del _hist_cache[k]
+
+
+def read_history(buoy_id: str, days_back: int = 14,
+                 fields: tuple[str, ...] = ("wind", "direction", "wave"),
+                 last_n: Optional[int] = None) -> list[dict]:
+    """Pull readings for `buoy_id` newer than `days_back` days, sorted oldest→newest.
+
+    Args:
+        fields: which value-keys to fetch. Skipping unused fields is a direct
+            multiplier on reads — Trends only needs ('wind','wave'), Graph too.
+            Defaults to all three for backward compatibility.
+        last_n: if set, only fetch the most recent N timestamps. /api/log uses
+            this to avoid pulling 2 days of data just to display 12 rows.
+
+    Returns: list of {timestamp(datetime), wind_speed, direction, wave_height}.
+    Missing fields surface as None.
+    """
+    cache_key = (buoy_id, days_back, fields, last_n)
+    now_ts = _time.time()
+    with _hist_lock:
+        hit = _hist_cache.get(cache_key)
+        if hit and (now_ts - hit[0]) < _HIST_TTL_SEC:
+            return hit[1]
+
     cutoff = datetime.now(VAN_TZ) - timedelta(days=days_back)
-    wind_keys = _list_keys(f"{buoy_id}_wind_")
+    # ISO-format keys sort chronologically as strings, so we can pick the
+    # tail without parsing every timestamp first.
+    wind_keys = sorted(_list_keys(f"{buoy_id}_wind_"))
 
-    # First pass: filter to in-window timestamps + collect the full key list to fetch
-    triples = []   # list of (ts, wind_key, dir_key, wave_key)
-    fetch_keys: list[str] = []
+    # First pass: filter to in-window timestamps
+    triples = []   # (ts, ts_str)
     for k in wind_keys:
         ts_str = k.replace(f"{buoy_id}_wind_", "")
         try:
@@ -141,18 +176,28 @@ def read_history(buoy_id: str, days_back: int = 14) -> list[dict]:
             ts = VAN_TZ.localize(ts)
         if ts < cutoff:
             continue
-        dk = f"{buoy_id}_direction_{ts_str}"
-        wk = f"{buoy_id}_wave_{ts_str}"
-        triples.append((ts, k, dk, wk))
-        fetch_keys.extend([k, dk, wk])
+        triples.append((ts, ts_str))
+
+    if last_n is not None:
+        triples = triples[-last_n:]
+
+    # Build only the keys we actually need based on `fields`
+    fetch_keys: list[str] = []
+    for _ts, ts_str in triples:
+        if "wind" in fields:
+            fetch_keys.append(f"{buoy_id}_wind_{ts_str}")
+        if "direction" in fields:
+            fetch_keys.append(f"{buoy_id}_direction_{ts_str}")
+        if "wave" in fields:
+            fetch_keys.append(f"{buoy_id}_wave_{ts_str}")
 
     values = _bulk_get(fetch_keys)
 
     out = []
-    for ts, wind_k, dir_k, wave_k in triples:
-        wind = values.get(wind_k)
-        direction = values.get(dir_k)
-        wave = values.get(wave_k)
+    for ts, ts_str in triples:
+        wind = values.get(f"{buoy_id}_wind_{ts_str}") if "wind" in fields else None
+        direction = values.get(f"{buoy_id}_direction_{ts_str}") if "direction" in fields else None
+        wave = values.get(f"{buoy_id}_wave_{ts_str}") if "wave" in fields else None
         try:
             wind_f = float(wind) if wind is not None else None
         except ValueError:
@@ -169,4 +214,6 @@ def read_history(buoy_id: str, days_back: int = 14) -> list[dict]:
         })
 
     out.sort(key=lambda r: r["timestamp"])
+    with _hist_lock:
+        _hist_cache[cache_key] = (now_ts, out)
     return out
