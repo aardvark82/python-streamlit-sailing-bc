@@ -1,0 +1,185 @@
+"""Flask + APScheduler — single-process headless helper.
+
+Endpoints:
+  GET  /                       → static index.html (React app via CDN)
+  GET  /api/locations          → buoy registry
+  GET  /api/log?location=&limit=12   → recent readings
+  GET  /api/series?location=&days=3  → time-series for charting
+  GET  /api/trends?location=&days=14 → morning/afternoon/evening summary
+  GET  /api/settings           → settings (with key masked)
+  POST /api/settings           → update settings
+  POST /api/fetch_now          → trigger one fetch cycle immediately
+  GET  /api/health             → liveness + last-cycle status
+"""
+from __future__ import annotations
+
+import logging
+import os
+import threading
+from datetime import datetime
+from pathlib import Path
+
+from flask import Flask, jsonify, request, send_from_directory
+from apscheduler.schedulers.background import BackgroundScheduler
+
+from . import settings
+from .buoy_fetcher import BUOYS, BUOY_BY_ID, fetch_buoy
+from .kv_client import read_history, write_reading, VAN_TZ
+from .trends import summarize
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+log = logging.getLogger("helper")
+
+FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
+
+app = Flask(__name__, static_folder=str(FRONTEND_DIR), static_url_path="")
+
+# In-memory cycle status (last run per buoy)
+_cycle_status: dict[str, dict] = {}
+_cycle_lock = threading.Lock()
+
+
+def run_fetch_cycle():
+    """Fetch all buoys, write to CF KV. Logs per-buoy success/error."""
+    log.info("Starting fetch cycle")
+    for meta in BUOYS:
+        bid = meta["id"]
+        entry = {"buoy_id": bid, "name": meta["name"], "started_at": datetime.now(VAN_TZ).isoformat()}
+        try:
+            r = fetch_buoy(bid)
+            ts = write_reading(bid, r.wind_speed, r.direction, r.wave_height_m)
+            entry.update({
+                "ok": True, "ts": ts,
+                "wind_speed": r.wind_speed, "direction": r.direction,
+                "wave_m": r.wave_height_m,
+            })
+            log.info("[%s] %s — wrote %s kts %s waves=%s", bid, meta["name"],
+                     r.wind_speed, r.direction, r.wave_height_m)
+        except Exception as e:
+            entry.update({"ok": False, "error": str(e)})
+            log.exception("[%s] failed", bid)
+        with _cycle_lock:
+            _cycle_status[bid] = entry
+    log.info("Fetch cycle complete")
+
+
+# ── Routes ─────────────────────────────────────────────────────────────
+
+@app.route("/")
+def index():
+    return send_from_directory(str(FRONTEND_DIR), "index.html")
+
+
+@app.route("/api/locations")
+def api_locations():
+    return jsonify(BUOYS)
+
+
+@app.route("/api/log")
+def api_log():
+    bid = request.args.get("location")
+    limit = int(request.args.get("limit", 12))
+    if bid not in BUOY_BY_ID:
+        return jsonify(error="unknown location"), 400
+    rows = read_history(bid, days_back=2)
+    rows = rows[-limit:]
+    return jsonify([{
+        "timestamp": r["timestamp"].isoformat(),
+        "wind_speed": r["wind_speed"],
+        "direction": r["direction"],
+        "wave_height_m": r["wave_height"],
+    } for r in reversed(rows)])
+
+
+@app.route("/api/series")
+def api_series():
+    bid = request.args.get("location")
+    days = int(request.args.get("days", 3))
+    if bid not in BUOY_BY_ID:
+        return jsonify(error="unknown location"), 400
+    rows = read_history(bid, days_back=days)
+    return jsonify([{
+        "timestamp": r["timestamp"].isoformat(),
+        "wind_speed": r["wind_speed"],
+        "direction": r["direction"],
+        "wave_height_m": r["wave_height"],
+    } for r in rows])
+
+
+@app.route("/api/trends")
+def api_trends():
+    bid = request.args.get("location")
+    days = int(request.args.get("days", 14))
+    if bid == "all":
+        return jsonify({b["id"]: summarize(read_history(b["id"], days_back=days)) for b in BUOYS})
+    if bid not in BUOY_BY_ID:
+        return jsonify(error="unknown location"), 400
+    return jsonify(summarize(read_history(bid, days_back=days)))
+
+
+@app.route("/api/settings", methods=["GET"])
+def api_settings_get():
+    s = settings.load()
+    key = s.get("openai_api_key") or ""
+    return jsonify({
+        "openai_api_key_set": bool(key),
+        "openai_api_key_masked": (key[:6] + "…" + key[-4:]) if len(key) >= 12 else None,
+    })
+
+
+@app.route("/api/settings", methods=["POST"])
+def api_settings_post():
+    body = request.get_json(silent=True) or {}
+    updates = {}
+    if "openai_api_key" in body:
+        v = (body["openai_api_key"] or "").strip()
+        if v:
+            updates["openai_api_key"] = v
+        else:
+            # Empty value clears the key
+            current = settings.load()
+            current.pop("openai_api_key", None)
+            settings.SETTINGS_PATH.write_text(__import__("json").dumps(current, indent=2))
+            return jsonify(ok=True, cleared=True)
+    if updates:
+        settings.save(updates)
+    return jsonify(ok=True)
+
+
+@app.route("/api/fetch_now", methods=["POST"])
+def api_fetch_now():
+    threading.Thread(target=run_fetch_cycle, daemon=True).start()
+    return jsonify(ok=True, message="fetch cycle started")
+
+
+@app.route("/api/health")
+def api_health():
+    with _cycle_lock:
+        return jsonify(ok=True, last_cycle=dict(_cycle_status))
+
+
+# ── Scheduler bootstrap ────────────────────────────────────────────────
+
+_scheduler: BackgroundScheduler | None = None
+
+
+def start_scheduler():
+    global _scheduler
+    if _scheduler is not None:
+        return
+    interval_min = int(os.environ.get("FETCH_INTERVAL_MIN", "60"))
+    _scheduler = BackgroundScheduler(timezone=str(VAN_TZ))
+    _scheduler.add_job(run_fetch_cycle, "interval", minutes=interval_min,
+                       next_run_time=datetime.now(VAN_TZ), id="hourly_fetch",
+                       max_instances=1, coalesce=True)
+    _scheduler.start()
+    log.info("Scheduler started — every %d min", interval_min)
+
+
+# Start on import so both `flask run` and `gunicorn` get the scheduler
+start_scheduler()
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", "5111"))
+    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
