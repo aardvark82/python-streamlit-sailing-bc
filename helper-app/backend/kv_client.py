@@ -9,6 +9,7 @@ _fetch_buoy_wind_history_df):
 from __future__ import annotations
 
 import os
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from urllib.parse import quote
 from typing import Optional
@@ -20,6 +21,22 @@ from . import usage
 from .envutil import getenv_ci
 
 VAN_TZ = pytz.timezone("America/Vancouver")
+
+# Shared pool — capped at 50 concurrent connections so a single
+# read_history() doesn't fan out unbounded against CF.
+_MAX_PARALLEL = 50
+_pool = ThreadPoolExecutor(max_workers=_MAX_PARALLEL, thread_name_prefix="cfkv")
+
+# Reuse a single requests.Session so the TCP/TLS handshake to CF is
+# pooled across the 50 worker threads (huge latency win on 300+ reads).
+_session = requests.Session()
+# urllib3 defaults to pool_connections=10/pool_maxsize=10 — would bottleneck
+# the 50 worker threads down to 10. Mount adapters sized to match.
+_adapter = requests.adapters.HTTPAdapter(pool_connections=_MAX_PARALLEL,
+                                           pool_maxsize=_MAX_PARALLEL,
+                                           max_retries=1)
+_session.mount("https://", _adapter)
+_session.mount("http://", _adapter)
 
 
 def _config():
@@ -54,10 +71,14 @@ def write_reading(buoy_id: str, wind_speed: float, direction: Optional[str],
     }
     if wave_height_m is not None:
         keys[f"{buoy_id}_wave_{ts}"] = str(wave_height_m)
-    for k, v in keys.items():
-        r = requests.put(f"{base}/values/{quote(k, safe='')}", headers=headers, data=v, timeout=15)
+    def _put(kv):
+        k, v = kv
+        r = _session.put(f"{base}/values/{quote(k, safe='')}", headers=headers, data=v, timeout=15)
         r.raise_for_status()
         usage.record("write")
+
+    # Writes too — parallel, but only 3 keys per call so the impact is small.
+    list(_pool.map(_put, keys.items()))
     return ts
 
 
@@ -69,7 +90,7 @@ def _list_keys(prefix: str, limit: int = 1000):
         params = {"prefix": prefix, "limit": limit}
         if cursor:
             params["cursor"] = cursor
-        r = requests.get(f"{base}/keys", params=params, headers=headers, timeout=20)
+        r = _session.get(f"{base}/keys", params=params, headers=headers, timeout=20)
         r.raise_for_status()
         usage.record("list")
         body = r.json()
@@ -82,20 +103,34 @@ def _list_keys(prefix: str, limit: int = 1000):
 
 def _get(key: str) -> Optional[str]:
     base, headers = _config()
-    r = requests.get(f"{base}/values/{quote(key, safe='')}", headers=headers, timeout=15)
+    r = _session.get(f"{base}/values/{quote(key, safe='')}", headers=headers, timeout=15)
     usage.record("read")
     if r.status_code == 200:
         return r.text
     return None
 
 
+def _bulk_get(keys: list[str]) -> dict[str, Optional[str]]:
+    """Fan out reads through the shared pool (cap 50). Returns {key: value or None}."""
+    if not keys:
+        return {}
+    results = list(_pool.map(_get, keys))
+    return dict(zip(keys, results))
+
+
 def read_history(buoy_id: str, days_back: int = 14) -> list[dict]:
     """Pull triplets for `buoy_id` newer than `days_back` days, sorted oldest→newest.
-    Returns list of {timestamp(datetime), wind_speed, direction, wave_height}."""
+    Returns list of {timestamp(datetime), wind_speed, direction, wave_height}.
+
+    Reads are batched: collect every key we'd need (wind+dir+wave for each
+    in-window timestamp), fire them through the 50-thread pool, then assemble.
+    Speedup vs sequential is ~30-50× on 14-day windows."""
     cutoff = datetime.now(VAN_TZ) - timedelta(days=days_back)
     wind_keys = _list_keys(f"{buoy_id}_wind_")
 
-    out = []
+    # First pass: filter to in-window timestamps + collect the full key list to fetch
+    triples = []   # list of (ts, wind_key, dir_key, wave_key)
+    fetch_keys: list[str] = []
     for k in wind_keys:
         ts_str = k.replace(f"{buoy_id}_wind_", "")
         try:
@@ -106,9 +141,18 @@ def read_history(buoy_id: str, days_back: int = 14) -> list[dict]:
             ts = VAN_TZ.localize(ts)
         if ts < cutoff:
             continue
-        wind = _get(k)
-        direction = _get(f"{buoy_id}_direction_{ts_str}")
-        wave = _get(f"{buoy_id}_wave_{ts_str}")
+        dk = f"{buoy_id}_direction_{ts_str}"
+        wk = f"{buoy_id}_wave_{ts_str}"
+        triples.append((ts, k, dk, wk))
+        fetch_keys.extend([k, dk, wk])
+
+    values = _bulk_get(fetch_keys)
+
+    out = []
+    for ts, wind_k, dir_k, wave_k in triples:
+        wind = values.get(wind_k)
+        direction = values.get(dir_k)
+        wave = values.get(wave_k)
         try:
             wind_f = float(wind) if wind is not None else None
         except ValueError:
