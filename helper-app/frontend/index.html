@@ -54,6 +54,16 @@
                               border: none; border-radius: 6px; cursor: pointer; font-weight: 500; }
     .toast { position: fixed; bottom: 1.5rem; right: 1.5rem; background: #0f172a; color: #fff;
              padding: 0.7rem 1.2rem; border-radius: 6px; font-size: 0.85rem; }
+    /* Top-of-page indeterminate progress bar — visible while any fetch is in-flight */
+    .loadbar { position: fixed; top: 0; left: 0; right: 0; height: 3px; background: transparent;
+               z-index: 9999; overflow: hidden; pointer-events: none; }
+    .loadbar > div { position: absolute; height: 100%; width: 30%;
+                      background: linear-gradient(90deg, #3b82f6, #60a5fa, #3b82f6);
+                      animation: loadbar-slide 1.1s ease-in-out infinite; }
+    @keyframes loadbar-slide {
+      0%   { left: -30%; }
+      100% { left: 100%; }
+    }
     .muted { color: #64748b; font-size: 0.85rem; }
     .row-flex { display: flex; gap: 0.5rem; align-items: center; }
   </style>
@@ -62,6 +72,29 @@
   <div id="root"></div>
   <script type="text/babel">
     const { useState, useEffect, useRef } = React;
+
+    // Patch window.fetch to track in-flight count and fire a CustomEvent
+    // every time it changes — used by <LoadBar> to show a top progress bar.
+    (function patchFetch() {
+      let inflight = 0;
+      const orig = window.fetch.bind(window);
+      const emit = () => window.dispatchEvent(new CustomEvent('fetch-inflight', { detail: inflight }));
+      window.fetch = function (...args) {
+        inflight++; emit();
+        return orig(...args).finally(() => { inflight = Math.max(0, inflight - 1); emit(); });
+      };
+    })();
+
+    function LoadBar() {
+      const [n, setN] = useState(0);
+      useEffect(() => {
+        const h = (e) => setN(e.detail);
+        window.addEventListener('fetch-inflight', h);
+        return () => window.removeEventListener('fetch-inflight', h);
+      }, []);
+      if (!n) return null;
+      return <div className="loadbar"><div /></div>;
+    }
 
     // Catches render errors in any child so one bad view doesn't blank
     // the whole app. Shows the error inline + a reset button.
@@ -147,6 +180,7 @@
             </ErrorBoundary>
           </div>
           {toast && <div className="toast">{toast}</div>}
+          <LoadBar />
         </div>
       );
     }
