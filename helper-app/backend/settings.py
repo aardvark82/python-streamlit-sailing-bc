@@ -6,7 +6,9 @@ import json
 import os
 from pathlib import Path
 
-DATA_DIR = Path(os.environ.get("HELPER_DATA_DIR", "/data"))
+from .envutil import getenv_ci
+
+DATA_DIR = Path(getenv_ci("HELPER_DATA_DIR", "/data"))
 SETTINGS_PATH = DATA_DIR / "settings.json"
 
 
@@ -34,4 +36,4 @@ def save(updates: dict) -> dict:
 
 def get_openai_key() -> str | None:
     # Env var wins if set (allows ops to inject without touching disk)
-    return os.environ.get("OPENAI_API_KEY") or load().get("openai_api_key")
+    return getenv_ci("OPENAI_API_KEY") or load().get("openai_api_key")

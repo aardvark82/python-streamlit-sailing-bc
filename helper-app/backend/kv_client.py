@@ -16,13 +16,15 @@ from typing import Optional
 import requests
 import pytz
 
+from .envutil import getenv_ci
+
 VAN_TZ = pytz.timezone("America/Vancouver")
 
 
 def _config():
-    account_id = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
-    namespace_id = os.environ.get("CLOUDFLARE_NAMESPACE_ID")
-    api_token = os.environ.get("CLOUDFLARE_API_TOKEN")
+    account_id = getenv_ci("CLOUDFLARE_ACCOUNT_ID")
+    namespace_id = getenv_ci("CLOUDFLARE_NAMESPACE_ID")
+    api_token = getenv_ci("CLOUDFLARE_API_TOKEN")
     if not all([account_id, namespace_id, api_token]):
         raise RuntimeError("Cloudflare env vars missing (CLOUDFLARE_ACCOUNT_ID / NAMESPACE_ID / API_TOKEN)")
     base = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}"

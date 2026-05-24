@@ -24,6 +24,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from . import settings
 from .buoy_fetcher import BUOYS, BUOY_BY_ID, fetch_buoy
+from .envutil import getenv_ci
 from .kv_client import read_history, write_reading, VAN_TZ
 from .trends import summarize
 
@@ -167,7 +168,7 @@ def start_scheduler():
     global _scheduler
     if _scheduler is not None:
         return
-    interval_min = int(os.environ.get("FETCH_INTERVAL_MIN", "60"))
+    interval_min = int(getenv_ci("FETCH_INTERVAL_MIN", "60"))
     _scheduler = BackgroundScheduler(timezone=str(VAN_TZ))
     _scheduler.add_job(run_fetch_cycle, "interval", minutes=interval_min,
                        next_run_time=datetime.now(VAN_TZ), id="hourly_fetch",
@@ -181,5 +182,5 @@ start_scheduler()
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", "5111"))
+    port = int(getenv_ci("PORT", "5111"))
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
