@@ -147,6 +147,60 @@ def api_settings_post():
     return jsonify(ok=True)
 
 
+@app.route("/api/settings/test", methods=["POST"])
+def api_settings_test():
+    """Verify each configured credential without exposing its value.
+    - Cloudflare: list one KV key (read-only smoke test).
+    - OpenAI: GET /v1/models with the configured key.
+    Each returns {ok, detail} so the UI can show per-provider status."""
+    import requests as _rq
+
+    results = {}
+
+    # Cloudflare
+    account_id = getenv_ci("CLOUDFLARE_ACCOUNT_ID")
+    namespace_id = getenv_ci("CLOUDFLARE_NAMESPACE_ID")
+    api_token = getenv_ci("CLOUDFLARE_API_TOKEN")
+    if not all([account_id, namespace_id, api_token]):
+        missing = [n for n, v in [("ACCOUNT_ID", account_id),
+                                    ("NAMESPACE_ID", namespace_id),
+                                    ("API_TOKEN", api_token)] if not v]
+        results["cloudflare"] = {"ok": False, "detail": f"missing env: {', '.join(missing)}"}
+    else:
+        try:
+            url = (f"https://api.cloudflare.com/client/v4/accounts/{account_id}"
+                   f"/storage/kv/namespaces/{namespace_id}/keys")
+            r = _rq.get(url, headers={"Authorization": f"Bearer {api_token}"},
+                        params={"limit": 1}, timeout=10)
+            if r.status_code == 200 and r.json().get("success"):
+                count = len(r.json().get("result", []))
+                results["cloudflare"] = {"ok": True, "detail": f"KV reachable ({count} sample key)"}
+            else:
+                results["cloudflare"] = {"ok": False, "detail": f"HTTP {r.status_code}: {r.text[:200]}"}
+        except Exception as e:
+            results["cloudflare"] = {"ok": False, "detail": str(e)[:200]}
+
+    # OpenAI — prefer env var, fall back to /data/settings.json
+    openai_key = settings.get_openai_key()
+    if not openai_key:
+        results["openai"] = {"ok": False, "detail": "no key set (env OPENAI_API_KEY or Settings tab)"}
+    else:
+        try:
+            r = _rq.get("https://api.openai.com/v1/models",
+                        headers={"Authorization": f"Bearer {openai_key}"}, timeout=10)
+            if r.status_code == 200:
+                n = len(r.json().get("data", []))
+                results["openai"] = {"ok": True, "detail": f"{n} models accessible"}
+            elif r.status_code == 401:
+                results["openai"] = {"ok": False, "detail": "401 unauthorized (bad key)"}
+            else:
+                results["openai"] = {"ok": False, "detail": f"HTTP {r.status_code}: {r.text[:200]}"}
+        except Exception as e:
+            results["openai"] = {"ok": False, "detail": str(e)[:200]}
+
+    return jsonify(results)
+
+
 @app.route("/api/fetch_now", methods=["POST"])
 def api_fetch_now():
     threading.Thread(target=run_fetch_cycle, daemon=True).start()

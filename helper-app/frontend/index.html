@@ -231,6 +231,8 @@
       const [info, setInfo] = useState(null);
       const [val, setVal] = useState('');
       const [saved, setSaved] = useState(false);
+      const [test, setTest] = useState(null);
+      const [testing, setTesting] = useState(false);
       const load = () => fetch('/api/settings').then(r => r.json()).then(setInfo);
       useEffect(load, []);
       const save = async () => {
@@ -241,6 +243,28 @@
         load();
         setTimeout(() => setSaved(false), 2000);
       };
+      const runTest = async () => {
+        setTesting(true);
+        setTest(null);
+        try {
+          const r = await fetch('/api/settings/test', { method: 'POST' });
+          setTest(await r.json());
+        } catch (e) {
+          setTest({ error: String(e) });
+        }
+        setTesting(false);
+      };
+      const row = (label, res) => (
+        <div className="trend-stat" style={{ marginBottom: 6 }}>
+          <span style={{ display: 'inline-block', width: 100, fontWeight: 600 }}>{label}</span>
+          {res
+            ? <>
+                <span className={`badge ${res.ok ? 'badge-green' : 'badge-red'}`}>{res.ok ? 'OK' : 'FAIL'}</span>
+                <span style={{ marginLeft: 8 }}>{res.detail}</span>
+              </>
+            : <span className="muted">—</span>}
+        </div>
+      );
       return (
         <div className="card settings-form">
           <h2>Settings</h2>
@@ -253,13 +277,24 @@
             </p>
           )}
           <input type="password" placeholder="sk-…" value={val} onChange={e => setVal(e.target.value)} />
-          <div className="row-flex">
+          <div className="row-flex" style={{ marginTop: 8 }}>
             <button onClick={save} disabled={!val}>Save</button>
             <button onClick={() => fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                                                               body: JSON.stringify({ openai_api_key: '' }) }).then(load)}
                     style={{ background: '#64748b' }}>Clear</button>
             {saved && <span style={{ color: '#10b981' }}>Saved ✓</span>}
           </div>
+          <hr style={{ margin: '1.5rem 0', border: 0, borderTop: '1px solid #e2e8f0' }} />
+          <h3 style={{ marginTop: 0 }}>Test credentials</h3>
+          <p className="muted">Live-checks that .env keys actually work against Cloudflare and OpenAI.</p>
+          <button onClick={runTest} disabled={testing}>{testing ? 'Testing…' : 'Run test'}</button>
+          {test && !test.error && (
+            <div style={{ marginTop: 12 }}>
+              {row('Cloudflare', test.cloudflare)}
+              {row('OpenAI', test.openai)}
+            </div>
+          )}
+          {test && test.error && <p style={{ color: '#dc2626' }}>{test.error}</p>}
         </div>
       );
     }
