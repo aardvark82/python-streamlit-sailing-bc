@@ -22,7 +22,7 @@ from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from . import db, reconcile, settings, usage
+from . import cleanup, db, reconcile, settings, usage
 from .buoy_fetcher import BUOYS, BUOY_BY_ID, fetch_buoy
 from .envutil import getenv_ci
 from .kv_client import read_history, write_reading, VAN_TZ, invalidate_history
@@ -317,6 +317,14 @@ def api_reconcile_sync_all():
 @app.route("/api/db/stats")
 def api_db_stats():
     return jsonify(db.stats())
+
+
+@app.route("/api/cleanup/old", methods=["POST"])
+def api_cleanup_old():
+    body = request.get_json(silent=True) or {}
+    months = int(body.get("months", 3))
+    result = cleanup.cleanup_older_than(BUOYS, months=months)
+    return jsonify(result)
 
 
 @app.route("/api/health")

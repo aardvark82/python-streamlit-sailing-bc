@@ -492,6 +492,54 @@
 
           <hr style={{ margin: '1.5rem 0', border: 0, borderTop: '1px solid #e2e8f0' }} />
           <UsageBlock />
+
+          <hr style={{ margin: '1.5rem 0', border: 0, borderTop: '1px solid #e2e8f0' }} />
+          <CleanupBlock />
+        </div>
+      );
+    }
+
+    function CleanupBlock() {
+      const [busy, setBusy] = useState(false);
+      const [result, setResult] = useState(null);
+      const run = async () => {
+        if (!confirm('Permanently delete every reading older than 3 months from BOTH Cloudflare KV and the local SQLite database? This cannot be undone.')) return;
+        setBusy(true);
+        setResult(null);
+        try {
+          const r = await fetch('/api/cleanup/old', { method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ months: 3 }) });
+          setResult(await r.json());
+        } catch (e) {
+          setResult({ error: String(e) });
+        }
+        setBusy(false);
+      };
+      return (
+        <div>
+          <h3 style={{ marginTop: 0 }}>Clean up old data</h3>
+          <p className="muted">
+            Delete every reading older than 3 months from both Cloudflare KV and local SQLite.
+            Frees KV storage (keeps you well under the 1GB free-tier cap) and trims the dashboard's
+            historical scope. Deletes are bulk (one HTTP call per buoy) but still count against
+            the 1,000/day delete cap — typically well under that.
+          </p>
+          <button onClick={run} disabled={busy} style={{ background: '#dc2626' }}>
+            {busy ? 'Cleaning…' : '🗑 Delete data older than 3 months'}
+          </button>
+          {result && !result.error && (
+            <div style={{ marginTop: 12 }}>
+              {Object.entries(result).map(([bid, r]) => (
+                <div key={bid} className="trend-stat" style={{ marginBottom: 4 }}>
+                  <strong>{r.name}</strong>: removed {r.kv_deleted} KV keys, {r.db_deleted} DB rows
+                  {r.error && <span style={{ color: '#dc2626' }}> — error: {r.error}</span>}
+                  <span className="muted" style={{ marginLeft: 8, fontSize: '0.78rem' }}>(cutoff {r.cutoff})</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {result && result.error && <p style={{ color: '#dc2626' }}>{result.error}</p>}
         </div>
       );
     }
