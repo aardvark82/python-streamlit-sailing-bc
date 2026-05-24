@@ -19,6 +19,7 @@ VOLUME ["/data"]
 
 EXPOSE 5111
 
-# Single gunicorn worker — APScheduler is in-process, multi-worker would
-# duplicate the cron and write multiple times per slot.
-CMD ["gunicorn", "-w", "1", "-b", "0.0.0.0:5111", "--timeout", "60", "backend.app:app"]
+# Single worker (APScheduler is in-process — multi-worker would duplicate
+# the cron). --threads 8 lets us serve concurrent requests so one slow
+# endpoint can't freeze the whole UI.
+CMD ["gunicorn", "-w", "1", "--threads", "8", "-b", "0.0.0.0:5111", "--timeout", "60", "backend.app:app"]
