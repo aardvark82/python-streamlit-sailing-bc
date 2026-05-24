@@ -13,12 +13,15 @@ from typing import Optional
 import requests
 from bs4 import BeautifulSoup
 
-# Buoy registry — id, human name, whether the station reports waves
+# Buoy registry — id, human name, whether the station reports waves.
+# Order drives the UI: first entry = default location for Log/Graph,
+# first card on Trends/Reconcile. Pam Rocks is the primary signal for
+# the user's sailing-decision workflow.
 BUOYS = [
+    {"id": "WAS",   "name": "Pam Rocks",      "waves": False},
     {"id": "46146", "name": "Halibut Bank",   "waves": True},
     {"id": "46304", "name": "English Bay",    "waves": True},
     {"id": "WSB",   "name": "Point Atkinson", "waves": False},
-    {"id": "WAS",   "name": "Pam Rocks",      "waves": False},
 ]
 BUOY_BY_ID = {b["id"]: b for b in BUOYS}
 
