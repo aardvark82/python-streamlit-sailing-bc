@@ -9,7 +9,7 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 
-from utils import cached_fetch_url, cached_fetch_url_live
+from utils import cached_fetch_url, cached_fetch_url_live, cached_fetch_url_buoy
 from fetch_weather import fetch_from_open_weather
 from fetch_forecast import (
     fetch_beautifulsoup_marine_forecast_for_url,
@@ -67,7 +67,9 @@ def _fetch_buoy_wind_wave(buoy_id='46304'):
         f'?mapID=02&siteID=14305&stationID={buoy_id}'
     )
     try:
-        res = cached_fetch_url_live(url)
+        # Buoys publish hourly — 15-min cache (vs the old 3-min live cache)
+        # cuts default-page scrape frequency ~5×.
+        res = cached_fetch_url_buoy(url)
         soup = BeautifulSoup(res.content, 'html.parser')
         table = soup.find('table', class_='table')
         if not table or not table.tbody:

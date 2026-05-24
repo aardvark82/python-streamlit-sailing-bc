@@ -30,9 +30,9 @@ from fetch_weather import display_weather_info, display_clear_skies_html
 from fetch_tides import display_point_atkinson_tides
 from wind_utils import create_arrow_html
 from fetch_gonogo import display_gonogo_sidebar, display_gonogo_page, display_kiosk_page
-from fetch_whales import display_whales_page
-from fetch_whales2 import display_whales2_page
-from fetch_alex import display_alex_page, display_iot_usage_page
+# fetch_whales*, fetch_alex are LAZY-imported inside their page functions —
+# they each pull in heavy deps (websocket-client, mapbox helpers, plotly
+# extras). Default Go/No-Go landing should not pay that cost.
 from pathlib import Path
 
 # Read version from VERSION file
@@ -112,7 +112,15 @@ def page_dashboard():
     except Exception as e:
         st.error(f"Failed to load clear skies: {e}")
 
+    # Three forecast summaries — pre-warm the underlying HTTP cache in
+    # parallel so the sequential render below hits warm caches and feels
+    # instant. We only parallelize the fetch, not the render, because
+    # Streamlit DeltaGenerators aren't thread-safe.
     try:
+        from concurrent.futures import ThreadPoolExecutor
+        forecast_urls = [URL_FORECAST_HOWESOUND, URL_FORECAST_SOUTH_NANAIMO, URL_FORECAST_NORTH_NANAIMO]
+        with ThreadPoolExecutor(max_workers=3) as ex:
+            list(ex.map(cached_fetch_url, forecast_urls))
         display_summary_marine_forecast_for_url(draw=st, url=URL_FORECAST_HOWESOUND, title="Howe Sound")
         display_summary_marine_forecast_for_url(draw=st, url=URL_FORECAST_SOUTH_NANAIMO, title="South of Nanaimo")
         display_summary_marine_forecast_for_url(draw=st, url=URL_FORECAST_NORTH_NANAIMO, title="North of Nanaimo")
@@ -171,6 +179,7 @@ def page_pamrocks():
 
 def page_whales():
     try:
+        from fetch_whales import display_whales_page
         display_whales_page(container=st)
     except Exception as e:
         st.error(f"Failed to load whale tracker: {e}")
@@ -178,6 +187,7 @@ def page_whales():
 
 def page_whales2():
     try:
+        from fetch_whales2 import display_whales2_page
         display_whales2_page(container=st)
     except Exception as e:
         st.error(f"Failed to load whale tracker 2: {e}")
@@ -185,6 +195,7 @@ def page_whales2():
 
 def page_alex():
     try:
+        from fetch_alex import display_alex_page
         display_alex_page(container=st)
     except Exception as e:
         st.error(f"Failed to load Alex Location: {e}")
@@ -192,6 +203,7 @@ def page_alex():
 
 def page_iot_usage():
     try:
+        from fetch_alex import display_iot_usage_page
         display_iot_usage_page(container=st)
     except Exception as e:
         st.error(f"Failed to load IoT Usage: {e}")
