@@ -16,6 +16,7 @@ from typing import Optional
 import requests
 import pytz
 
+from . import usage
 from .envutil import getenv_ci
 
 VAN_TZ = pytz.timezone("America/Vancouver")
@@ -56,6 +57,7 @@ def write_reading(buoy_id: str, wind_speed: float, direction: Optional[str],
     for k, v in keys.items():
         r = requests.put(f"{base}/values/{quote(k, safe='')}", headers=headers, data=v, timeout=15)
         r.raise_for_status()
+        usage.record("write")
     return ts
 
 
@@ -69,6 +71,7 @@ def _list_keys(prefix: str, limit: int = 1000):
             params["cursor"] = cursor
         r = requests.get(f"{base}/keys", params=params, headers=headers, timeout=20)
         r.raise_for_status()
+        usage.record("list")
         body = r.json()
         out.extend(item["name"] for item in body.get("result", []))
         cursor = body.get("result_info", {}).get("cursor")
@@ -80,6 +83,7 @@ def _list_keys(prefix: str, limit: int = 1000):
 def _get(key: str) -> Optional[str]:
     base, headers = _config()
     r = requests.get(f"{base}/values/{quote(key, safe='')}", headers=headers, timeout=15)
+    usage.record("read")
     if r.status_code == 200:
         return r.text
     return None

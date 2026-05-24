@@ -22,7 +22,7 @@ from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from . import settings
+from . import settings, usage
 from .buoy_fetcher import BUOYS, BUOY_BY_ID, fetch_buoy
 from .envutil import getenv_ci
 from .kv_client import read_history, write_reading, VAN_TZ
@@ -246,6 +246,11 @@ def api_settings_test():
 def api_fetch_now():
     threading.Thread(target=run_fetch_cycle, daemon=True).start()
     return jsonify(ok=True, message="fetch cycle started")
+
+
+@app.route("/api/usage")
+def api_usage():
+    return jsonify(usage.snapshot())
 
 
 @app.route("/api/health")
