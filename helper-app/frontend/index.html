@@ -63,6 +63,26 @@
   <script type="text/babel">
     const { useState, useEffect, useRef } = React;
 
+    // Catches render errors in any child so one bad view doesn't blank
+    // the whole app. Shows the error inline + a reset button.
+    class ErrorBoundary extends React.Component {
+      constructor(p) { super(p); this.state = { err: null }; }
+      static getDerivedStateFromError(err) { return { err }; }
+      componentDidCatch(err, info) { console.error('ErrorBoundary caught:', err, info); }
+      render() {
+        if (this.state.err) {
+          return (
+            <div className="card" style={{ border: '1px solid #fecaca', background: '#fef2f2' }}>
+              <h3 style={{ marginTop: 0, color: '#991b1b' }}>UI error</h3>
+              <pre style={{ whiteSpace: 'pre-wrap', fontSize: '0.85rem' }}>{String(this.state.err)}</pre>
+              <button onClick={() => this.setState({ err: null })}>Reset view</button>
+            </div>
+          );
+        }
+        return this.props.children;
+      }
+    }
+
     function badgeForWind(kts) {
       if (kts == null) return null;
       if (kts < 10) return <span className="badge badge-green">{kts} kts</span>;
@@ -119,10 +139,12 @@
                 ))}
               </div>
             )}
-            {view === 'log' && activeLoc && <LogView locationId={activeLoc} />}
-            {view === 'graph' && activeLoc && <GraphView locationId={activeLoc} />}
-            {view === 'trends' && <TrendsView locations={locations} />}
-            {view === 'settings' && <SettingsView />}
+            <ErrorBoundary key={view + ':' + (activeLoc || '')}>
+              {view === 'log' && activeLoc && <LogView locationId={activeLoc} />}
+              {view === 'graph' && activeLoc && <GraphView locationId={activeLoc} />}
+              {view === 'trends' && <TrendsView locations={locations} />}
+              {view === 'settings' && <SettingsView />}
+            </ErrorBoundary>
           </div>
           {toast && <div className="toast">{toast}</div>}
         </div>
@@ -136,6 +158,7 @@
         fetch(`/api/log?location=${locationId}&limit=12`).then(r => r.json()).then(setRows);
       }, [locationId]);
       if (rows === null) return <p className="muted">Loading…</p>;
+      if (!Array.isArray(rows)) return <p style={{ color: '#dc2626' }}>API error: {JSON.stringify(rows)}</p>;
       if (!rows.length) return <p className="muted">No readings yet.</p>;
       return (
         <div className="card">
