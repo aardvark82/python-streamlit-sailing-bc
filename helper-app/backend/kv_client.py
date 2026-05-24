@@ -8,7 +8,9 @@ _fetch_buoy_wind_history_df):
 """
 from __future__ import annotations
 
+import logging
 import os
+import time as _time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from urllib.parse import quote
@@ -19,6 +21,8 @@ import pytz
 
 from . import usage
 from .envutil import getenv_ci
+
+log = logging.getLogger("helper.kv")
 
 VAN_TZ = pytz.timezone("America/Vancouver")
 
@@ -84,9 +88,12 @@ def write_reading(buoy_id: str, wind_speed: float, direction: Optional[str],
 
 def _list_keys(prefix: str, limit: int = 1000):
     base, headers = _config()
+    t0 = _time.time()
     out = []
     cursor = None
+    pages = 0
     while True:
+        pages += 1
         params = {"prefix": prefix, "limit": limit}
         if cursor:
             params["cursor"] = cursor
@@ -98,6 +105,7 @@ def _list_keys(prefix: str, limit: int = 1000):
         cursor = body.get("result_info", {}).get("cursor")
         if not cursor:
             break
+    log.info("_list_keys prefix=%r → %d keys in %d pages, %.2fs", prefix, len(out), pages, _time.time() - t0)
     return out
 
 
@@ -137,6 +145,23 @@ def invalidate_history(buoy_id: Optional[str] = None):
                     del _hist_cache[k]
 
 
+def _list_recent_wind_keys(buoy_id: str, want_n: int, max_days_back: int = 7) -> list[str]:
+    """List wind-keys for `buoy_id` walking backwards day-by-day until we
+    have at least `want_n` keys (or hit `max_days_back`). Uses a narrow
+    date-prefix on each list call so we never paginate through the buoy's
+    full history just to find the tail. ISO keys are sort-safe.
+    """
+    out: list[str] = []
+    now = datetime.now(VAN_TZ)
+    for offset in range(max_days_back):
+        day = (now - timedelta(days=offset)).strftime("%Y-%m-%d")
+        prefix = f"{buoy_id}_wind_{day}"
+        out.extend(_list_keys(prefix))
+        if len(out) >= want_n:
+            break
+    return sorted(out)
+
+
 def read_history(buoy_id: str, days_back: int = 14,
                  fields: tuple[str, ...] = ("wind", "direction", "wave"),
                  last_n: Optional[int] = None) -> list[dict]:
@@ -157,12 +182,20 @@ def read_history(buoy_id: str, days_back: int = 14,
     with _hist_lock:
         hit = _hist_cache.get(cache_key)
         if hit and (now_ts - hit[0]) < _HIST_TTL_SEC:
+            log.info("read_history %s cache HIT (%d rows)", buoy_id, len(hit[1]))
             return hit[1]
+    t0 = _time.time()
 
     cutoff = datetime.now(VAN_TZ) - timedelta(days=days_back)
-    # ISO-format keys sort chronologically as strings, so we can pick the
-    # tail without parsing every timestamp first.
-    wind_keys = sorted(_list_keys(f"{buoy_id}_wind_"))
+    # Fast path: when caller only wants the last N readings, walk back
+    # day-by-day with a date-narrowed prefix instead of listing the
+    # buoy's full history (which could be thousands of keys → multi-second
+    # pagination). Otherwise fall back to full list.
+    if last_n is not None:
+        wind_keys = _list_recent_wind_keys(buoy_id, want_n=last_n,
+                                             max_days_back=max(1, days_back))
+    else:
+        wind_keys = sorted(_list_keys(f"{buoy_id}_wind_"))
 
     # First pass: filter to in-window timestamps
     triples = []   # (ts, ts_str)
@@ -216,4 +249,6 @@ def read_history(buoy_id: str, days_back: int = 14,
     out.sort(key=lambda r: r["timestamp"])
     with _hist_lock:
         _hist_cache[cache_key] = (now_ts, out)
+    log.info("read_history %s days=%s last_n=%s fields=%s → %d rows in %.2fs (%d kv reads)",
+             buoy_id, days_back, last_n, fields, len(out), _time.time() - t0, len(fetch_keys))
     return out
