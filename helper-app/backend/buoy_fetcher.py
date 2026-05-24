@@ -6,22 +6,26 @@ Sources: Environment Canada marine current-conditions HTML pages.
 """
 from __future__ import annotations
 
+import io
 import re
 from dataclasses import dataclass
 from typing import Optional
 
+import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 
-# Buoy registry — id, human name, whether the station reports waves.
+# Station registry — id, human name, whether the station reports waves,
+# optional source override (defaults to weather.gc.ca buoy).
 # Order drives the UI: first entry = default location for Log/Graph,
 # first card on Trends/Reconcile. Pam Rocks is the primary signal for
 # the user's sailing-decision workflow.
 BUOYS = [
-    {"id": "WAS",   "name": "Pam Rocks",      "waves": False},
-    {"id": "46146", "name": "Halibut Bank",   "waves": True},
-    {"id": "46304", "name": "English Bay",    "waves": True},
-    {"id": "WSB",   "name": "Point Atkinson", "waves": False},
+    {"id": "WAS",     "name": "Pam Rocks",     "waves": False},
+    {"id": "46146",   "name": "Halibut Bank",  "waves": True},
+    {"id": "46304",   "name": "English Bay",   "waves": True},
+    {"id": "WSB",     "name": "Point Atkinson", "waves": False},
+    {"id": "JERICHO", "name": "Jericho Wind",  "waves": False, "source": "jericho"},
 ]
 BUOY_BY_ID = {b["id"]: b for b in BUOYS}
 
@@ -67,10 +71,60 @@ def _parse_wave_m(text: str) -> Optional[float]:
         return None
 
 
+def _fetch_jericho() -> BuoyReading:
+    """Davis weather station CSV from JSCA. Parsing identical to main app's
+    parseJerichoWindHistory so values are interchangeable. Wind speed and
+    high-speed columns are treated as the highest reading in the last row
+    (same convention as buoy parsing — _parse_wind picks max of all ints)."""
+    url = "https://jsca.bc.ca/main/downld02.txt"
+    r = requests.get(url, headers={
+        "User-Agent": USER_AGENT,
+        "Accept": "text/plain, text/csv, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+    }, timeout=25)
+    r.raise_for_status()
+
+    csv_raw = r.content.decode("utf-8")
+    csv_fixed = "\n".join(csv_raw.splitlines()[3:])
+    column_names = [
+        "Date", "Time", "Temp Out", "Temp Hi", "Temp Low", "Hum Out",
+        "Dew Pt.", "Wind Speed", "Wind Dir", "Wind Run", "Wind Hi Speed",
+        "Wind Hi Dir", "Wind Chill", "Heat Index", "THW Index", "Bar",
+        "Rain", "Rain Rate", "Heat D-D", "Cool D-D", "In Temp", "In Hum",
+        "In Dew", "In Heat", "In EMC", "In Air Density", "Wind Samp",
+        "Wind TX", "IS Recept.", "Arc Int",
+    ]
+    df = pd.read_csv(io.StringIO(csv_fixed), header=None, names=column_names,
+                     sep=r"\s+", engine="python", on_bad_lines="skip")
+    last = df.iloc[-1]
+    try:
+        wind = float(last["Wind Speed"])
+        hi = float(last["Wind Hi Speed"])
+        wind_speed = int(round(max(wind, hi)))
+    except (ValueError, TypeError):
+        wind_speed = 0
+    direction = str(last["Wind Dir"]).strip() or None
+    wind_text = f"{direction or '?'} {last['Wind Speed']} hi {last['Wind Hi Speed']}"
+    return BuoyReading(
+        buoy_id="JERICHO",
+        name="Jericho Wind",
+        issued_time=f"{last['Date']} {last['Time']}",
+        wind_text=wind_text,
+        direction=direction,
+        wind_speed=wind_speed,
+        wave_height_m=None,
+        air_temp=str(last["Temp Out"]) + "°C" if "Temp Out" in last else None,
+        water_temp=None,
+        wave_period_s=None,
+    )
+
+
 def fetch_buoy(buoy_id: str) -> BuoyReading:
-    """Scrape weather.gc.ca current-conditions HTML — same URL and table
-    structure used by st.py::refreshBuoy."""
+    """Dispatch by source — gc.ca buoys by default, jericho for JSCA CSV."""
     meta = BUOY_BY_ID[buoy_id]
+    if meta.get("source") == "jericho":
+        return _fetch_jericho()
+
     url = (
         "https://www.weather.gc.ca/marine/weatherConditions-currentConditions_e.html"
         f"?mapID=02&siteID=14305&stationID={buoy_id}"
