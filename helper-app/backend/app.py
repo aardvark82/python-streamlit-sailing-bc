@@ -334,9 +334,10 @@ def api_wave_model():
 def api_wave_model_predict():
     bid = request.args.get("location")
     wind = float(request.args.get("wind_kts", 0))
+    direction = request.args.get("direction")
     if bid not in BUOY_BY_ID:
         return jsonify(error="unknown location"), 400
-    return jsonify(wave_model.predict(bid, wind) or {"error": "model not available"})
+    return jsonify(wave_model.predict(bid, wind, direction) or {"error": "model not available"})
 
 
 @app.route("/api/cleanup/old", methods=["POST"])

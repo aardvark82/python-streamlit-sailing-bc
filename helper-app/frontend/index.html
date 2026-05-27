@@ -334,8 +334,22 @@
     function WaveModelView() {
       const [data, setData] = useState(null);
       const [wind, setWind] = useState(15);
+      const [dir, setDir] = useState('');
+      const BANDS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
       const load = () => fetch('/api/wave_model').then(r => r.json()).then(setData);
       useEffect(load, []);
+
+      const predict = (m) => {
+        const band = dir;
+        const bb = band && m.by_direction && m.by_direction[band] && m.by_direction[band].fitted
+          ? m.by_direction[band] : null;
+        const slope = bb ? bb.slope_m_per_kt2 : m.best.slope_m_per_kt2;
+        const inter = bb ? bb.intercept_m   : m.best.intercept_m;
+        const r2    = bb ? bb.r2            : m.best.r2;
+        const cm = Math.max(0, (slope * wind * wind + inter) * 100);
+        return { cm, r2, source: bb ? `direction-specific (${band})` : 'global fit' };
+      };
+
       if (!data) return <p className="muted">Fitting…</p>;
       return (
         <div>
@@ -379,12 +393,56 @@
                     <strong style={{ marginRight: 8 }}>Predict for wind =</strong>
                     <input type="number" min="0" max="50" value={wind}
                            onChange={e => setWind(parseFloat(e.target.value) || 0)}
-                           style={{ width: 70, padding: 4 }} /> kts →&nbsp;
-                    <strong style={{ color: '#1d4ed8' }}>
-                      {Math.max(0, m.best.slope_m_per_kt2 * wind * wind + m.best.intercept_m).toFixed(2)} m
-                      &nbsp;({Math.max(0, (m.best.slope_m_per_kt2 * wind * wind + m.best.intercept_m) * 100).toFixed(0)} cm)
-                    </strong>
+                           style={{ width: 70, padding: 4 }} /> kts
+                    &nbsp;from&nbsp;
+                    <select value={dir} onChange={e => setDir(e.target.value)} style={{ padding: 4 }}>
+                      <option value="">(any / global)</option>
+                      {BANDS.map(b => <option key={b} value={b}>{b}</option>)}
+                    </select>
+                    {' → '}
+                    {(() => {
+                      const p = predict(m);
+                      return (
+                        <>
+                          <strong style={{ color: '#1d4ed8' }}>{(p.cm/100).toFixed(2)} m ({p.cm.toFixed(0)} cm)</strong>
+                          <span className="muted" style={{ marginLeft: 8, fontSize: '0.8rem' }}>
+                            via {p.source}, R²={p.r2.toFixed(2)}
+                          </span>
+                        </>
+                      );
+                    })()}
                   </div>
+                  <details style={{ marginTop: 8 }}>
+                    <summary className="muted" style={{ cursor: 'pointer', fontSize: '0.85rem' }}>
+                      By wind direction (lag {m.best.lag_hours}h)
+                      {m.weighted_r2_across_directions != null && (
+                        <span style={{ marginLeft: 8 }}>— weighted R² = <strong>{m.weighted_r2_across_directions.toFixed(2)}</strong></span>
+                      )}
+                    </summary>
+                    <table className="log-table" style={{ marginTop: 6 }}>
+                      <thead><tr><th>dir</th><th>n</th><th>slope</th><th>intercept</th><th>R²</th><th>fetch fx</th></tr></thead>
+                      <tbody>
+                        {BANDS.map(b => {
+                          const bb = m.by_direction[b] || { n_pairs: 0, fitted: false };
+                          if (!bb.fitted) return (
+                            <tr key={b}><td>{b}</td><td>{bb.n_pairs}</td>
+                              <td colSpan="4" className="muted">— not enough data —</td></tr>
+                          );
+                          const fetchPct = (bb.slope_m_per_kt2 / 0.00566 * 100).toFixed(0);
+                          return (
+                            <tr key={b}>
+                              <td><strong>{b}</strong></td>
+                              <td>{bb.n_pairs}</td>
+                              <td>{bb.slope_m_per_kt2.toFixed(5)}</td>
+                              <td>{bb.intercept_m.toFixed(3)}</td>
+                              <td>{bb.r2.toFixed(3)}</td>
+                              <td>{fetchPct}%</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </details>
                   <details style={{ marginTop: 8 }}>
                     <summary className="muted" style={{ cursor: 'pointer', fontSize: '0.85rem' }}>R² by lag</summary>
                     <table className="log-table" style={{ marginTop: 6 }}>
