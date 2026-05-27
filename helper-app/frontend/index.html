@@ -159,13 +159,14 @@
             <button className={`nav-btn ${view === 'graph' ? 'active' : ''}`} onClick={() => setView('graph')}>Graph</button>
             <button className={`nav-btn ${view === 'log' ? 'active' : ''}`} onClick={() => setView('log')}>Log</button>
             <button className={`nav-btn ${view === 'trends' ? 'active' : ''}`} onClick={() => setView('trends')}>Trends</button>
+            <button className={`nav-btn ${view === 'wave' ? 'active' : ''}`} onClick={() => setView('wave')}>Wave Model</button>
             <button className={`nav-btn ${view === 'reconcile' ? 'active' : ''}`} onClick={() => setView('reconcile')}>Reconcile</button>
             <div className="nav-section">Admin</div>
             <button className="nav-btn" onClick={triggerFetch}>Fetch now</button>
             <button className={`nav-btn ${view === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')}>Settings</button>
           </div>
           <div className="main">
-            {view !== 'settings' && view !== 'trends' && view !== 'reconcile' && (
+            {view !== 'settings' && view !== 'trends' && view !== 'reconcile' && view !== 'wave' && (
               <div className="location-tabs">
                 {locations.map(l => (
                   <button key={l.id} className={activeLoc === l.id ? 'active' : ''}
@@ -177,6 +178,7 @@
               {view === 'log' && activeLoc && <LogView locationId={activeLoc} />}
               {view === 'graph' && activeLoc && <GraphView locationId={activeLoc} />}
               {view === 'trends' && <TrendsView locations={locations} />}
+              {view === 'wave' && <WaveModelView />}
               {view === 'reconcile' && <ReconcileView locations={locations} />}
               {view === 'settings' && <SettingsView />}
             </ErrorBoundary>
@@ -325,6 +327,85 @@
               </div>
             );
           })}
+        </div>
+      );
+    }
+
+    function WaveModelView() {
+      const [data, setData] = useState(null);
+      const [wind, setWind] = useState(15);
+      const load = () => fetch('/api/wave_model').then(r => r.json()).then(setData);
+      useEffect(load, []);
+      if (!data) return <p className="muted">Fitting…</p>;
+      return (
+        <div>
+          <h2>Wave height model</h2>
+          <p className="muted">Empirically fits <code>wave_m ≈ a · wind_kts² + b</code> against your stored
+            buoy data, sweeping lags 0–12h to find the wind→wave delay. Physics ref: fully-developed open-ocean
+            seas give slope ≈ 0.00566 m/kt² (SMB / Pierson-Moskowitz). Lower slope here = fetch-limited basin.</p>
+          {Object.entries(data).map(([bid, m]) => (
+            <div key={bid} className="card">
+              <h3 style={{ marginTop: 0 }}>{m.name} <span className="muted" style={{ fontSize: '0.85rem' }}>({bid})</span></h3>
+              {m.error ? (
+                <p style={{ color: '#dc2626' }}>{m.error}</p>
+              ) : (
+                <>
+                  <p style={{ fontSize: '1.1rem', fontWeight: 600,
+                                background: '#f0fdf4', border: '1px solid #86efac',
+                                padding: '0.6rem 0.9rem', borderRadius: 6, fontFamily: 'ui-monospace, monospace' }}>
+                    {m.formula}
+                  </p>
+                  <div className="trend-grid">
+                    <div className="trend-cell">
+                      <h4>Best lag</h4>
+                      <div className="trend-stat"><strong>{m.best.lag_hours}h</strong></div>
+                      <div className="muted" style={{ fontSize: '0.78rem' }}>(wind→wave delay)</div>
+                    </div>
+                    <div className="trend-cell">
+                      <h4>R²</h4>
+                      <div className="trend-stat"><strong>{m.best.r2.toFixed(3)}</strong></div>
+                      <div className="muted" style={{ fontSize: '0.78rem' }}>fit quality</div>
+                    </div>
+                    <div className="trend-cell">
+                      <h4>Fetch effect</h4>
+                      <div className="trend-stat"><strong>{m.fetch_limit_pct_of_open_ocean}%</strong></div>
+                      <div className="muted" style={{ fontSize: '0.78rem' }}>of open-ocean SMB slope</div>
+                    </div>
+                  </div>
+                  <p className="muted" style={{ marginTop: 10, fontSize: '0.85rem' }}>
+                    Fit on {m.best.n_pairs} hourly pairs from {m.n_hourly_rows} bucketed readings.
+                  </p>
+                  <div style={{ marginTop: 10, padding: 10, background: '#f8fafc', borderRadius: 6 }}>
+                    <strong style={{ marginRight: 8 }}>Predict for wind =</strong>
+                    <input type="number" min="0" max="50" value={wind}
+                           onChange={e => setWind(parseFloat(e.target.value) || 0)}
+                           style={{ width: 70, padding: 4 }} /> kts →&nbsp;
+                    <strong style={{ color: '#1d4ed8' }}>
+                      {Math.max(0, m.best.slope_m_per_kt2 * wind * wind + m.best.intercept_m).toFixed(2)} m
+                      &nbsp;({Math.max(0, (m.best.slope_m_per_kt2 * wind * wind + m.best.intercept_m) * 100).toFixed(0)} cm)
+                    </strong>
+                  </div>
+                  <details style={{ marginTop: 8 }}>
+                    <summary className="muted" style={{ cursor: 'pointer', fontSize: '0.85rem' }}>R² by lag</summary>
+                    <table className="log-table" style={{ marginTop: 6 }}>
+                      <thead><tr><th>lag (h)</th><th>n</th><th>slope</th><th>intercept</th><th>R²</th></tr></thead>
+                      <tbody>
+                        {m.all_lags.map(l => (
+                          <tr key={l.lag_hours} style={l.lag_hours === m.best.lag_hours ? { background: '#dcfce7', fontWeight: 600 } : {}}>
+                            <td>{l.lag_hours}</td><td>{l.n_pairs}</td>
+                            <td>{l.slope_m_per_kt2.toFixed(5)}</td>
+                            <td>{l.intercept_m.toFixed(3)}</td>
+                            <td>{l.r2.toFixed(3)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </details>
+                </>
+              )}
+            </div>
+          ))}
+          <button onClick={load}>Refit</button>
         </div>
       );
     }

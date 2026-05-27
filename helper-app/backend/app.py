@@ -22,7 +22,7 @@ from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from . import cleanup, db, reconcile, settings, usage
+from . import cleanup, db, reconcile, settings, usage, wave_model
 from .buoy_fetcher import BUOYS, BUOY_BY_ID, fetch_buoy
 from .envutil import getenv_ci
 from .kv_client import read_history, write_reading, VAN_TZ, invalidate_history
@@ -317,6 +317,26 @@ def api_reconcile_sync_all():
 @app.route("/api/db/stats")
 def api_db_stats():
     return jsonify(db.stats())
+
+
+@app.route("/api/wave_model")
+def api_wave_model():
+    """Fit wave_m ≈ a·wind² + b at the best lag for each waves-bearing buoy."""
+    out = {}
+    for meta in BUOYS:
+        if not meta.get("waves"):
+            continue
+        out[meta["id"]] = {"name": meta["name"], **wave_model.fit(meta["id"])}
+    return jsonify(out)
+
+
+@app.route("/api/wave_model/predict")
+def api_wave_model_predict():
+    bid = request.args.get("location")
+    wind = float(request.args.get("wind_kts", 0))
+    if bid not in BUOY_BY_ID:
+        return jsonify(error="unknown location"), 400
+    return jsonify(wave_model.predict(bid, wind) or {"error": "model not available"})
 
 
 @app.route("/api/cleanup/old", methods=["POST"])
