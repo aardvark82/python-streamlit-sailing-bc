@@ -517,9 +517,27 @@ def _fetch_buoy_wind_history_df(container, buoy_id, days_back=3):
             return None
 
         all_keys = [item["name"] for item in data.get("result", [])]
-        cutoff = datetime.now(pytz.timezone('America/Vancouver')) - pd.Timedelta(days=days_back)
+        now_van = datetime.now(pytz.timezone('America/Vancouver'))
+        cutoff = now_van - pd.Timedelta(days=days_back)
 
-        # First pass: filter to in-window keys + extract timestamps
+        # Downsample older history to cut KV reads ~5× without losing
+        # recent detail:
+        #   0-12h ago:   every hour       (full granularity matters here)
+        #   12-24h ago:  every 2 hours
+        #   24-72h ago:  every 4 hours
+        # Stored keys are 30-min slots, so we keep only minute==0 entries
+        # and additionally filter on the hour modulo per band.
+        def _keep(ts):
+            if ts.minute != 0:
+                return False
+            hours_ago = (now_van - ts).total_seconds() / 3600.0
+            if hours_ago < 12:
+                return True
+            if hours_ago < 24:
+                return ts.hour % 2 == 0
+            return ts.hour % 4 == 0
+
+        # First pass: filter to in-window + downsampled keys
         wanted = []  # list of (timestamp, ts_str)
         for key in all_keys:
             if not key.startswith(f"{buoy_id}_wind_"):
@@ -530,6 +548,8 @@ def _fetch_buoy_wind_history_df(container, buoy_id, days_back=3):
             except ValueError:
                 continue
             if ts < cutoff:
+                continue
+            if not _keep(ts):
                 continue
             wanted.append((ts, ts_str))
 
