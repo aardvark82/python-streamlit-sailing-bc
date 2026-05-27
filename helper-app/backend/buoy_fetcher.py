@@ -97,14 +97,21 @@ def _fetch_jericho() -> BuoyReading:
     df = pd.read_csv(io.StringIO(csv_fixed), header=None, names=column_names,
                      sep=r"\s+", engine="python", on_bad_lines="skip")
     last = df.iloc[-1]
+    # Jericho is a Davis weather station — 'Wind Speed' is sustained (the
+    # primary value for sailing decisions); 'Wind Hi Speed' is the in-arc
+    # peak gust. Always store sustained as wind_speed for consistency with
+    # the buoy pages. Gust goes into wind_text for context only.
     try:
-        wind = float(last["Wind Speed"])
-        hi = float(last["Wind Hi Speed"])
-        wind_speed = int(round(max(wind, hi)))
+        wind_speed = int(round(float(last["Wind Speed"])))
     except (ValueError, TypeError):
         wind_speed = 0
+    try:
+        gust = int(round(float(last["Wind Hi Speed"])))
+    except (ValueError, TypeError):
+        gust = None
     direction = str(last["Wind Dir"]).strip() or None
-    wind_text = f"{direction or '?'} {last['Wind Speed']} hi {last['Wind Hi Speed']}"
+    wind_text = (f"{direction or '?'} {wind_speed}"
+                 + (f" gust {gust}" if gust is not None else ""))
     return BuoyReading(
         buoy_id="JERICHO",
         name="Jericho Wind",
