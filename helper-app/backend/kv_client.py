@@ -205,15 +205,13 @@ def kv_list_timestamps(buoy_id: str) -> set[str]:
 
 
 def kv_fetch_one(buoy_id: str, ts: str) -> dict:
-    """One triplet from KV (used by reconcile sync-from-kv backfill)."""
-    base, headers = _config()
-    keys = [f"{buoy_id}_wind_{ts}",
-            f"{buoy_id}_direction_{ts}",
-            f"{buoy_id}_wave_{ts}"]
-    values = _bulk_get(keys)
-    wind = values.get(keys[0])
-    direction = values.get(keys[1])
-    wave = values.get(keys[2])
+    """One triplet from KV (used by reconcile sync-from-kv backfill).
+    Does its 3 GETs sequentially — reconcile already parallelizes the
+    outer per-timestamp loop 50-wide, so pooling here too would just
+    nest executors."""
+    wind = _get(f"{buoy_id}_wind_{ts}")
+    direction = _get(f"{buoy_id}_direction_{ts}")
+    wave = _get(f"{buoy_id}_wave_{ts}")
     try:
         wind_f = float(wind) if wind is not None else None
     except ValueError:
