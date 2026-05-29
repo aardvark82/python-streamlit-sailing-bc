@@ -22,7 +22,7 @@ from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from . import alexa, cleanup, db, reconcile, settings, usage, wave_model
+from . import alexa, cleanup, db, forecast, reconcile, settings, usage, wave_model
 from .buoy_fetcher import BUOYS, BUOY_BY_ID, fetch_buoy
 from .envutil import getenv_ci
 from .kv_client import read_history, write_reading, VAN_TZ, invalidate_history
@@ -317,6 +317,23 @@ def api_reconcile_sync_all():
 @app.route("/api/db/stats")
 def api_db_stats():
     return jsonify(db.stats())
+
+
+@app.route("/api/forecast")
+def api_forecast():
+    region = request.args.get("region", "howe_sound")
+    return jsonify(forecast.get_forecast(region))
+
+
+@app.route("/api/forecast/gonogo")
+def api_forecast_gonogo():
+    region = request.args.get("region", "howe_sound")
+    return jsonify(forecast.gonogo_from_forecast(region))
+
+
+@app.route("/api/forecast/regions")
+def api_forecast_regions():
+    return jsonify([{"id": k, "name": v["name"]} for k, v in forecast.REGIONS.items()])
 
 
 @app.route("/api/alexa", methods=["GET", "POST"])

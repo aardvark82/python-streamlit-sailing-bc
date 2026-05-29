@@ -159,6 +159,7 @@
             <button className={`nav-btn ${view === 'graph' ? 'active' : ''}`} onClick={() => setView('graph')}>Graph</button>
             <button className={`nav-btn ${view === 'log' ? 'active' : ''}`} onClick={() => setView('log')}>Log</button>
             <button className={`nav-btn ${view === 'trends' ? 'active' : ''}`} onClick={() => setView('trends')}>Trends</button>
+            <button className={`nav-btn ${view === 'forecast' ? 'active' : ''}`} onClick={() => setView('forecast')}>Marine Forecast</button>
             <button className={`nav-btn ${view === 'wave' ? 'active' : ''}`} onClick={() => setView('wave')}>Wave Model</button>
             <button className={`nav-btn ${view === 'alexa' ? 'active' : ''}`} onClick={() => setView('alexa')}>Alexa</button>
             <button className={`nav-btn ${view === 'reconcile' ? 'active' : ''}`} onClick={() => setView('reconcile')}>Reconcile</button>
@@ -167,7 +168,7 @@
             <button className={`nav-btn ${view === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')}>Settings</button>
           </div>
           <div className="main">
-            {view !== 'settings' && view !== 'trends' && view !== 'reconcile' && view !== 'wave' && view !== 'alexa' && (
+            {view !== 'settings' && view !== 'trends' && view !== 'reconcile' && view !== 'wave' && view !== 'alexa' && view !== 'forecast' && (
               <div className="location-tabs">
                 {locations.map(l => (
                   <button key={l.id} className={activeLoc === l.id ? 'active' : ''}
@@ -179,6 +180,7 @@
               {view === 'log' && activeLoc && <LogView locationId={activeLoc} />}
               {view === 'graph' && activeLoc && <GraphView locationId={activeLoc} />}
               {view === 'trends' && <TrendsView locations={locations} />}
+              {view === 'forecast' && <ForecastView />}
               {view === 'wave' && <WaveModelView />}
               {view === 'alexa' && <AlexaView />}
               {view === 'reconcile' && <ReconcileView locations={locations} />}
@@ -329,6 +331,85 @@
               </div>
             );
           })}
+        </div>
+      );
+    }
+
+    function ForecastView() {
+      const [region, setRegion] = useState('howe_sound');
+      const [regions, setRegions] = useState([]);
+      const [fc, setFc] = useState(null);
+      const [gng, setGng] = useState(null);
+      const [loading, setLoading] = useState(false);
+
+      useEffect(() => {
+        fetch('/api/forecast/regions').then(r => r.json()).then(setRegions);
+      }, []);
+      const load = () => {
+        setLoading(true); setFc(null); setGng(null);
+        Promise.all([
+          fetch(`/api/forecast?region=${region}`).then(r => r.json()),
+          fetch(`/api/forecast/gonogo?region=${region}`).then(r => r.json()),
+        ]).then(([f, g]) => { setFc(f); setGng(g); }).finally(() => setLoading(false));
+      };
+      useEffect(load, [region]);
+
+      const badge = (status) => {
+        const map = { go: ['#dcfce7', '#166534', 'GO'], caution: ['#fef9c3', '#854d0e', 'CAUTION'], nogo: ['#fee2e2', '#991b1b', 'NO-GO'] };
+        const [bg, fg, txt] = map[status] || ['#e2e8f0', '#374151', '?'];
+        return <span style={{ background: bg, color: fg, padding: '4px 12px', borderRadius: 999, fontWeight: 700 }}>{txt}</span>;
+      };
+
+      return (
+        <div>
+          <h2>Marine Forecast</h2>
+          <div className="row-flex" style={{ marginBottom: 12 }}>
+            <select value={region} onChange={e => setRegion(e.target.value)} style={{ padding: 6 }}>
+              {regions.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+            <button onClick={load} disabled={loading}>{loading ? 'Loading…' : 'Refresh'}</button>
+          </div>
+
+          {gng && !gng.error && (
+            <div className="card" style={{ borderLeft: '4px solid #1d4ed8' }}>
+              <h3 style={{ marginTop: 0 }}>Forecast Go / No-Go &nbsp; {badge(gng.status)}</h3>
+              <p>Peak wind <strong>{gng.driving_wind_kts} kts</strong>
+                {gng.driving_dir && gng.driving_dir !== 'N/A' ? ` from ${gng.driving_dir}` : ''}
+                {gng.driving_period ? ` around ${gng.driving_period}` : ''}.</p>
+              {gng.strong_wind_warning && <p style={{ color: '#991b1b', fontWeight: 700 }}>⚠ Strong Wind Warning</p>}
+              {gng.wind_warning && !gng.strong_wind_warning && <p style={{ color: '#b45309', fontWeight: 700 }}>⚠ Wind Warning</p>}
+              <p className="muted" style={{ fontSize: '0.82rem' }}>
+                Verdict from the worst upcoming forecast period (not past wind). Thresholds: ≤10 kt GO, ≤15 kt caution.
+              </p>
+            </div>
+          )}
+
+          {fc && fc.error && <div className="card"><p style={{ color: '#dc2626' }}>{fc.error}</p></div>}
+          {fc && !fc.error && (
+            <div className="card">
+              <h3 style={{ marginTop: 0 }}>{fc.name}</h3>
+              {fc.issued && <p className="muted">Issued {new Date(fc.issued).toLocaleString()} · {fc.period}</p>}
+              {fc.ai_error && <p style={{ color: '#b45309' }}>OpenAI parse unavailable ({fc.ai_error}). Showing raw text only — set the key in Settings.</p>}
+              {fc.rows && fc.rows.length > 0 && (
+                <table className="log-table">
+                  <thead><tr><th>Period</th><th>Wind</th><th>Gust</th><th>Dir</th></tr></thead>
+                  <tbody>
+                    {fc.rows.map((r, i) => (
+                      <tr key={i} style={Math.max(r.wind, r.gust) > 15 ? { background: '#fee2e2' } : (Math.max(r.wind, r.gust) > 10 ? { background: '#fef9c3' } : {})}>
+                        <td>{r.time}</td><td>{r.wind} kt</td><td>{r.gust} kt</td><td>{r.dir}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {fc.forecast_text && (
+                <details style={{ marginTop: 10 }}>
+                  <summary className="muted" style={{ cursor: 'pointer' }}>Raw forecast text</summary>
+                  <p style={{ lineHeight: 1.6 }}>{fc.forecast_text}</p>
+                </details>
+              )}
+            </div>
+          )}
         </div>
       );
     }
