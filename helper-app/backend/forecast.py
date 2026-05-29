@@ -35,6 +35,11 @@ REGIONS = {
                       "url": "https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=14305"},
 }
 
+# Model for forecast parsing. gpt-5-nano was tried (v175) but returns
+# unusable/empty CSV for this messy-HTML extraction task — reverted to
+# gpt-5-mini. Change here to switch (openai_log records this name).
+OPENAI_MODEL = "gpt-5-mini"
+
 # Go/No-Go thresholds (knots) — match fetch_gonogo.py / alexa.py
 WIND_GO = 10
 WIND_CAUTION = 15
@@ -126,7 +131,7 @@ def _openai_parse(html: str, reason: str = "forecast parsing") -> str:
     r = requests.post(
         "https://api.openai.com/v1/chat/completions",
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"},
-        json={"model": "gpt-5-nano",
+        json={"model": OPENAI_MODEL,
               "messages": [
                   {"role": "system", "content": "You are an expert meteorologist."},
                   {"role": "user", "content": prompt},
@@ -139,7 +144,7 @@ def _openai_parse(html: str, reason: str = "forecast parsing") -> str:
     try:
         openai_log.record(
             reason=reason,
-            model="gpt-5-nano",
+            model=OPENAI_MODEL,
             prompt_tokens=usage.get("prompt_tokens", 0),
             completion_tokens=usage.get("completion_tokens", 0),
         )
@@ -165,12 +170,14 @@ def _csv_to_rows(csv_text: str) -> list[dict]:
 
     rows = []
     for _, r in df.iterrows():
-        rows.append({
-            "time": str(r.get("time", "")).strip(),
-            "wind": num(r.get("wind speed", r.get("wind_speed", 0))),
-            "gust": num(r.get("max wind speed", r.get("max_wind_speed", 0))),
-            "dir": str(r.get("wind direction", r.get("wind_direction", ""))).strip().upper(),
-        })
+        time = str(r.get("time", "")).strip()
+        wind = num(r.get("wind speed", r.get("wind_speed", 0)))
+        gust = num(r.get("max wind speed", r.get("max_wind_speed", 0)))
+        dirn = str(r.get("wind direction", r.get("wind_direction", ""))).strip().upper()
+        # Drop fully-empty rows (a weak model can emit blank/garbage lines)
+        if not time and wind == 0 and gust == 0 and dirn in ("", "NAN"):
+            continue
+        rows.append({"time": time, "wind": wind, "gust": gust, "dir": dirn})
     return rows
 
 
