@@ -334,6 +334,11 @@ def api_openai_log():
     return jsonify(openai_log.snapshot())
 
 
+@app.route("/api/openai_log/reset", methods=["POST"])
+def api_openai_log_reset():
+    return jsonify(ok=True, cleared=openai_log.reset())
+
+
 @app.route("/api/forecast")
 def api_forecast():
     region = request.args.get("region", "howe_sound")

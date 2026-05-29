@@ -126,7 +126,7 @@ def _openai_parse(html: str, reason: str = "forecast parsing") -> str:
     r = requests.post(
         "https://api.openai.com/v1/chat/completions",
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"},
-        json={"model": "gpt-5-mini",
+        json={"model": "gpt-5-nano",
               "messages": [
                   {"role": "system", "content": "You are an expert meteorologist."},
                   {"role": "user", "content": prompt},
@@ -139,7 +139,7 @@ def _openai_parse(html: str, reason: str = "forecast parsing") -> str:
     try:
         openai_log.record(
             reason=reason,
-            model="gpt-5-mini",
+            model="gpt-5-nano",
             prompt_tokens=usage.get("prompt_tokens", 0),
             completion_tokens=usage.get("completion_tokens", 0),
         )

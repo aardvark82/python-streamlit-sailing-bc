@@ -899,7 +899,14 @@
               ))}
             </tbody>
           </table>
-          <button onClick={load} style={{ background: '#64748b', marginTop: 8 }}>Refresh</button>
+          <div className="row-flex" style={{ marginTop: 8 }}>
+            <button onClick={load} style={{ background: '#64748b' }}>Refresh</button>
+            <button style={{ background: '#dc2626' }} onClick={async () => {
+              if (!confirm('Clear the OpenAI usage log? Totals and the monthly estimate restart from zero (use after a model switch).')) return;
+              await fetch('/api/openai_log/reset', { method: 'POST' });
+              load();
+            }}>Reset log</button>
+          </div>
         </div>
       );
     }

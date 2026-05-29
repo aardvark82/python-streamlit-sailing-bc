@@ -66,6 +66,15 @@ def record(reason: str, model: str, prompt_tokens: int, completion_tokens: int):
     return entry
 
 
+def reset() -> int:
+    """Clear the log. Returns how many entries were removed. Useful after
+    a model switch so the monthly-cost extrapolation starts fresh."""
+    with _lock:
+        n = len(_load())
+        _save([])
+    return n
+
+
 def snapshot(limit: int = 100) -> dict:
     with _lock:
         entries = _load()
