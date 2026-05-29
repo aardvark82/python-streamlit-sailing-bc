@@ -220,17 +220,32 @@ def _verdict(wind: float) -> str:
     return "go"
 
 
+_WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday",
+             "friday", "saturday", "sunday")
+
+
+def _is_today_label(time_label: str) -> bool:
+    """True if a forecast period refers to today (now / today / this
+    afternoon / this evening / tonight / overnight). Future days carry a
+    weekday name (e.g. 'Saturday', 'Sunday night') or 'tomorrow'."""
+    t = (time_label or "").lower()
+    if "tomorrow" in t:
+        return False
+    if any(d in t for d in _WEEKDAYS):
+        return False
+    return True
+
+
 def gonogo_from_forecast(region: str = "howe_sound", allow_fetch: bool = True) -> dict:
-    """Verdict from the WORST forecast period for the rest of today.
-    Looks past the 'now' row at upcoming periods so it flags an
-    afternoon/evening blow-up before the wind actually arrives.
-    allow_fetch=False → cached-only (for Alexa's 8s budget)."""
+    """Verdict from the WORST forecast period for the rest of TODAY only.
+    Excludes future named days so a Saturday gale doesn't no-go a calm
+    Thursday. allow_fetch=False → cached-only (for Alexa's 8s budget)."""
     fc = get_forecast(region, allow_fetch=allow_fetch)
     if fc.get("error") or not fc.get("rows"):
         return {"error": fc.get("error", "no forecast rows"), "region": region}
 
-    rows = fc["rows"]
-    # Consider all rows (incl. 'now') but report which drives the verdict.
+    today_rows = [r for r in fc["rows"] if _is_today_label(r["time"])]
+    rows = today_rows or fc["rows"][:1]   # fall back to 'now' if nothing matched
     worst = max(rows, key=lambda r: max(r["wind"], r["gust"]))
     driving = max(worst["wind"], worst["gust"])
     status = _verdict(driving)

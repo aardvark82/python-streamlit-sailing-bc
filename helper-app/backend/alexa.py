@@ -27,6 +27,26 @@ HOWE_SOUND = "WAS"      # Pam Rocks = Howe Sound proxy
 
 _ORDER = {"go": 0, "caution": 1, "nogo": 2}
 
+# Speech-friendly direction (handles both compass abbreviations from buoys
+# and full '…ERLY' words from the parsed forecast).
+_DIR_SPEAK = {
+    "N": "northerly", "NNE": "north-northeasterly", "NE": "northeasterly",
+    "ENE": "east-northeasterly", "E": "easterly", "ESE": "east-southeasterly",
+    "SE": "southeasterly", "SSE": "south-southeasterly", "S": "southerly",
+    "SSW": "south-southwesterly", "SW": "southwesterly", "WSW": "west-southwesterly",
+    "W": "westerly", "WNW": "west-northwesterly", "NW": "northwesterly",
+    "NNW": "north-northwesterly",
+}
+
+
+def _speak_dir(d):
+    if not d:
+        return ""
+    d = d.strip().upper()
+    if d in ("", "N/A", "VARIABLE", "V"):
+        return ""
+    return _DIR_SPEAK.get(d, d.lower())
+
 
 def _latest(buoy_id):
     rows = db.read_history(buoy_id, days_back=1) or db.read_history(buoy_id, days_back=3)
@@ -83,11 +103,12 @@ def build_speech() -> str:
             statuses.append(hs_status)
     else:
         if fc.get("driving_period") and fc.get("driving_wind_kts") is not None:
-            period = fc["driving_period"]
-            dirn = (fc.get("driving_dir") or "").strip()
-            dir_phrase = f" from the {dirn}" if dirn and dirn not in ("N/A", "") else ""
+            period = (fc["driving_period"] or "").strip().lower()
+            dir_phrase = _speak_dir(fc.get("driving_dir"))
+            dir_phrase = f" {dir_phrase}" if dir_phrase else ""
+            when = "" if period in ("", "now") else f", {period}"
             parts.append(f"Howe Sound forecast: peak wind {round(fc['driving_wind_kts'])} knots"
-                         f"{dir_phrase} around {period}.")
+                         f"{dir_phrase}{when}.")
         if fc.get("strong_wind_warning"):
             parts.append("A strong wind warning is in effect.")
         elif fc.get("wind_warning"):
