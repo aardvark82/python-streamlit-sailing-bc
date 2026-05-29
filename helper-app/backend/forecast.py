@@ -247,16 +247,27 @@ def _is_today_label(time_label: str) -> bool:
     return True
 
 
-def gonogo_from_forecast(region: str = "howe_sound", allow_fetch: bool = True) -> dict:
-    """Verdict from the WORST forecast period for the rest of TODAY only.
-    Excludes future named days so a Saturday gale doesn't no-go a calm
-    Thursday. allow_fetch=False → cached-only (for Alexa's 8s budget)."""
+def gonogo_from_forecast(region: str = "howe_sound", allow_fetch: bool = True,
+                         window_periods: int = 2) -> dict:
+    """Verdict from the WORST period inside the near-term window only.
+
+    The window is the next `window_periods` forecast periods that belong
+    to today (now + the immediate next period ≈ a 3-6h horizon). This
+    ignores both future named days (Saturday gale on a calm Friday) AND
+    later-today periods like 'overnight' that are well beyond a typical
+    outing. The full multi-day table is still returned by /api/forecast
+    for reference.
+
+    allow_fetch=False → cached-only (for Alexa's 8s budget)."""
     fc = get_forecast(region, allow_fetch=allow_fetch)
     if fc.get("error") or not fc.get("rows"):
         return {"error": fc.get("error", "no forecast rows"), "region": region}
 
     today_rows = [r for r in fc["rows"] if _is_today_label(r["time"])]
-    rows = today_rows or fc["rows"][:1]   # fall back to 'now' if nothing matched
+    # Near-term window: first N today periods (now + next). Falls back to
+    # whatever today rows exist, then to the 'now' row.
+    window = (today_rows or fc["rows"])[:max(1, window_periods)]
+    rows = window
     worst = max(rows, key=lambda r: max(r["wind"], r["gust"]))
     driving = max(worst["wind"], worst["gust"])
     status = _verdict(driving)
@@ -276,4 +287,5 @@ def gonogo_from_forecast(region: str = "howe_sound", allow_fetch: bool = True) -
         "strong_wind_warning": fc.get("strong_wind_warning"),
         "issued": fc.get("issued"),
         "period": fc.get("period"),
+        "window_periods_considered": [r["time"] for r in window],
     }
