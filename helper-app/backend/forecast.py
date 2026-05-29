@@ -15,8 +15,7 @@ import io
 import logging
 import re
 import threading
-import time as _time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 import pytz
@@ -47,10 +46,18 @@ WIND_CAUTION = 15
 _USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                "(KHTML, like Gecko) Chrome/120.0 Safari/537.36")
 
-# (region, time_bucket) → (fetched_at, payload). 30-min TTL.
-_cache: dict[tuple, tuple[float, dict]] = {}
+# region → (hour_slot, payload). weather.gc.ca re-issues marine forecasts
+# hourly, so we cache per hour and roll over at HH:01 (1-min grace after
+# the hour to let the new issue post). region: str → (slot:str, payload).
+_cache: dict[str, tuple[str, dict]] = {}
 _lock = threading.Lock()
-_TTL = 1800
+
+
+def _hour_slot() -> str:
+    """Identifier for the current hourly forecast window. Subtracting 1
+    minute means the slot flips at HH:01, not HH:00 — so a forecast cached
+    at 14:30 stays valid until 15:01, when the ~15:00 issue is expected."""
+    return (datetime.now(VAN_TZ) - timedelta(minutes=1)).strftime("%Y-%m-%d %H")
 
 
 def _time_bucket() -> str:
@@ -211,11 +218,12 @@ def trigger_async_refresh(region: str = "howe_sound") -> bool:
 
 
 def get_cached(region: str = "howe_sound") -> dict | None:
-    """Return a cached forecast if fresh, else None. Never does network I/O —
-    used by latency-sensitive paths (Alexa, which has an ~8s timeout)."""
+    """Return the forecast cached for the CURRENT hour slot, else None.
+    Never does network I/O — used by latency-sensitive paths (Alexa, 8s)."""
+    slot = _hour_slot()
     with _lock:
-        hit = _cache.get((region, _time_bucket()))
-    if hit and _time.time() - hit[0] < _TTL:
+        hit = _cache.get(region)
+    if hit and hit[0] == slot:
         return hit[1]
     return None
 
@@ -224,11 +232,10 @@ def get_forecast(region: str = "howe_sound", allow_fetch: bool = True) -> dict:
     if region not in REGIONS:
         return {"error": f"unknown region {region}"}
     meta = REGIONS[region]
-    cache_key = (region, _time_bucket())
-    now_ts = _time.time()
+    slot = _hour_slot()
     with _lock:
-        hit = _cache.get(cache_key)
-        if hit and now_ts - hit[0] < _TTL:
+        hit = _cache.get(region)
+        if hit and hit[0] == slot:
             return hit[1]
     if not allow_fetch:
         return {"error": "not cached", "region": region, "name": meta["name"], "stale": True}
@@ -255,7 +262,7 @@ def get_forecast(region: str = "howe_sound", allow_fetch: bool = True) -> dict:
         return {"error": str(e), "region": region, "name": meta["name"]}
 
     with _lock:
-        _cache[cache_key] = (now_ts, payload)
+        _cache[region] = (slot, payload)
     return payload
 
 
