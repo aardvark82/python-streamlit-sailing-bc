@@ -829,7 +829,70 @@
           <UsageBlock />
 
           <hr style={{ margin: '1.5rem 0', border: 0, borderTop: '1px solid #e2e8f0' }} />
+          <OpenAILogBlock />
+
+          <hr style={{ margin: '1.5rem 0', border: 0, borderTop: '1px solid #e2e8f0' }} />
           <CleanupBlock />
+        </div>
+      );
+    }
+
+    function OpenAILogBlock() {
+      const [d, setD] = useState(null);
+      const load = () => fetch('/api/openai_log').then(r => r.json()).then(setD);
+      useEffect(load, []);
+      if (!d) return <p className="muted">Loading OpenAI log…</p>;
+      const money = (v) => v == null ? '—' : '$' + Number(v).toFixed(v < 1 ? 4 : 2);
+      return (
+        <div>
+          <h3 style={{ marginTop: 0 }}>OpenAI usage log</h3>
+          <div className="trend-grid" style={{ marginBottom: 12 }}>
+            <div className="trend-cell">
+              <h4>Total tokens</h4>
+              <div className="trend-stat"><strong>{d.total_tokens.toLocaleString()}</strong></div>
+              <div className="muted" style={{ fontSize: '0.78rem' }}>{d.total_calls} calls</div>
+            </div>
+            <div className="trend-cell">
+              <h4>Total cost</h4>
+              <div className="trend-stat"><strong>{money(d.total_cost_usd)}</strong></div>
+            </div>
+            <div className="trend-cell">
+              <h4>Est. / month</h4>
+              <div className="trend-stat"><strong>{money(d.est_monthly_cost_usd)}</strong></div>
+              <div className="muted" style={{ fontSize: '0.78rem' }}>extrapolated</div>
+            </div>
+          </div>
+
+          {Object.keys(d.by_reason || {}).length > 0 && (
+            <details style={{ marginBottom: 10 }}>
+              <summary className="muted" style={{ cursor: 'pointer' }}>By reason</summary>
+              <table className="log-table" style={{ marginTop: 6 }}>
+                <thead><tr><th>Reason</th><th>Calls</th><th>Tokens</th><th>Cost</th></tr></thead>
+                <tbody>
+                  {Object.entries(d.by_reason).map(([r, b]) => (
+                    <tr key={r}><td>{r}</td><td>{b.calls}</td><td>{b.tokens.toLocaleString()}</td><td>{money(b.cost_usd)}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            </details>
+          )}
+
+          <table className="log-table">
+            <thead><tr><th>Time</th><th>Reason</th><th>Model</th><th>Tokens (in/out)</th><th>Cost</th></tr></thead>
+            <tbody>
+              {d.entries.length === 0 && <tr><td colSpan="5" className="muted">No OpenAI calls logged yet.</td></tr>}
+              {d.entries.map((e, i) => (
+                <tr key={i}>
+                  <td>{new Date(e.ts).toLocaleString()}</td>
+                  <td>{e.reason}</td>
+                  <td>{e.model}</td>
+                  <td>{e.prompt_tokens.toLocaleString()} / {e.completion_tokens.toLocaleString()}</td>
+                  <td>{money(e.cost_usd)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <button onClick={load} style={{ background: '#64748b', marginTop: 8 }}>Refresh</button>
         </div>
       );
     }

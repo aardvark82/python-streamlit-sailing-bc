@@ -23,7 +23,7 @@ import pytz
 import requests
 from bs4 import BeautifulSoup
 
-from . import settings
+from . import openai_log, settings
 
 log = logging.getLogger("helper.forecast")
 VAN_TZ = pytz.timezone("America/Vancouver")
@@ -98,7 +98,7 @@ def _parse_summary(html: str) -> dict:
     return out
 
 
-def _openai_parse(html: str) -> str:
+def _openai_parse(html: str, reason: str = "forecast parsing") -> str:
     key = settings.get_openai_key()
     if not key:
         raise RuntimeError("OpenAI key not set (Settings tab or OPENAI_API_KEY env)")
@@ -134,7 +134,18 @@ def _openai_parse(html: str) -> str:
         timeout=60,
     )
     r.raise_for_status()
-    return r.json()["choices"][0]["message"]["content"]
+    body = r.json()
+    usage = body.get("usage", {}) or {}
+    try:
+        openai_log.record(
+            reason=reason,
+            model="gpt-5-mini",
+            prompt_tokens=usage.get("prompt_tokens", 0),
+            completion_tokens=usage.get("completion_tokens", 0),
+        )
+    except Exception as e:
+        log.warning("openai_log.record failed: %s", e)
+    return body["choices"][0]["message"]["content"]
 
 
 def _csv_to_rows(csv_text: str) -> list[dict]:
@@ -192,7 +203,7 @@ def get_forecast(region: str = "howe_sound", allow_fetch: bool = True) -> dict:
         rows = []
         ai_error = None
         try:
-            rows = _csv_to_rows(_openai_parse(html))
+            rows = _csv_to_rows(_openai_parse(html, reason=f"forecast parsing ({meta['name']})"))
         except Exception as e:
             ai_error = str(e)
             log.warning("OpenAI forecast parse failed for %s: %s", region, e)

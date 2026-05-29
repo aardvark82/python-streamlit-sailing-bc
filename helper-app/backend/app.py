@@ -22,7 +22,7 @@ from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from . import alexa, cleanup, db, forecast, reconcile, settings, usage, wave_model
+from . import alexa, cleanup, db, forecast, openai_log, reconcile, settings, usage, wave_model
 from .buoy_fetcher import BUOYS, BUOY_BY_ID, fetch_buoy
 from .envutil import getenv_ci
 from .kv_client import read_history, write_reading, VAN_TZ, invalidate_history
@@ -327,6 +327,11 @@ def api_reconcile_sync_all():
 @app.route("/api/db/stats")
 def api_db_stats():
     return jsonify(db.stats())
+
+
+@app.route("/api/openai_log")
+def api_openai_log():
+    return jsonify(openai_log.snapshot())
 
 
 @app.route("/api/forecast")
