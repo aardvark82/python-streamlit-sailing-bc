@@ -426,6 +426,13 @@
             <h3 style={{ marginTop: 0 }}>🔊 What Alexa will say</h3>
             <p style={{ fontSize: '1.05rem', lineHeight: 1.5 }}>{preview || 'Loading…'}</p>
             <button onClick={load} style={{ marginTop: 4 }}>Refresh preview</button>
+            <p className="muted" style={{ marginTop: 10, fontSize: '0.85rem' }}>
+              📺 On an Echo Show (or any screen device) the skill also renders a visual card:
+              a big colour-coded <strong style={{ color: '#16a34a' }}>GO</strong> /
+              <strong style={{ color: '#d97706' }}> CAUTION</strong> /
+              <strong style={{ color: '#dc2626' }}> NO-GO</strong> banner with the forecast peak wind,
+              plus English Bay + Pam Rocks tiles and any wind-warning. Screenless Echos just hear the speech.
+            </p>
           </div>
 
           <div className="card">
