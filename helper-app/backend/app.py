@@ -22,7 +22,7 @@ from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from . import cleanup, db, reconcile, settings, usage, wave_model
+from . import alexa, cleanup, db, reconcile, settings, usage, wave_model
 from .buoy_fetcher import BUOYS, BUOY_BY_ID, fetch_buoy
 from .envutil import getenv_ci
 from .kv_client import read_history, write_reading, VAN_TZ, invalidate_history
@@ -317,6 +317,17 @@ def api_reconcile_sync_all():
 @app.route("/api/db/stats")
 def api_db_stats():
     return jsonify(db.stats())
+
+
+@app.route("/api/alexa", methods=["GET", "POST"])
+def api_alexa():
+    """Alexa custom-skill HTTPS endpoint.
+    GET  → {speech} for previewing in the UI / browser.
+    POST → full Alexa response envelope (what the skill returns)."""
+    if request.method == "GET":
+        return jsonify(speech=alexa.build_speech())
+    body = request.get_json(silent=True) or {}
+    return jsonify(alexa.handle_request(body))
 
 
 @app.route("/api/wave_model")

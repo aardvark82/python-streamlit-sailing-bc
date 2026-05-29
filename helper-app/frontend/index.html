@@ -160,13 +160,14 @@
             <button className={`nav-btn ${view === 'log' ? 'active' : ''}`} onClick={() => setView('log')}>Log</button>
             <button className={`nav-btn ${view === 'trends' ? 'active' : ''}`} onClick={() => setView('trends')}>Trends</button>
             <button className={`nav-btn ${view === 'wave' ? 'active' : ''}`} onClick={() => setView('wave')}>Wave Model</button>
+            <button className={`nav-btn ${view === 'alexa' ? 'active' : ''}`} onClick={() => setView('alexa')}>Alexa</button>
             <button className={`nav-btn ${view === 'reconcile' ? 'active' : ''}`} onClick={() => setView('reconcile')}>Reconcile</button>
             <div className="nav-section">Admin</div>
             <button className="nav-btn" onClick={triggerFetch}>Fetch now</button>
             <button className={`nav-btn ${view === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')}>Settings</button>
           </div>
           <div className="main">
-            {view !== 'settings' && view !== 'trends' && view !== 'reconcile' && view !== 'wave' && (
+            {view !== 'settings' && view !== 'trends' && view !== 'reconcile' && view !== 'wave' && view !== 'alexa' && (
               <div className="location-tabs">
                 {locations.map(l => (
                   <button key={l.id} className={activeLoc === l.id ? 'active' : ''}
@@ -179,6 +180,7 @@
               {view === 'graph' && activeLoc && <GraphView locationId={activeLoc} />}
               {view === 'trends' && <TrendsView locations={locations} />}
               {view === 'wave' && <WaveModelView />}
+              {view === 'alexa' && <AlexaView />}
               {view === 'reconcile' && <ReconcileView locations={locations} />}
               {view === 'settings' && <SettingsView />}
             </ErrorBoundary>
@@ -327,6 +329,82 @@
               </div>
             );
           })}
+        </div>
+      );
+    }
+
+    function AlexaView() {
+      const [preview, setPreview] = useState(null);
+      const endpoint = window.location.origin + '/api/alexa';
+      const load = () => fetch('/api/alexa').then(r => r.json()).then(d => setPreview(d.speech));
+      useEffect(load, []);
+      return (
+        <div>
+          <h2>Alexa voice briefing</h2>
+          <div className="card" style={{ background: '#eff6ff', borderColor: '#93c5fd' }}>
+            <h3 style={{ marginTop: 0 }}>🔊 What Alexa will say</h3>
+            <p style={{ fontSize: '1.05rem', lineHeight: 1.5 }}>{preview || 'Loading…'}</p>
+            <button onClick={load} style={{ marginTop: 4 }}>Refresh preview</button>
+          </div>
+
+          <div className="card">
+            <h3 style={{ marginTop: 0 }}>Endpoint</h3>
+            <p className="muted">Your skill points here. <strong>Alexa requires HTTPS with a trusted certificate.</strong></p>
+            <pre style={{ background: '#0f172a', color: '#e2e8f0', padding: 10, borderRadius: 6, overflowX: 'auto' }}>
+              {endpoint}
+            </pre>
+            {endpoint.startsWith('http://') && (
+              <p style={{ color: '#b45309', background: '#fffbeb', padding: 8, borderRadius: 6 }}>
+                ⚠ You're on HTTP. Alexa won't accept this. In Coolify, open this app → <strong>Domains</strong>,
+                add the sslip.io host, and toggle <strong>Generate Let's Encrypt certificate / Force HTTPS</strong>.
+                Then the endpoint becomes <code>https://…/api/alexa</code>.
+              </p>
+            )}
+          </div>
+
+          <div className="card">
+            <h3 style={{ marginTop: 0 }}>Setup — one-time (~10 min)</h3>
+            <ol style={{ lineHeight: 1.7 }}>
+              <li><strong>Enable HTTPS</strong> on this app in Coolify (Domains → Let's Encrypt). Confirm
+                <code> https://…/api/alexa</code> opens in a browser and returns JSON.</li>
+              <li>Go to <a href="https://developer.amazon.com/alexa/console/ask" target="_blank">developer.amazon.com/alexa/console/ask</a> →
+                <strong> Create Skill</strong>. Name it <em>Sailing Conditions</em>, model <strong>Custom</strong>,
+                hosting <strong>Provision your own</strong>.</li>
+              <li>Under <strong>Invocations → Skill Invocation Name</strong>, set
+                <code> sailing conditions</code>.</li>
+              <li>Under <strong>Interaction Model → JSON Editor</strong>, keep the default — the built-in
+                <code> LaunchRequest</code> is all we need (no custom intents required).</li>
+              <li>Under <strong>Endpoint</strong>, choose <strong>HTTPS</strong>, paste the endpoint above into
+                "Default Region", and pick the certificate option
+                <em>"My development endpoint has a certificate from a trusted certificate authority"</em>
+                (true when Coolify uses Let's Encrypt).</li>
+              <li>Click <strong>Build Model</strong>, then the <strong>Test</strong> tab → set to
+                <em>Development</em> → type or say <code>open sailing conditions</code>. You should hear the briefing.</li>
+            </ol>
+          </div>
+
+          <div className="card">
+            <h3 style={{ marginTop: 0 }}>Make it a Routine (motion / schedule / phrase)</h3>
+            <p className="muted">Alexa app → <strong>More → Routines → +</strong></p>
+            <ol style={{ lineHeight: 1.7 }}>
+              <li><strong>When this happens</strong>:
+                <ul>
+                  <li><em>Voice</em> — e.g. "Alexa, sailing report"</li>
+                  <li><em>Schedule</em> — e.g. every morning at 7am</li>
+                  <li><em>Device → Motion</em> (Echo Show with motion sensor) — fires when you walk by</li>
+                </ul>
+              </li>
+              <li><strong>Add action → Custom</strong> → type exactly:
+                <pre style={{ background: '#f1f5f9', padding: 8, borderRadius: 6 }}>open sailing conditions</pre>
+                This makes Alexa launch your skill and read the briefing aloud.</li>
+              <li>(Echo Show) optionally add a second action to set the device's screen, then Save.</li>
+            </ol>
+            <p className="muted" style={{ fontSize: '0.85rem' }}>
+              Note: per Alexa's rules a skill can't stay pinned/screensaver-style — it speaks the briefing
+              then returns to the home screen after the idle timeout. The motion trigger gives you the
+              "walk by → hear conditions" behaviour.
+            </p>
+          </div>
         </div>
       );
     }
