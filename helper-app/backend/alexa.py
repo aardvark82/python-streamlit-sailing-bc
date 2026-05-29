@@ -87,11 +87,13 @@ def _gather() -> dict:
         hs_d = {"wind": round(hs["wind_speed"])}
         hs_status = _verdict(hs["wind_speed"], hs.get("wave_height"))
 
+    # Cached-only (8s budget). On a miss, kick off a background OpenAI
+    # refresh so the NEXT invocation is warm, and flag this one as pending.
     fc = forecast.gonogo_from_forecast("howe_sound", allow_fetch=False)
     fc_d = None
+    fc_pending = False
     if fc.get("error"):
-        if hs_status:
-            statuses.append(hs_status)
+        fc_pending = forecast.trigger_async_refresh("howe_sound") or True
     else:
         fc_d = {
             "status": fc["status"],
@@ -103,8 +105,11 @@ def _gather() -> dict:
         }
         statuses.append(fc["status"])
 
+    # Verdict only when forecast is available (it's the driver). While the
+    # forecast is refreshing we report 'pending' instead of a stale verdict.
     overall = max(statuses, key=lambda s: _ORDER[s]) if statuses else None
-    return {"english_bay": eb_d, "pam_rocks": hs_d, "forecast": fc_d, "overall": overall}
+    return {"english_bay": eb_d, "pam_rocks": hs_d, "forecast": fc_d,
+            "forecast_pending": fc_pending, "overall": overall}
 
 
 def build_speech(data: dict | None = None) -> str:
@@ -137,6 +142,10 @@ def build_speech(data: dict | None = None) -> str:
             parts.append("A strong wind warning is in effect.")
         elif fc["wind_warning"]:
             parts.append("A wind warning is in effect.")
+    elif data.get("forecast_pending"):
+        # Forecast not cached — background refresh just started.
+        parts.append("Refreshing forecast. Ask again in a few seconds.")
+        return " ".join(parts)
 
     if data["overall"]:
         verdict_text = {
@@ -190,18 +199,23 @@ def _tile(label, value, sub=None):
 
 
 def build_apl_document(data: dict) -> dict:
-    overall = data["overall"] or "caution"
-    color = _STATUS_COLOR.get(overall, "#64748b")
-    label = _STATUS_LABEL.get(overall, "—")
-
-    # Banner subtitle from the forecast driver
     fc = data["forecast"]
-    subtitle = "Vancouver / Howe Sound"
-    if fc and fc["wind"] is not None:
-        period = (fc["period"] or "").lower()
-        dirn = _speak_dir(fc["dir"])
-        when = "" if period in ("", "now") else f" {period}"
-        subtitle = f"Peak {fc['wind']} kt{(' ' + dirn) if dirn else ''}{when}".strip()
+    pending = data.get("forecast_pending") and not fc
+
+    if pending:
+        color = "#64748b"
+        label = "REFRESHING"
+        subtitle = "Ask again in a few seconds"
+    else:
+        overall = data["overall"] or "caution"
+        color = _STATUS_COLOR.get(overall, "#64748b")
+        label = _STATUS_LABEL.get(overall, "—")
+        subtitle = "Vancouver / Howe Sound"
+        if fc and fc["wind"] is not None:
+            period = (fc["period"] or "").lower()
+            dirn = _speak_dir(fc["dir"])
+            when = "" if period in ("", "now") else f" {period}"
+            subtitle = f"Peak {fc['wind']} kt{(' ' + dirn) if dirn else ''}{when}".strip()
 
     tiles = []
     eb = data["english_bay"]

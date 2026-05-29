@@ -181,6 +181,35 @@ def _csv_to_rows(csv_text: str) -> list[dict]:
     return rows
 
 
+_refreshing: set[str] = set()
+_refresh_lock = threading.Lock()
+
+
+def trigger_async_refresh(region: str = "howe_sound") -> bool:
+    """Kick off a background forecast fetch (OpenAI) if one isn't already
+    running for this region. Returns True if a new refresh was started.
+    Used by the Alexa endpoint on a cache miss so the NEXT invocation
+    has a warm forecast — without blocking the current 8s response."""
+    if region not in REGIONS:
+        return False
+    with _refresh_lock:
+        if region in _refreshing:
+            return False
+        _refreshing.add(region)
+
+    def _run():
+        try:
+            get_forecast(region, allow_fetch=True)
+        except Exception as e:
+            log.warning("async forecast refresh failed for %s: %s", region, e)
+        finally:
+            with _refresh_lock:
+                _refreshing.discard(region)
+
+    threading.Thread(target=_run, daemon=True, name=f"fc-refresh-{region}").start()
+    return True
+
+
 def get_cached(region: str = "howe_sound") -> dict | None:
     """Return a cached forecast if fresh, else None. Never does network I/O —
     used by latency-sensitive paths (Alexa, which has an ~8s timeout)."""
