@@ -163,7 +163,17 @@ def _csv_to_rows(csv_text: str) -> list[dict]:
     return rows
 
 
-def get_forecast(region: str = "howe_sound") -> dict:
+def get_cached(region: str = "howe_sound") -> dict | None:
+    """Return a cached forecast if fresh, else None. Never does network I/O —
+    used by latency-sensitive paths (Alexa, which has an ~8s timeout)."""
+    with _lock:
+        hit = _cache.get((region, _time_bucket()))
+    if hit and _time.time() - hit[0] < _TTL:
+        return hit[1]
+    return None
+
+
+def get_forecast(region: str = "howe_sound", allow_fetch: bool = True) -> dict:
     if region not in REGIONS:
         return {"error": f"unknown region {region}"}
     meta = REGIONS[region]
@@ -173,6 +183,8 @@ def get_forecast(region: str = "howe_sound") -> dict:
         hit = _cache.get(cache_key)
         if hit and now_ts - hit[0] < _TTL:
             return hit[1]
+    if not allow_fetch:
+        return {"error": "not cached", "region": region, "name": meta["name"], "stale": True}
 
     try:
         html = _fetch_html(meta["url"])
@@ -208,11 +220,12 @@ def _verdict(wind: float) -> str:
     return "go"
 
 
-def gonogo_from_forecast(region: str = "howe_sound") -> dict:
+def gonogo_from_forecast(region: str = "howe_sound", allow_fetch: bool = True) -> dict:
     """Verdict from the WORST forecast period for the rest of today.
     Looks past the 'now' row at upcoming periods so it flags an
-    afternoon/evening blow-up before the wind actually arrives."""
-    fc = get_forecast(region)
+    afternoon/evening blow-up before the wind actually arrives.
+    allow_fetch=False → cached-only (for Alexa's 8s budget)."""
+    fc = get_forecast(region, allow_fetch=allow_fetch)
     if fc.get("error") or not fc.get("rows"):
         return {"error": fc.get("error", "no forecast rows"), "region": region}
 

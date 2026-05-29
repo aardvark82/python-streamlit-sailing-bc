@@ -63,16 +63,25 @@ def build_speech() -> str:
     else:
         parts.append("English Bay data is currently unavailable.")
 
+    hs_status = None
     if hs and hs.get("wind_speed") is not None:
         parts.append(f"Howe Sound at Pam Rocks: wind {round(hs['wind_speed'])} knots.")
+        hs_status = _verdict(hs["wind_speed"], hs.get("wave_height"))
     else:
         parts.append("Howe Sound data is currently unavailable.")
 
     # Forecast-driven outlook + verdict (later-in-day conditions from the
-    # weather.gc.ca marine forecast, parsed by OpenAI) — replaces the old
-    # past-wind trend extrapolation.
-    fc = forecast.gonogo_from_forecast("howe_sound")
-    if not fc.get("error"):
+    # weather.gc.ca marine forecast, parsed by OpenAI). CACHED-ONLY here:
+    # Alexa enforces an ~8s response budget and a cold OpenAI parse can
+    # blow past it. The hourly cron warms the cache; if it isn't warm we
+    # fall back to the current-conditions verdict so we never time out.
+    fc = forecast.gonogo_from_forecast("howe_sound", allow_fetch=False)
+    if fc.get("error"):
+        # Forecast not cached yet → use live buoy verdicts so the briefing
+        # still ends with a Go/No-Go.
+        if hs_status:
+            statuses.append(hs_status)
+    else:
         if fc.get("driving_period") and fc.get("driving_wind_kts") is not None:
             period = fc["driving_period"]
             dirn = (fc.get("driving_dir") or "").strip()

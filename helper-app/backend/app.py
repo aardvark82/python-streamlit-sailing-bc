@@ -80,6 +80,16 @@ def run_fetch_cycle():
     except NameError:
         pass
     invalidate_history()
+
+    # Warm the marine-forecast cache so the Alexa endpoint (cached-only,
+    # 8s budget) always has a fresh forecast to read without blocking on
+    # an OpenAI call at request time.
+    try:
+        for region in forecast.REGIONS:
+            forecast.get_forecast(region, allow_fetch=True)
+    except Exception as e:
+        log.warning("forecast warm failed: %s", e)
+
     log.info("Fetch cycle complete")
 
 
