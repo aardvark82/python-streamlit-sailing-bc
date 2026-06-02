@@ -38,6 +38,8 @@ WHALE_FLEET = [
     {'name': 'SALISH SEA ECLIPSE', 'operator': 'Prince of Whales', 'icon_color': '#ff7f0e'},
     {'name': 'OCEAN MAGIC II',     'operator': 'Prince of Whales', 'icon_color': '#ff7f0e'},
     {'name': 'OCEAN MAGIC',        'operator': 'Prince of Whales', 'icon_color': '#ff7f0e'},
+    # Other Vancouver-area
+    {'name': 'COUNTESS',           'operator': 'Other',            'icon_color': '#9467bd', 'mmsi': 316004455},
 ]
 
 # Strait of Georgia + Howe Sound + Burrard Inlet bounding box

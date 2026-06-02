@@ -63,6 +63,8 @@ WHALE_FLEET = [
      'icon_color': '#ff7f0e'},
     {'name': 'Ocean Magic',        'operator': 'Prince of Whales', 'region': 'Telegraph Cove',
      'icon_color': '#ff7f0e'},
+    {'name': 'Countess',           'operator': 'Other', 'region': 'Vancouver',
+     'icon_color': '#9467bd', 'mmsi': 316004455},
 ]
 
 
