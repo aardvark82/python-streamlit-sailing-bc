@@ -120,33 +120,33 @@ otherwise by case-insensitive normalized name
 
 ### Wild Whales Vancouver — blue `#1f77b4`
 
-| Name | MMSI | Region | Notes |
-|---|---|---|---|
-| Aurora I | — | Vancouver | Small zodiac — often no AIS |
-| Aurora II | — | Vancouver | Small zodiac — often no AIS |
-| Eagle Eyes | — | Vancouver |  |
-| Jing Yu | — | Vancouver |  |
+| Name | MMSI | Region |
+|---|---|---|
+| Aurora I | **316040487** | Vancouver |
+| Aurora II | **316040366** | Vancouver |
+| Eagle Eyes | **316034894** | Vancouver |
+| Jing Yu | **316032442** | Vancouver |
 
 ### Vancouver Whale Watch — green `#2ca02c`
 
-| Name | MMSI | Region | Notes |
-|---|---|---|---|
-| Explorathor II | — | Vancouver |  |
-| Explorathor Express | **316008045** | Vancouver |  |
-| Express | — | Vancouver |  |
-| Strider | — | Vancouver | Small zodiac — often no AIS |
-| Lightship | — | Vancouver | Small zodiac — often no AIS |
+| Name | MMSI | Region |
+|---|---|---|
+| Explorathor II | **316008046** | Vancouver |
+| Explorathor Express | **316008045** | Vancouver |
+| Express | — | Vancouver |
+| Strider | **316035167** | Vancouver |
+| Lightship | **316014609** | Vancouver |
 
 ### Prince of Whales — orange `#ff7f0e`
 
-| Name | MMSI | Region | Notes |
-|---|---|---|---|
-| Salish Sea Dream | — | Vancouver |  |
-| Salish Sea Freedom | **316042213** | Vancouver |  |
-| Salish Sea Eclipse | — | Victoria |  |
-| Salish Sea Glory | **316059231** | Vancouver |  |
-| Ocean Magic | — | Telegraph Cove |  |
-| Ocean Magic II | — | Telegraph Cove |  |
+| Name | MMSI | Region |
+|---|---|---|
+| Salish Sea Dream | **316032858** | Vancouver |
+| Salish Sea Freedom | **316042213** | Vancouver |
+| Salish Sea Eclipse | **316039686** | Victoria |
+| Salish Sea Glory | **316059231** | Vancouver |
+| Ocean Magic | **316006789** | Telegraph Cove |
+| Ocean Magic II | **316008331** | Telegraph Cove |
 
 ### Other / private — purple `#9467bd`
 
@@ -158,20 +158,34 @@ Sister vessels (consecutive MMSIs 316004454–456).
 | Countess | **316004455** | Vancouver |
 | Lady Di | **316004456** | Vancouver |
 
-### Hard-coded MMSIs at a glance
+### Hard-coded MMSIs at a glance (16 of 17 known)
 
 ```
 316004454  The Duchess
 316004455  Countess
 316004456  Lady Di
+316006789  Ocean Magic
 316008045  Explorathor Express
+316008046  Explorathor II
+316008331  Ocean Magic II
+316014609  Lightship
+316032442  Jing Yu
+316032858  Salish Sea Dream
+316034894  Eagle Eyes
+316035167  Strider
+316039686  Salish Sea Eclipse
+316040366  Aurora II
+316040487  Aurora I
 316042213  Salish Sea Freedom
 316059231  Salish Sea Glory
 ```
 
-Small zodiacs (Aurora I/II, Strider, Lightship) often don't transmit
-AIS — they'll be absent from your results, which is expected. Filter
-boats not seen in the last 24 h from the "active" list.
+Only **Express** (Vancouver Whale Watch) is still without an MMSI —
+add it via `/vessel/search?filter.name=Express` once observed.
+
+Filter boats not seen in the last 24 h from the "active" list — even
+with valid MMSIs, vessels in port often have AIS off and will appear
+to be "missing" until they leave the dock.
 
 ---
 

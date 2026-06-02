@@ -23,23 +23,23 @@ import plotly.graph_objects as go
 # appear; the larger covered/semi-covered vessels usually do.
 WHALE_FLEET = [
     # Wild Whales Vancouver
-    {'name': 'AURORA I',         'operator': 'Wild Whales Vancouver',  'icon_color': '#1f77b4'},
-    {'name': 'AURORA II',        'operator': 'Wild Whales Vancouver',  'icon_color': '#1f77b4'},
-    {'name': 'EAGLE EYES',       'operator': 'Wild Whales Vancouver',  'icon_color': '#1f77b4'},
-    {'name': 'JING YU',          'operator': 'Wild Whales Vancouver',  'icon_color': '#1f77b4'},
+    {'name': 'AURORA I',         'operator': 'Wild Whales Vancouver',  'icon_color': '#1f77b4', 'mmsi': 316040487},
+    {'name': 'AURORA II',        'operator': 'Wild Whales Vancouver',  'icon_color': '#1f77b4', 'mmsi': 316040366},
+    {'name': 'EAGLE EYES',       'operator': 'Wild Whales Vancouver',  'icon_color': '#1f77b4', 'mmsi': 316034894},
+    {'name': 'JING YU',          'operator': 'Wild Whales Vancouver',  'icon_color': '#1f77b4', 'mmsi': 316032442},
     # Vancouver Whale Watch
-    {'name': 'EXPLORATHOR II',      'operator': 'Vancouver Whale Watch',  'icon_color': '#2ca02c'},
+    {'name': 'EXPLORATHOR II',      'operator': 'Vancouver Whale Watch',  'icon_color': '#2ca02c', 'mmsi': 316008046},
     {'name': 'EXPLORATHOR EXPRESS', 'operator': 'Vancouver Whale Watch',  'icon_color': '#2ca02c', 'mmsi': 316008045},
     {'name': 'EXPRESS',          'operator': 'Vancouver Whale Watch',  'icon_color': '#2ca02c'},
-    {'name': 'STRIDER',          'operator': 'Vancouver Whale Watch',  'icon_color': '#2ca02c'},
-    {'name': 'LIGHTSHIP',        'operator': 'Vancouver Whale Watch',  'icon_color': '#2ca02c'},
+    {'name': 'STRIDER',          'operator': 'Vancouver Whale Watch',  'icon_color': '#2ca02c', 'mmsi': 316035167},
+    {'name': 'LIGHTSHIP',        'operator': 'Vancouver Whale Watch',  'icon_color': '#2ca02c', 'mmsi': 316014609},
     # Prince of Whales (Vancouver, Victoria, Telegraph Cove)
-    {'name': 'SALISH SEA DREAM',   'operator': 'Prince of Whales', 'icon_color': '#ff7f0e'},
+    {'name': 'SALISH SEA DREAM',   'operator': 'Prince of Whales', 'icon_color': '#ff7f0e', 'mmsi': 316032858},
     {'name': 'SALISH SEA FREEDOM', 'operator': 'Prince of Whales', 'icon_color': '#ff7f0e', 'mmsi': 316042213},
-    {'name': 'SALISH SEA ECLIPSE', 'operator': 'Prince of Whales', 'icon_color': '#ff7f0e'},
+    {'name': 'SALISH SEA ECLIPSE', 'operator': 'Prince of Whales', 'icon_color': '#ff7f0e', 'mmsi': 316039686},
     {'name': 'SALISH SEA GLORY',   'operator': 'Prince of Whales', 'icon_color': '#ff7f0e', 'mmsi': 316059231},
-    {'name': 'OCEAN MAGIC II',     'operator': 'Prince of Whales', 'icon_color': '#ff7f0e'},
-    {'name': 'OCEAN MAGIC',        'operator': 'Prince of Whales', 'icon_color': '#ff7f0e'},
+    {'name': 'OCEAN MAGIC II',     'operator': 'Prince of Whales', 'icon_color': '#ff7f0e', 'mmsi': 316008331},
+    {'name': 'OCEAN MAGIC',        'operator': 'Prince of Whales', 'icon_color': '#ff7f0e', 'mmsi': 316006789},
     # Other Vancouver-area (private / sister vessels w/ consecutive MMSIs 316004454-456)
     {'name': 'COUNTESS',           'operator': 'Other',            'icon_color': '#9467bd', 'mmsi': 316004455},
     {'name': 'LADY DI',            'operator': 'Other',            'icon_color': '#9467bd', 'mmsi': 316004456},

@@ -393,25 +393,25 @@ struct FleetMember {
 enum WhaleFleet {
     static let all: [FleetMember] = [
         // Wild Whales Vancouver — blue
-        .init(mmsi: 0,         name: "Aurora I",            operatorName: "Wild Whales Vancouver",  color: .blue),
-        .init(mmsi: 0,         name: "Aurora II",           operatorName: "Wild Whales Vancouver",  color: .blue),
-        .init(mmsi: 0,         name: "Eagle Eyes",          operatorName: "Wild Whales Vancouver",  color: .blue),
-        .init(mmsi: 0,         name: "Jing Yu",             operatorName: "Wild Whales Vancouver",  color: .blue),
+        .init(mmsi: 316040487, name: "Aurora I",            operatorName: "Wild Whales Vancouver",  color: .blue),
+        .init(mmsi: 316040366, name: "Aurora II",           operatorName: "Wild Whales Vancouver",  color: .blue),
+        .init(mmsi: 316034894, name: "Eagle Eyes",          operatorName: "Wild Whales Vancouver",  color: .blue),
+        .init(mmsi: 316032442, name: "Jing Yu",             operatorName: "Wild Whales Vancouver",  color: .blue),
 
         // Vancouver Whale Watch — green
-        .init(mmsi: 0,         name: "Explorathor II",      operatorName: "Vancouver Whale Watch",  color: .green),
+        .init(mmsi: 316008046, name: "Explorathor II",      operatorName: "Vancouver Whale Watch",  color: .green),
         .init(mmsi: 316008045, name: "Explorathor Express", operatorName: "Vancouver Whale Watch",  color: .green),
         .init(mmsi: 0,         name: "Express",             operatorName: "Vancouver Whale Watch",  color: .green),
-        .init(mmsi: 0,         name: "Strider",             operatorName: "Vancouver Whale Watch",  color: .green),
-        .init(mmsi: 0,         name: "Lightship",           operatorName: "Vancouver Whale Watch",  color: .green),
+        .init(mmsi: 316035167, name: "Strider",             operatorName: "Vancouver Whale Watch",  color: .green),
+        .init(mmsi: 316014609, name: "Lightship",           operatorName: "Vancouver Whale Watch",  color: .green),
 
         // Prince of Whales — orange
-        .init(mmsi: 0,         name: "Salish Sea Dream",    operatorName: "Prince of Whales",       color: .orange),
+        .init(mmsi: 316032858, name: "Salish Sea Dream",    operatorName: "Prince of Whales",       color: .orange),
         .init(mmsi: 316042213, name: "Salish Sea Freedom",  operatorName: "Prince of Whales",       color: .orange),
-        .init(mmsi: 0,         name: "Salish Sea Eclipse",  operatorName: "Prince of Whales",       color: .orange),
+        .init(mmsi: 316039686, name: "Salish Sea Eclipse",  operatorName: "Prince of Whales",       color: .orange),
         .init(mmsi: 316059231, name: "Salish Sea Glory",    operatorName: "Prince of Whales",       color: .orange),
-        .init(mmsi: 0,         name: "Ocean Magic",         operatorName: "Prince of Whales",       color: .orange),
-        .init(mmsi: 0,         name: "Ocean Magic II",      operatorName: "Prince of Whales",       color: .orange),
+        .init(mmsi: 316006789, name: "Ocean Magic",         operatorName: "Prince of Whales",       color: .orange),
+        .init(mmsi: 316008331, name: "Ocean Magic II",      operatorName: "Prince of Whales",       color: .orange),
 
         // Other / private — purple (consecutive MMSIs suggest sister vessels)
         .init(mmsi: 316004454, name: "The Duchess",         operatorName: "Other",                  color: .purple),
@@ -424,18 +424,28 @@ enum WhaleFleet {
 }
 ```
 
-**Vessels with no MMSI yet** (Aurora I/II, Strider, Lightship, etc.) —
-either they don't transmit AIS (small zodiacs are often AIS-free) or
-the MMSI hasn't been observed. Use the `/vessel/search?filter.name=...`
-endpoint once to learn it, then add it to the table.
+**Only "Express"** is still without an MMSI — call
+`/vessel/search?filter.name=Express` once you observe it on AIS, copy
+the result into the table, and skip the runtime search forever after.
 
-### MMSIs at a glance
+### MMSIs at a glance (16 of 17 known)
 
 ```
 316004454  The Duchess
 316004455  Countess
 316004456  Lady Di
+316006789  Ocean Magic
 316008045  Explorathor Express
+316008046  Explorathor II
+316008331  Ocean Magic II
+316014609  Lightship
+316032442  Jing Yu
+316032858  Salish Sea Dream
+316034894  Eagle Eyes
+316035167  Strider
+316039686  Salish Sea Eclipse
+316040366  Aurora II
+316040487  Aurora I
 316042213  Salish Sea Freedom
 316059231  Salish Sea Glory
 ```
