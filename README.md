@@ -1,5 +1,5 @@
 # python-streamlit-sailing-bc
-Real-time Tides, Wind and Wave Height for sailors out of vancouver, BC
+Real-time Tides, Wind and Wave Height for sailors out of Vancouver, BC in the howe Sound and English Bay area
 
 # started May 2025 by aardvark82 in West Vancouver, BC
 
@@ -31,10 +31,3 @@ The excellent Jericho wind sailing page
 https://jsca.bc.ca/services/weather/
 publishes historical data in a csv at
 https://jsca.bc.ca/main/downld02.txt
-
-
-# Configure Pycharm debug
-https://www.google.com/search?q=Disable+Help+%7C+Find+Action+%7C+Registry&rlz=1C1GCEA_enCA1056CA1056&oq=Disable+Help+%7C+Find+Action+%7C+Registry&gs_lcrp=EgZjaHJvbWUyBggAEEUYOTIICAEQABgWGB4yBwgCEAAY7wXSAQczMzVqMGoxqAIAsAIA&sourceid=chrome&ie=UTF-8
-
-edit configuration ->   module -.streamlit.web.cli
-                        command: run st.py
