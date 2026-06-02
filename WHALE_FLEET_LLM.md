@@ -112,31 +112,66 @@ can be mis-cased, abbreviated, or absent).
 
 ---
 
-## Curated fleet
+## Curated fleet (17 vessels)
 
-Match by **MMSI** when available, otherwise by case-insensitive
-normalized name (`re.sub(r'[^A-Z0-9]', '', name.upper())`).
+Match by **MMSI** when available (faster + immune to name typos),
+otherwise by case-insensitive normalized name
+(`re.sub(r'[^A-Z0-9]', '', name.upper())`).
 
-| Name | Operator | MMSI |
+### Wild Whales Vancouver — blue `#1f77b4`
+
+| Name | MMSI | Region | Notes |
+|---|---|---|---|
+| Aurora I | — | Vancouver | Small zodiac — often no AIS |
+| Aurora II | — | Vancouver | Small zodiac — often no AIS |
+| Eagle Eyes | — | Vancouver |  |
+| Jing Yu | — | Vancouver |  |
+
+### Vancouver Whale Watch — green `#2ca02c`
+
+| Name | MMSI | Region | Notes |
+|---|---|---|---|
+| Explorathor II | — | Vancouver |  |
+| Explorathor Express | **316008045** | Vancouver |  |
+| Express | — | Vancouver |  |
+| Strider | — | Vancouver | Small zodiac — often no AIS |
+| Lightship | — | Vancouver | Small zodiac — often no AIS |
+
+### Prince of Whales — orange `#ff7f0e`
+
+| Name | MMSI | Region | Notes |
+|---|---|---|---|
+| Salish Sea Dream | — | Vancouver |  |
+| Salish Sea Freedom | **316042213** | Vancouver |  |
+| Salish Sea Eclipse | — | Victoria |  |
+| Salish Sea Glory | **316059231** | Vancouver |  |
+| Ocean Magic | — | Telegraph Cove |  |
+| Ocean Magic II | — | Telegraph Cove |  |
+
+### Other / private — purple `#9467bd`
+
+Sister vessels (consecutive MMSIs 316004454–456).
+
+| Name | MMSI | Region |
 |---|---|---|
-| Aurora I | Wild Whales Vancouver | — |
-| Aurora II | Wild Whales Vancouver | — |
-| Eagle Eyes | Wild Whales Vancouver | — |
-| Jing Yu | Wild Whales Vancouver | — |
-| Explorathor II | Vancouver Whale Watch | — |
-| Express | Vancouver Whale Watch | — |
-| Strider | Vancouver Whale Watch | — |
-| Lightship | Vancouver Whale Watch | — |
-| Salish Sea Dream | Prince of Whales | — |
-| Salish Sea Freedom | Prince of Whales | **316042213** |
-| Salish Sea Eclipse | Prince of Whales | — |
-| Ocean Magic | Prince of Whales | — |
-| Ocean Magic II | Prince of Whales | — |
-| **Countess** | **Other (Vancouver)** | **316004455** |
+| The Duchess | **316004454** | Vancouver |
+| Countess | **316004455** | Vancouver |
+| Lady Di | **316004456** | Vancouver |
 
-Smaller zodiacs (Aurora I/II, Strider, Lightship) often don't transmit
+### Hard-coded MMSIs at a glance
+
+```
+316004454  The Duchess
+316004455  Countess
+316004456  Lady Di
+316008045  Explorathor Express
+316042213  Salish Sea Freedom
+316059231  Salish Sea Glory
+```
+
+Small zodiacs (Aurora I/II, Strider, Lightship) often don't transmit
 AIS — they'll be absent from your results, which is expected. Filter
-out boats not seen in the last 24 h from the active list.
+boats not seen in the last 24 h from the "active" list.
 
 ---
 
@@ -179,12 +214,17 @@ def deg_to_compass(deg: float | None) -> str | None:
 
 ## Test cases
 
-- **Countess (MMSI 316004455)** — Vancouver-area; should resolve via REST
-  `/vessel/316004455/position`. If `vesselPosition` is null/404, the
-  boat is dockside or AIS off.
+- **Countess (316004455) / Lady Di (316004456) / The Duchess (316004454)**
+  — three sister vessels with consecutive MMSIs; if you can resolve one
+  you can usually resolve all three. Often moored at the same dock.
 - **Salish Sea Freedom (316042213)** — usually has live AIS in season
   (Apr–Oct), often near Steveston or Plumper Sound.
-- **Strider** — typically NO AIS (small zodiac). Expect absence.
+- **Salish Sea Glory (316059231)** — newest Prince of Whales hull;
+  Vancouver-based.
+- **Explorathor Express (316008045)** — Vancouver Whale Watch flagship
+  with reliable AIS in season.
+- **Strider / Lightship / Aurora I-II** — typically NO AIS (small
+  zodiacs). Expect absence; that's not a bug.
 
 ---
 

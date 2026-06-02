@@ -47,6 +47,8 @@ WHALE_FLEET = [
      'icon_color': '#1f77b4'},
     {'name': 'Explorathor II',   'operator': 'Vancouver Whale Watch',  'region': 'Vancouver',
      'icon_color': '#2ca02c'},
+    {'name': 'Explorathor Express', 'operator': 'Vancouver Whale Watch', 'region': 'Vancouver',
+     'icon_color': '#2ca02c', 'mmsi': 316008045},
     {'name': 'Express',          'operator': 'Vancouver Whale Watch',  'region': 'Vancouver',
      'icon_color': '#2ca02c'},
     {'name': 'Strider',          'operator': 'Vancouver Whale Watch',  'region': 'Vancouver',
@@ -59,12 +61,18 @@ WHALE_FLEET = [
      'icon_color': '#ff7f0e', 'mmsi': 316042213},
     {'name': 'Salish Sea Eclipse', 'operator': 'Prince of Whales', 'region': 'Victoria',
      'icon_color': '#ff7f0e'},
+    {'name': 'Salish Sea Glory',   'operator': 'Prince of Whales', 'region': 'Vancouver',
+     'icon_color': '#ff7f0e', 'mmsi': 316059231},
     {'name': 'Ocean Magic II',     'operator': 'Prince of Whales', 'region': 'Telegraph Cove',
      'icon_color': '#ff7f0e'},
     {'name': 'Ocean Magic',        'operator': 'Prince of Whales', 'region': 'Telegraph Cove',
      'icon_color': '#ff7f0e'},
     {'name': 'Countess',           'operator': 'Other', 'region': 'Vancouver',
      'icon_color': '#9467bd', 'mmsi': 316004455},
+    {'name': 'Lady Di',            'operator': 'Other', 'region': 'Vancouver',
+     'icon_color': '#9467bd', 'mmsi': 316004456},
+    {'name': 'The Duchess',        'operator': 'Other', 'region': 'Vancouver',
+     'icon_color': '#9467bd', 'mmsi': 316004454},
 ]
 
 
