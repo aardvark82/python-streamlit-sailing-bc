@@ -40,6 +40,18 @@ except OSError:
 
 app = Flask(__name__, static_folder=str(FRONTEND_DIR), static_url_path="")
 
+
+# Allow third-party clients (iOS chart plotter, LLM agents, etc.) to call
+# the /api/v1/ public surface from any origin. Other endpoints are
+# internal to the UI and don't need CORS.
+@app.after_request
+def _cors(resp):
+    if request.path.startswith("/api/v1/"):
+        resp.headers["Access-Control-Allow-Origin"] = "*"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+        resp.headers["Access-Control-Allow-Headers"] = "*"
+    return resp
+
 # In-memory cycle status (last run per buoy)
 _cycle_status: dict[str, dict] = {}
 _cycle_lock = threading.Lock()
@@ -92,6 +104,71 @@ def run_fetch_cycle():
 @app.route("/")
 def index():
     return send_from_directory(str(FRONTEND_DIR), "index.html")
+
+
+# ── /api/v1 — public read-only surface (CORS-enabled, stable contract) ─
+
+import pytz as _pytz_v1
+
+
+def _current_for(buoy_id: str):
+    """Latest reading from SQLite, normalized for the v1 public API."""
+    rows = db.read_history(buoy_id, days_back=1) or db.read_history(buoy_id, days_back=3)
+    if not rows:
+        return None
+    r = rows[-1]
+    ts = r["timestamp"]   # tz-aware Vancouver datetime
+    ts_utc = ts.astimezone(_pytz_v1.UTC)
+    age_min = int((datetime.now(VAN_TZ) - ts).total_seconds() / 60)
+    meta = BUOY_BY_ID.get(buoy_id) or {}
+    wave_m = r.get("wave_height")
+    return {
+        "id": buoy_id,
+        "name": meta.get("name", buoy_id),
+        "wind_kts": int(round(r["wind_speed"])) if r.get("wind_speed") is not None else None,
+        "wind_direction": r.get("direction"),
+        "wave_height_m": round(float(wave_m), 2) if wave_m is not None else None,
+        "wave_height_cm": int(round(wave_m * 100)) if wave_m is not None else None,
+        "waves_supported": bool(meta.get("waves", False)),
+        "updated_at_utc": ts_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "updated_at_local": ts.isoformat(timespec="seconds"),
+        "age_minutes": age_min,
+        "stale": age_min > 90,
+    }
+
+
+@app.route("/api/v1/locations")
+def api_v1_locations():
+    """Registry — id, human name, waves capability."""
+    return jsonify([
+        {"id": b["id"], "name": b["name"], "waves": bool(b.get("waves", False))}
+        for b in BUOYS
+    ])
+
+
+@app.route("/api/v1/current")
+def api_v1_current_all():
+    """Current readings for every tracked location."""
+    out = {}
+    for b in BUOYS:
+        c = _current_for(b["id"])
+        if c:
+            out[b["id"]] = c
+    return jsonify({
+        "fetched_at_utc": datetime.now(_pytz_v1.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "locations": out,
+    })
+
+
+@app.route("/api/v1/current/<bid>")
+def api_v1_current_one(bid):
+    """Current reading for a single location."""
+    if bid not in BUOY_BY_ID:
+        return jsonify(error=f"unknown location '{bid}'"), 404
+    c = _current_for(bid)
+    if not c:
+        return jsonify(error="no data available", id=bid), 503
+    return jsonify(c)
 
 
 @app.route("/api/version")

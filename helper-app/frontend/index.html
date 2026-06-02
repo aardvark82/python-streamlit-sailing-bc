@@ -162,13 +162,14 @@
             <button className={`nav-btn ${view === 'forecast' ? 'active' : ''}`} onClick={() => setView('forecast')}>Marine Forecast</button>
             <button className={`nav-btn ${view === 'wave' ? 'active' : ''}`} onClick={() => setView('wave')}>Wave Model</button>
             <button className={`nav-btn ${view === 'alexa' ? 'active' : ''}`} onClick={() => setView('alexa')}>Alexa</button>
+            <button className={`nav-btn ${view === 'api' ? 'active' : ''}`} onClick={() => setView('api')}>API</button>
             <button className={`nav-btn ${view === 'reconcile' ? 'active' : ''}`} onClick={() => setView('reconcile')}>Reconcile</button>
             <div className="nav-section">Admin</div>
             <button className="nav-btn" onClick={triggerFetch}>Fetch now</button>
             <button className={`nav-btn ${view === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')}>Settings</button>
           </div>
           <div className="main">
-            {view !== 'settings' && view !== 'trends' && view !== 'reconcile' && view !== 'wave' && view !== 'alexa' && view !== 'forecast' && (
+            {view !== 'settings' && view !== 'trends' && view !== 'reconcile' && view !== 'wave' && view !== 'alexa' && view !== 'forecast' && view !== 'api' && (
               <div className="location-tabs">
                 {locations.map(l => (
                   <button key={l.id} className={activeLoc === l.id ? 'active' : ''}
@@ -183,6 +184,7 @@
               {view === 'forecast' && <ForecastView />}
               {view === 'wave' && <WaveModelView />}
               {view === 'alexa' && <AlexaView />}
+              {view === 'api' && <APIView locations={locations} />}
               {view === 'reconcile' && <ReconcileView locations={locations} />}
               {view === 'settings' && <SettingsView />}
             </ErrorBoundary>
@@ -410,6 +412,141 @@
               )}
             </div>
           )}
+        </div>
+      );
+    }
+
+    function APIView({ locations }) {
+      const base = window.location.origin;
+      const [sample, setSample] = useState(null);
+      useEffect(() => {
+        fetch('/api/v1/current').then(r => r.json()).then(setSample);
+      }, []);
+
+      const code = ({ children }) => (
+        <pre style={{ background: '#0f172a', color: '#e2e8f0', padding: 12, borderRadius: 6,
+                        overflowX: 'auto', fontSize: '0.82rem', lineHeight: 1.45 }}>{children}</pre>
+      );
+      const copyBtn = (text) => (
+        <button style={{ background: '#64748b', fontSize: '0.78rem', padding: '4px 10px', marginLeft: 8 }}
+                onClick={() => { navigator.clipboard.writeText(text); }}>📋 Copy</button>
+      );
+
+      const llmPrompt = `You can fetch current marine weather conditions for buoys around Vancouver, BC.
+
+BASE URL: ${base}
+
+ENDPOINTS (all GET, no auth, CORS-enabled, return JSON):
+  /api/v1/locations            → list of station registries [{id, name, waves}]
+  /api/v1/current              → current readings for all stations
+  /api/v1/current/{id}         → current reading for one station
+
+CURRENT-READING SHAPE (per station):
+  id              string  station id (e.g. "WAS")
+  name            string  human name (e.g. "Pam Rocks")
+  wind_kts        int     sustained wind speed, knots
+  wind_direction  string  compass abbrev (N, NE, E, …, NW) or null
+  wave_height_m   float   significant wave height in meters, or null
+  wave_height_cm  int     same in centimeters, or null
+  waves_supported bool    whether the station reports waves at all
+  updated_at_utc  string  ISO 8601 UTC, e.g. "2026-05-29T01:17:16Z"
+  updated_at_local string ISO 8601 with Vancouver offset
+  age_minutes     int     minutes since the reading was captured
+  stale           bool    true if age_minutes > 90
+
+STATIONS:
+  WAS      Pam Rocks       (Howe Sound, wind only)
+  46146    Halibut Bank    (Strait of Georgia, wind + waves)
+  46304    English Bay     (Vancouver, wind + waves)
+  WSB      Point Atkinson  (wind only)
+  JERICHO  Jericho Wind    (JSCA Davis station, wind only)
+
+Data is captured hourly from environment.gc.ca (Jericho from jsca.bc.ca)
+and stored in local SQLite. Wind direction is a 16-point compass label.
+A "stale" flag means data is older than 90 minutes (cron failure or
+upstream outage).
+
+Example: fetch all current conditions
+  fetch("${base}/api/v1/current")
+    .then(r => r.json())
+    .then(data => /* data.locations is keyed by id */);`;
+
+      return (
+        <div>
+          <h2>Public API</h2>
+          <p className="muted">Read-only JSON endpoints for the buoy data this helper-app collects.
+            No auth, CORS open. Use these from your iOS chart plotter, an LLM agent, or any other client.</p>
+
+          <div className="card">
+            <h3 style={{ marginTop: 0 }}>Base URL {copyBtn(base)}</h3>
+            {code({ children: base })}
+          </div>
+
+          <div className="card">
+            <h3 style={{ marginTop: 0 }}>Endpoints</h3>
+            <table className="log-table">
+              <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+              <tbody>
+                <tr><td>GET</td><td><code>/api/v1/locations</code></td><td>List all tracked stations</td></tr>
+                <tr><td>GET</td><td><code>/api/v1/current</code></td><td>Current wind+wave for every station</td></tr>
+                <tr><td>GET</td><td><code>/api/v1/current/{`{id}`}</code></td><td>Current for one station (404 if unknown, 503 if no data)</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div className="card">
+            <h3 style={{ marginTop: 0 }}>Try it: /api/v1/current
+              {copyBtn(`${base}/api/v1/current`)}
+            </h3>
+            <p className="muted" style={{ marginBottom: 4 }}>Live response right now:</p>
+            {sample ? code({ children: JSON.stringify(sample, null, 2) }) : <p>Loading…</p>}
+          </div>
+
+          <div className="card">
+            <h3 style={{ marginTop: 0 }}>curl examples {copyBtn(`curl ${base}/api/v1/current\ncurl ${base}/api/v1/current/WAS`)}</h3>
+            {code({ children: `# All locations
+curl ${base}/api/v1/current
+
+# Just Pam Rocks
+curl ${base}/api/v1/current/WAS
+
+# Registry
+curl ${base}/api/v1/locations` })}
+          </div>
+
+          <div className="card">
+            <h3 style={{ marginTop: 0 }}>iOS / Swift example {copyBtn(`let url = URL(string: "${base}/api/v1/current/WAS")!
+URLSession.shared.dataTask(with: url) { data, _, _ in
+    guard let data = data,
+          let json = try? JSONSerialization.jsonObject(with: data) else { return }
+    print(json)
+}.resume()`)}</h3>
+            {code({ children: `struct CurrentReading: Decodable {
+  let id: String
+  let name: String
+  let wind_kts: Int?
+  let wind_direction: String?
+  let wave_height_m: Double?
+  let wave_height_cm: Int?
+  let updated_at_utc: String   // ISO 8601 Z
+  let age_minutes: Int
+  let stale: Bool
+}
+
+let url = URL(string: "${base}/api/v1/current/WAS")!
+URLSession.shared.dataTask(with: url) { data, _, _ in
+  guard let data = data,
+        let reading = try? JSONDecoder().decode(CurrentReading.self, from: data)
+  else { return }
+  print(reading.wind_kts ?? -1, reading.wind_direction ?? "?", reading.updated_at_utc)
+}.resume()` })}
+          </div>
+
+          <div className="card" style={{ background: '#eff6ff', borderColor: '#93c5fd' }}>
+            <h3 style={{ marginTop: 0 }}>🤖 Prompt for Claude / Cursor / Copilot {copyBtn(llmPrompt)}</h3>
+            <p className="muted">Paste this into your coding assistant to give it everything it needs to call the API.</p>
+            {code({ children: llmPrompt })}
+          </div>
         </div>
       );
     }
