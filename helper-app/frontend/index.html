@@ -227,8 +227,8 @@
     }
 
     // ── Day/night shading (dependency-free NOAA sun calc, DST-correct) ──
-    const _DAY_FILL = 'rgba(135, 206, 250, 0.10)';   // light sky blue
-    const _NIGHT_FILL = 'rgba(23, 49, 99, 0.16)';    // darker navy
+    const _DAY_FILL = 'rgba(135, 206, 250, 0.28)';   // light sky blue — clearly visible
+    const _NIGHT_FILL = 'rgba(28, 52, 94, 0.33)';    // darker navy
     const _VAN_TZ = 'America/Vancouver';
     const _VANFMT = new Intl.DateTimeFormat('en-CA', {
       timeZone: _VAN_TZ, year: 'numeric', month: '2-digit', day: '2-digit',
@@ -362,9 +362,9 @@
         }
         // Day/Night legend proxies (shapes don't appear in the legend on their own)
         traces.push({ x: [null], y: [null], type: 'scatter', mode: 'markers', name: 'Day',
-                      marker: { size: 12, symbol: 'square', color: 'rgba(135,206,250,0.6)' } });
+                      marker: { size: 12, symbol: 'square', color: 'rgba(135,206,250,0.85)' } });
         traces.push({ x: [null], y: [null], type: 'scatter', mode: 'markers', name: 'Night',
-                      marker: { size: 12, symbol: 'square', color: 'rgba(23,49,99,0.7)' } });
+                      marker: { size: 12, symbol: 'square', color: 'rgba(28,52,94,0.85)' } });
 
         let shapes = [];
         try { shapes = buildDayNightShapes(x); } catch (e) { console.warn('shading skipped', e); }

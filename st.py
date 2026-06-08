@@ -926,8 +926,10 @@ def _add_day_night_shading(fig, start, end, lat=49.28, lon=-123.12):
     if cursor < end:
         night_intervals.append((cursor, end))
 
-    DAY = 'rgba(135, 206, 250, 0.10)'   # light sky blue
-    NIGHT = 'rgba(23, 49, 99, 0.18)'    # darker navy
+    DAY = 'rgba(135, 206, 250, 0.28)'   # light sky blue — clearly visible
+    NIGHT = 'rgba(28, 52, 94, 0.33)'    # darker navy
+    DAY_LEGEND = 'rgba(135, 206, 250, 0.85)'
+    NIGHT_LEGEND = 'rgba(28, 52, 94, 0.85)'
     for a, b in day_intervals:
         fig.add_shape(type='rect', xref='x', yref='paper',
                       x0=pd.Timestamp(a), x1=pd.Timestamp(b), y0=0, y1=1,
@@ -939,9 +941,9 @@ def _add_day_night_shading(fig, start, end, lat=49.28, lon=-123.12):
 
     # Legend proxies so the shading is self-explanatory
     fig.add_trace(go.Scatter(x=[None], y=[None], mode='markers', name='Day',
-                             marker=dict(size=12, color=DAY.replace('0.10', '0.6'), symbol='square')))
+                             marker=dict(size=12, color=DAY_LEGEND, symbol='square')))
     fig.add_trace(go.Scatter(x=[None], y=[None], mode='markers', name='Night',
-                             marker=dict(size=12, color=NIGHT.replace('0.18', '0.7'), symbol='square')))
+                             marker=dict(size=12, color=NIGHT_LEGEND, symbol='square')))
 
 
 def plot_wave_history_chart(container, past_df, buoy_id):
