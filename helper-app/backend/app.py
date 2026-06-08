@@ -304,6 +304,41 @@ def api_settings_post():
     return jsonify(ok=True, updates=updates)
 
 
+@app.route("/api/ai/test_forecast", methods=["POST"])
+def api_ai_test_forecast():
+    """Force-fresh forecast parse for diagnostics. Does NOT touch the
+    region cache — always fetches the HTML and re-runs the AI parse with
+    whatever provider/model is currently configured in Settings.
+    Returns parsed rows + raw model output + tokens/cost/elapsed."""
+    body = request.get_json(silent=True) or {}
+    region = (body.get("region") or "howe_sound").strip()
+    if region not in forecast.REGIONS:
+        return jsonify(error=f"unknown region '{region}'"), 400
+    meta = forecast.REGIONS[region]
+    try:
+        html = forecast.fetch_html(meta["url"])
+        summary = forecast._parse_summary(html)
+        rows, parse_meta = forecast.ai_parse_html(
+            html,
+            reason=f"forecast TEST ({meta['name']})",
+            source_label=f"Marine forecast HTML — {meta['name']} (test)",
+        )
+        return jsonify({
+            "ok": True,
+            "region": region,
+            "name": meta["name"],
+            "url": meta["url"],
+            "issued": summary.get("issued"),
+            "period": summary.get("period"),
+            "forecast_text": summary.get("forecast_text"),
+            "rows": rows,
+            **parse_meta,
+        })
+    except Exception as e:
+        log.exception("forecast test failed")
+        return jsonify(ok=False, error=str(e)), 500
+
+
 @app.route("/api/ollama/status")
 def api_ollama_status():
     return jsonify(ai_provider.ollama_status())

@@ -990,9 +990,26 @@ URLSession.shared.dataTask(with: url) { data, _, _ in
       const [ollama, setOllama] = useState(null);
       const [pulling, setPulling] = useState(false);
       const [msg, setMsg] = useState(null);
+      const [testing, setTesting] = useState(false);
+      const [testResult, setTestResult] = useState(null);
       const reload = () => fetch('/api/ollama/status').then(r => r.json()).then(setOllama);
       useEffect(reload, []);
       if (!s) return <p className="muted">Loading…</p>;
+
+      const runForecastTest = async () => {
+        setTesting(true);
+        setTestResult({ status: 'running' });
+        try {
+          const r = await fetch('/api/ai/test_forecast', { method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ region: 'howe_sound' }) });
+          const j = await r.json();
+          setTestResult({ status: r.ok ? 'ok' : 'error', ...j });
+        } catch (e) {
+          setTestResult({ status: 'error', error: String(e) });
+        }
+        setTesting(false);
+      };
       const post = async (body) => {
         await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                                          body: JSON.stringify(body) });
@@ -1068,6 +1085,125 @@ URLSession.shared.dataTask(with: url) { data, _, _ in
               expect 30-90s per forecast parse on a 10-core/20-thread iMac. Falls back to OpenAI
               if the toggle is on OpenAI.
             </p>
+          </div>
+
+          <div style={{ marginTop: 12 }}>
+            <button onClick={runForecastTest} disabled={testing}
+                    style={{ background: '#7c3aed' }}>
+              {testing ? 'Running…' : '🧪 Test model with forecast (Howe Sound)'}
+            </button>
+            <p className="muted" style={{ fontSize: '0.78rem', marginTop: 4 }}>
+              Forces a fresh fetch + AI parse using the provider/model selected above (bypasses
+              the hourly cache). Shows raw output + parsed rows + tokens/time/cost.
+            </p>
+          </div>
+
+          {testResult && <ForecastTestModal result={testResult} onClose={() => setTestResult(null)} />}
+        </div>
+      );
+    }
+
+
+    function ForecastTestModal({ result, onClose }) {
+      const money = (v) => v == null ? '—' : '$' + Number(v).toFixed(v < 1 ? 6 : 2);
+      const overlay = {
+        position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.55)',
+        zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '2rem',
+      };
+      const sheet = {
+        background: '#fff', borderRadius: 10, maxWidth: 1080, width: '100%',
+        maxHeight: '90vh', overflowY: 'auto', padding: '1.5rem',
+        boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+      };
+      return (
+        <div style={overlay} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+          <div style={sheet}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2 style={{ margin: 0 }}>🧪 Forecast test — {result.name || 'Howe Sound'}</h2>
+              <button onClick={onClose} style={{ background: '#64748b' }}>Close</button>
+            </div>
+
+            {result.status === 'running' && (
+              <p className="muted" style={{ marginTop: 16 }}>Fetching forecast HTML and running the AI parse… (Ollama on CPU can take 30-90s)</p>
+            )}
+
+            {result.status === 'error' && (
+              <div style={{ marginTop: 16, color: '#dc2626' }}>
+                <strong>Error:</strong> {result.error}
+              </div>
+            )}
+
+            {result.status === 'ok' && (
+              <>
+                <div className="trend-grid" style={{ marginTop: 16 }}>
+                  <div className="trend-cell">
+                    <h4>Provider / Model</h4>
+                    <div className="trend-stat">
+                      {result.provider === 'ollama' ? '🖥 ' : '☁️ '}
+                      <strong>{result.provider}</strong>
+                      <br /><code style={{ fontSize: '0.85rem' }}>{result.model}</code>
+                    </div>
+                  </div>
+                  <div className="trend-cell">
+                    <h4>Tokens (in / out)</h4>
+                    <div className="trend-stat">
+                      <strong>{result.prompt_tokens?.toLocaleString()}</strong>
+                      &nbsp;/&nbsp;
+                      <strong>{result.completion_tokens?.toLocaleString()}</strong>
+                    </div>
+                  </div>
+                  <div className="trend-cell">
+                    <h4>Time / Cost</h4>
+                    <div className="trend-stat">
+                      <strong>{result.elapsed_sec?.toFixed(2)}s</strong>
+                      &nbsp;·&nbsp;
+                      <strong>{money(result.cost_usd)}</strong>
+                    </div>
+                  </div>
+                </div>
+
+                {result.issued && (
+                  <p className="muted" style={{ marginTop: 12, fontSize: '0.85rem' }}>
+                    Forecast issued {new Date(result.issued).toLocaleString()} · {result.period}
+                  </p>
+                )}
+
+                <h3 style={{ marginTop: 16 }}>Parsed rows ({result.rows?.length || 0})</h3>
+                {result.rows && result.rows.length > 0 ? (
+                  <table className="log-table">
+                    <thead><tr><th>Period</th><th>Wind</th><th>Gust</th><th>Direction</th></tr></thead>
+                    <tbody>
+                      {result.rows.map((r, i) => (
+                        <tr key={i}
+                            style={Math.max(r.wind, r.gust) > 15 ? { background: '#fee2e2' }
+                                : (Math.max(r.wind, r.gust) > 10 ? { background: '#fef9c3' } : {})}>
+                          <td>{r.time}</td><td>{r.wind} kt</td><td>{r.gust} kt</td><td>{r.dir}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <p className="muted">No rows parsed. Inspect the raw output below to see what the model returned.</p>
+                )}
+
+                <details style={{ marginTop: 16 }}>
+                  <summary className="muted" style={{ cursor: 'pointer' }}>Raw model output</summary>
+                  <pre style={{ background: '#0f172a', color: '#e2e8f0', padding: 12,
+                                  borderRadius: 6, overflowX: 'auto', fontSize: '0.82rem',
+                                  whiteSpace: 'pre-wrap' }}>
+                    {result.raw_output || '(empty)'}
+                  </pre>
+                </details>
+
+                {result.forecast_text && (
+                  <details style={{ marginTop: 8 }}>
+                    <summary className="muted" style={{ cursor: 'pointer' }}>Source forecast text (input)</summary>
+                    <p style={{ lineHeight: 1.5, marginTop: 6 }}>{result.forecast_text}</p>
+                  </details>
+                )}
+              </>
+            )}
           </div>
         </div>
       );

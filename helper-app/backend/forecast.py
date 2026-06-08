@@ -110,6 +110,57 @@ def _parse_summary(html: str) -> dict:
     return out
 
 
+def fetch_html(url: str) -> str:
+    """Public alias of _fetch_html — used by the 'Test model' endpoint
+    so it can bypass the per-region cache."""
+    return _fetch_html(url)
+
+
+def ai_parse_html(html: str, reason: str, source_label: str) -> tuple[list[dict], dict]:
+    """Run AI parsing on an arbitrary chunk of forecast HTML and also
+    return the raw model output + a small metadata block for UI display.
+    Returns (rows, metadata)."""
+    from . import ai_provider
+    now = datetime.now(VAN_TZ)
+    now_str = now.strftime("%A %H:%M %Z")
+    is_evening = now.hour >= 19
+
+    prompt = (
+        "Make it short and just the table. "
+        "Parse this forecast from marine weather canada (the section called \"Marine Forecast\") and "
+        "extract a table with the following columns: time, wind speed, max wind speed, wind direction. "
+        "wind speed is the first number in the wind speed string. max wind speed is the second. "
+        "for example - if it says 5 to 15 knots, wind speed is 5 and max wind speed is 15. "
+        "If it says light winds, use a value of 3. "
+        "Make sure the Max (Gust/gusting) wind speed if not mentioned is the value of the wind speed, never less. "
+        "Make it a CSV. The first row is current conditions with time 'now'. "
+        f"\n\nCurrent local time is {now_str}. "
+        "For the FIRST row, if the forecast says 'winds X becoming Y this evening/tonight/overnight', "
+        + ("it IS evening now, use the AFTER-transition value. "
+           if is_evening else "it is NOT evening yet, use the BEFORE-transition value. ")
+        + "\n\nHere's the forecast HTML:\n" + html
+    )
+    result = ai_provider.chat(
+        messages=[
+            {"role": "system", "content": "You are an expert meteorologist."},
+            {"role": "user", "content": prompt},
+        ],
+        reason=reason,
+        source_data=source_label,
+    )
+    rows = _csv_to_rows(result.content)
+    meta = {
+        "provider": result.provider,
+        "model": result.model,
+        "prompt_tokens": result.prompt_tokens,
+        "completion_tokens": result.completion_tokens,
+        "elapsed_sec": round(result.elapsed_sec, 2),
+        "cost_usd": round(result.cost_usd, 6),
+        "raw_output": result.content,
+    }
+    return rows, meta
+
+
 def _ai_parse(html: str, reason: str = "forecast parsing",
               source_label: str = "Marine forecast HTML") -> str:
     """Hand the marine-forecast HTML to whichever provider is configured
