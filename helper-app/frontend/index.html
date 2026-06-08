@@ -1196,9 +1196,18 @@ URLSession.shared.dataTask(with: url) { data, _, _ in
                   </pre>
                 </details>
 
-                {result.forecast_text && (
+                {result.clean_input && (
+                  <details style={{ marginTop: 8 }} open>
+                    <summary className="muted" style={{ cursor: 'pointer' }}>Cleaned input actually sent to the model</summary>
+                    <p style={{ lineHeight: 1.5, marginTop: 6, background: '#f0fdf4',
+                                  border: '1px solid #86efac', borderRadius: 6, padding: 10 }}>
+                      {result.clean_input}
+                    </p>
+                  </details>
+                )}
+                {result.forecast_text && result.forecast_text !== result.clean_input && (
                   <details style={{ marginTop: 8 }}>
-                    <summary className="muted" style={{ cursor: 'pointer' }}>Source forecast text (input)</summary>
+                    <summary className="muted" style={{ cursor: 'pointer' }}>Source forecast summary (reference)</summary>
                     <p style={{ lineHeight: 1.5, marginTop: 6 }}>{result.forecast_text}</p>
                   </details>
                 )}

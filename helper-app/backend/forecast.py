@@ -116,38 +116,77 @@ def fetch_html(url: str) -> str:
     return _fetch_html(url)
 
 
-def ai_parse_html(html: str, reason: str, source_label: str) -> tuple[list[dict], dict]:
-    """Run AI parsing on an arbitrary chunk of forecast HTML and also
-    return the raw model output + a small metadata block for UI display.
-    Returns (rows, metadata)."""
-    from . import ai_provider
+def _extract_forecast_text(html: str) -> str:
+    """Pull just the clean marine-forecast prose out of the full gc.ca
+    page. Feeding the whole HTML (head, JS, nav, footer — tens of
+    thousands of tokens) to a small local model makes it describe the
+    webpage instead of parsing the forecast. We send only this.
+
+    Priority: the <span class='textSummary'> we already parse for the
+    summary; fall back to the #forecast-content div's text; last resort
+    a stripped version of the whole page (truncated)."""
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+        summary = soup.find("span", class_="textSummary")
+        if summary and summary.get_text(strip=True):
+            return summary.get_text(" ", strip=True)
+        fc = soup.find("div", id="forecast-content")
+        if fc and fc.get_text(strip=True):
+            return fc.get_text(" ", strip=True)
+        text = soup.get_text(" ", strip=True)
+        return text[:4000]
+    except Exception:
+        return html[:4000]
+
+
+def _build_prompt(forecast_text: str) -> str:
     now = datetime.now(VAN_TZ)
     now_str = now.strftime("%A %H:%M %Z")
     is_evening = now.hour >= 19
-
-    prompt = (
-        "Make it short and just the table. "
-        "Parse this forecast from marine weather canada (the section called \"Marine Forecast\") and "
-        "extract a table with the following columns: time, wind speed, max wind speed, wind direction. "
-        "wind speed is the first number in the wind speed string. max wind speed is the second. "
-        "for example - if it says 5 to 15 knots, wind speed is 5 and max wind speed is 15. "
-        "If it says light winds, use a value of 3. "
-        "Make sure the Max (Gust/gusting) wind speed if not mentioned is the value of the wind speed, never less. "
-        "Make it a CSV. The first row is current conditions with time 'now'. "
+    return (
+        "You are parsing a marine wind forecast. Output ONLY a CSV table, "
+        "no prose, no explanation, no code fences. "
+        "Columns: time,wind speed,max wind speed,wind direction. "
+        "wind speed is the first number in a range; max wind speed is the second. "
+        "Example: '5 to 15 knots' -> wind speed 5, max wind speed 15. "
+        "If it says 'light', use 3. "
+        "If a max/gust isn't given, set max wind speed equal to wind speed, never less. "
+        "wind direction is the compass word (e.g. northerly, southerly, northwesterly). "
+        "The FIRST row is the current/nearest period with time 'now'. "
+        "Add one row per subsequent period mentioned (this morning, this evening, "
+        "Tuesday morning, etc.). "
         f"\n\nCurrent local time is {now_str}. "
-        "For the FIRST row, if the forecast says 'winds X becoming Y this evening/tonight/overnight', "
+        "For the 'now' row, if the text says 'winds X becoming Y this evening/tonight/overnight', "
         + ("it IS evening now, use the AFTER-transition value. "
            if is_evening else "it is NOT evening yet, use the BEFORE-transition value. ")
-        + "\n\nHere's the forecast HTML:\n" + html
+        + "\n\nForecast text:\n" + forecast_text
+        + "\n\nCSV:"
     )
+
+
+def _run_parse(html: str, *, reason: str, source_label: str):
+    """Shared core: extract clean text → build prompt → call provider.
+    Returns the ai_provider.AIResult."""
+    from . import ai_provider
+    forecast_text = _extract_forecast_text(html)
+    prompt = _build_prompt(forecast_text)
     result = ai_provider.chat(
         messages=[
-            {"role": "system", "content": "You are an expert meteorologist."},
+            {"role": "system", "content":
+             "You are an expert meteorologist that outputs only CSV tables."},
             {"role": "user", "content": prompt},
         ],
         reason=reason,
         source_data=source_label,
     )
+    # Attach the cleaned input so the test modal can show what was actually sent
+    result_extra = forecast_text
+    return result, result_extra
+
+
+def ai_parse_html(html: str, reason: str, source_label: str) -> tuple[list[dict], dict]:
+    """Run AI parsing and also return raw output + metadata for the UI."""
+    result, clean_input = _run_parse(html, reason=reason, source_label=source_label)
     rows = _csv_to_rows(result.content)
     meta = {
         "provider": result.provider,
@@ -157,43 +196,16 @@ def ai_parse_html(html: str, reason: str, source_label: str) -> tuple[list[dict]
         "elapsed_sec": round(result.elapsed_sec, 2),
         "cost_usd": round(result.cost_usd, 6),
         "raw_output": result.content,
+        "clean_input": clean_input,
     }
     return rows, meta
 
 
 def _ai_parse(html: str, reason: str = "forecast parsing",
-              source_label: str = "Marine forecast HTML") -> str:
-    """Hand the marine-forecast HTML to whichever provider is configured
-    (OpenAI or Ollama) and get back the CSV table. ai_provider handles
-    logging + cost calc + the provider switch."""
-    now = datetime.now(VAN_TZ)
-    now_str = now.strftime("%A %H:%M %Z")
-    is_evening = now.hour >= 19
-
-    prompt = (
-        "Make it short and just the table. "
-        "Parse this forecast from marine weather canada (the section called \"Marine Forecast\") and "
-        "extract a table with the following columns: time, wind speed, max wind speed, wind direction. "
-        "wind speed is the first number in the wind speed string. max wind speed is the second. "
-        "for example - if it says 5 to 15 knots, wind speed is 5 and max wind speed is 15. "
-        "If it says light winds, use a value of 3. "
-        "Make sure the Max (Gust/gusting) wind speed if not mentioned is the value of the wind speed, never less. "
-        "Make it a CSV. The first row is current conditions with time 'now'. "
-        f"\n\nCurrent local time is {now_str}. "
-        "For the FIRST row, if the forecast says 'winds X becoming Y this evening/tonight/overnight', "
-        + ("it IS evening now, use the AFTER-transition value. "
-           if is_evening else "it is NOT evening yet, use the BEFORE-transition value. ")
-        + "\n\nHere's the forecast HTML:\n" + html
-    )
-
-    result = ai_provider.chat(
-        messages=[
-            {"role": "system", "content": "You are an expert meteorologist."},
-            {"role": "user", "content": prompt},
-        ],
-        reason=reason,
-        source_data=source_label,
-    )
+              source_label: str = "Marine forecast text") -> str:
+    """Hand the cleaned forecast text to the configured provider and get
+    back the CSV table."""
+    result, _ = _run_parse(html, reason=reason, source_label=source_label)
     return result.content
 
 

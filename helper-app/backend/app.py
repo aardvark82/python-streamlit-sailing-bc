@@ -329,7 +329,7 @@ def api_ai_test_forecast():
         rows, parse_meta = forecast.ai_parse_html(
             html,
             reason=f"forecast TEST ({meta['name']})",
-            source_label=f"Marine forecast HTML — {meta['name']} (test)",
+            source_label=f"Marine forecast text — {meta['name']} (test)",
         )
         return jsonify({
             "ok": True,
