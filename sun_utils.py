@@ -111,7 +111,11 @@ def add_day_night_shading(fig, start, end, lat=49.28, lon=-123.12, add_legend=Tr
                       fillcolor=NIGHT_FILL, line_width=0, layer='below')
 
     if add_legend:
-        fig.add_trace(go.Scatter(x=[None], y=[None], mode='markers', name='Day',
+        # Use a real in-window datetime as x (with y=None so nothing draws).
+        # x=[None] would leave the x-axis type ambiguous and, combined with a
+        # numeric add_vline elsewhere, can flip the whole axis to linear.
+        x_anchor = pd.Timestamp(start)
+        fig.add_trace(go.Scatter(x=[x_anchor], y=[None], mode='markers', name='Day',
                                  marker=dict(size=12, color=DAY_LEGEND, symbol='square')))
-        fig.add_trace(go.Scatter(x=[None], y=[None], mode='markers', name='Night',
+        fig.add_trace(go.Scatter(x=[x_anchor], y=[None], mode='markers', name='Night',
                                  marker=dict(size=12, color=NIGHT_LEGEND, symbol='square')))

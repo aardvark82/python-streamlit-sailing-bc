@@ -571,6 +571,9 @@ def create_natural_tide_chart(tide_df, container=None):
         plot_bgcolor='white',
         paper_bgcolor='white',
         xaxis=dict(
+            type='date',  # pin to a date axis — the day/night legend proxies +
+                          # the epoch-ms add_vline below could otherwise let
+                          # Plotly flip the axis to linear (numeric epoch ticks).
             showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)',
             zeroline=False,
             # Clip visible window to the next 48 h so the chart focuses on
