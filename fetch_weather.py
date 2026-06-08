@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from timeago import format as timeago_format
 
 from wind_utils import create_arrow_html
+from sun_utils import add_day_night_shading, NIGHT_GREY, NIGHT_GREY_LEGEND
 
 
 @dataclass
@@ -183,6 +184,16 @@ def display_precipitation_forecast(weather_data, container):
         precip_chances.append(risk_of_rain * 10)
 
     fig = go.Figure()
+
+    # Light-grey night bands behind the 5-day forecast (sun-based; the
+    # x-axis here is real hourly datetimes, so this maps to actual
+    # sunrise/sunset unlike the categorical marine-forecast chart).
+    if timestamps:
+        try:
+            add_day_night_shading(fig, timestamps[0], timestamps[-1], day_fill=None,
+                                  night_fill=NIGHT_GREY, night_legend=NIGHT_GREY_LEGEND)
+        except Exception as e:
+            print(f"5-day forecast night shading skipped: {e}")
 
     fig.add_trace(go.Bar(
         x=timestamps,
