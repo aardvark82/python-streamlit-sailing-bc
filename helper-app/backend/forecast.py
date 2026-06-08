@@ -11,6 +11,7 @@ afternoon?' which the past-wind trend model can't.
 """
 from __future__ import annotations
 
+import csv
 import io
 import logging
 import re
@@ -209,29 +210,61 @@ def _ai_parse(html: str, reason: str = "forecast parsing",
     return result.content
 
 
+def _num(x) -> int:
+    """Highest integer in a cell; 'light' → 3; else 0."""
+    s = str(x or "").strip()
+    if not s:
+        return 0
+    if "light" in s.lower():
+        return 3
+    nums = re.findall(r"\d+", s)
+    return max(int(n) for n in nums) if nums else 0
+
+
+def _looks_like_header(time_field: str, wind_field: str) -> bool:
+    """True for a CSV header row so we never treat 'time,wind speed,…' as data."""
+    t = (time_field or "").strip().lower()
+    w = (wind_field or "").strip().lower()
+    if t in ("time", "period", "when"):
+        return True
+    # 'wind speed' / 'windspeed' / 'speed' in the 2nd column with no digit
+    if ("wind" in w or "speed" in w) and not any(c.isdigit() for c in w):
+        return True
+    return False
+
+
 def _csv_to_rows(csv_text: str) -> list[dict]:
+    """Parse the model's CSV into rows. Robust to:
+    - missing header (both OpenAI and Ollama often omit it) — we read
+      POSITIONALLY (col0=time, col1=wind, col2=gust, col3=dir) rather than
+      by header name, so a 'now,20,20,northerly' first line isn't eaten as
+      the header.
+    - quoted OR unquoted values (csv module handles both).
+    - multi-word directions ('northerly outflow', 'southerly inflow').
+    - a header row IF the model includes one (skipped via _looks_like_header).
+    - extra trailing columns (ignored) / short rows (skipped).
+    """
     csv_text = csv_text.replace("```csv", "").replace("```", "").strip()
-    df = pd.read_csv(io.StringIO(csv_text), sep=",", on_bad_lines="skip")
-    df = df.dropna(how="all").reset_index(drop=True)
-    df.columns = df.columns.str.strip().str.lower()
-
-    def num(x):
-        if pd.isna(x):
-            return 0
-        s = str(x)
-        if "light" in s.lower():
-            return 3
-        nums = re.findall(r"\d+", s)
-        return max(int(n) for n in nums) if nums else 0
-
     rows = []
-    for _, r in df.iterrows():
-        time = str(r.get("time", "")).strip()
-        wind = num(r.get("wind speed", r.get("wind_speed", 0)))
-        gust = num(r.get("max wind speed", r.get("max_wind_speed", 0)))
-        dirn = str(r.get("wind direction", r.get("wind_direction", ""))).strip().upper()
+    for fields in csv.reader(io.StringIO(csv_text)):
+        if len(fields) < 3:
+            continue
+        time = (fields[0] or "").strip()
+        wind_raw = (fields[1] or "").strip()
+        gust_raw = (fields[2] or "").strip() if len(fields) > 2 else ""
+        dirn = (fields[3] or "").strip().upper() if len(fields) > 3 else ""
+
+        if _looks_like_header(time, wind_raw):
+            continue
+
+        wind = _num(wind_raw)
+        gust = _num(gust_raw)
+        # If no gust given, mirror wind (matches the prompt's instruction).
+        if gust == 0 and wind > 0:
+            gust = wind
+
         # Drop fully-empty rows (a weak model can emit blank/garbage lines)
-        if not time and wind == 0 and gust == 0 and dirn in ("", "NAN"):
+        if not time and wind == 0 and gust == 0 and dirn in ("", "NAN", "N/A"):
             continue
         rows.append({"time": time, "wind": wind, "gust": gust, "dir": dirn})
     return rows
