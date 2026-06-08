@@ -46,7 +46,9 @@
     .trend-cell h4 { margin: 0 0 0.5rem; text-transform: capitalize; }
     .trend-stat { font-size: 0.85rem; color: #475569; }
     .trend-stat strong { color: #0f172a; }
-    .settings-form { max-width: 480px; }
+    .settings-form { max-width: none; }
+    /* Constrain the key-input + key-info bits — full width is overkill for an sk-… string */
+    .settings-form > input[type="password"] { max-width: 560px; }
     .settings-form label { display: block; margin-bottom: 0.4rem; font-weight: 500; font-size: 0.9rem; }
     .settings-form input { width: 100%; padding: 0.55rem; border: 1px solid #cbd5e1; border-radius: 6px;
                             font-family: monospace; font-size: 0.85rem; }
