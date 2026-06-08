@@ -14,6 +14,8 @@ from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 from scipy.interpolate import CubicSpline
 
+from sun_utils import add_day_night_shading
+
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -529,6 +531,12 @@ def create_natural_tide_chart(tide_df, container=None):
 
     # ── Build chart and render full-width below the metrics ──
     fig = go.Figure()
+
+    # Day/night background bands first so they render beneath the tide curve.
+    try:
+        add_day_night_shading(fig, current_time, current_time + pd.Timedelta(hours=48))
+    except Exception as e:
+        print(f"Tide day/night shading skipped: {e}")
 
     fig.add_trace(go.Scatter(
         x=smooth_tide_df['datetime'],
