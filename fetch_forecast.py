@@ -12,6 +12,30 @@ from utils import cached_fetch_url
 from wind_utils import create_arrow_html
 
 
+def _extract_forecast_text(html):
+    """Pull just the clean marine-forecast prose out of the full gc.ca
+    page. Feeding the whole HTML (head, JS, nav, footer — tens of
+    thousands of tokens) to the model wastes tokens and, on weaker
+    models, makes it describe the webpage instead of parsing the
+    forecast. We send only this clean text.
+
+    Priority: <span class='textSummary'> (same node the BeautifulSoup
+    path reads); fall back to the #forecast-content div text; last
+    resort a stripped, truncated version of the whole page."""
+    try:
+        soup = BeautifulSoup(html, 'html.parser')
+        summary = soup.find('span', class_='textSummary')
+        if summary and summary.get_text(strip=True):
+            return summary.get_text(' ', strip=True)
+        fc = soup.find('div', id='forecast-content')
+        if fc and fc.get_text(strip=True):
+            return fc.get_text(' ', strip=True)
+        text = soup.get_text(' ', strip=True)
+        return text[:4000]
+    except Exception:
+        return html[:4000]
+
+
 def openAIFetchForecastForURL(url):
     """Use GPT-4o to parse a marine forecast page into a CSV table of wind data.
     The response depends on the time of day (evening vs not) so the cache key includes it."""
@@ -66,9 +90,11 @@ def _openAIFetchForecastForURL_cached(url, time_bucket):
         f"{'it IS evening now (>= 7 PM Pacific), so use the AFTER-transition value (e.g. Y / light / strong).' if is_evening else 'it is NOT evening yet (< 7 PM Pacific), so use the BEFORE-transition value (e.g. X / 5-15).'} "
         "Apply the same logic for 'becoming ... tonight' (threshold 9 PM) and 'becoming ... overnight' (threshold 11 PM). "
         "The 'time' column for this first row should still be labeled with the current period (e.g. 'now'). "
-        "\n\nHere's the forecast HTML:"
+        "\n\nHere's the forecast text:\n"
     )
-    chat_gpt_msg = chat_gpt_msg + response.text
+    # Send the clean extracted forecast text, NOT the full HTML page —
+    # smaller/cheaper prompt and far more reliable parsing.
+    chat_gpt_msg = chat_gpt_msg + _extract_forecast_text(response.text)
 
     url_api = "https://api.openai.com/v1/chat/completions"
     headers = {
