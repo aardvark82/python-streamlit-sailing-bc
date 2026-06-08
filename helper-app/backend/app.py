@@ -46,11 +46,19 @@ app = Flask(__name__, static_folder=str(FRONTEND_DIR), static_url_path="")
 # the /api/v1/ public surface from any origin. Other endpoints are
 # internal to the UI and don't need CORS.
 @app.after_request
-def _cors(resp):
+def _response_headers(resp):
     if request.path.startswith("/api/v1/"):
         resp.headers["Access-Control-Allow-Origin"] = "*"
         resp.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
         resp.headers["Access-Control-Allow-Headers"] = "*"
+    # The SPA shell (index.html) must always be revalidated so a fresh
+    # Coolify deploy is picked up on a normal reload — no hard-refresh
+    # needed. The single-file React app has no hashed asset bundle, so
+    # the HTML is the only thing browsers were caching stalely.
+    if resp.mimetype == "text/html":
+        resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
     return resp
 
 # In-memory cycle status (last run per buoy)
