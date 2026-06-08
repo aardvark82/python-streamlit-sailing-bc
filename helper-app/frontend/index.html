@@ -226,6 +226,98 @@
       );
     }
 
+    // ── Day/night shading (dependency-free NOAA sun calc, DST-correct) ──
+    const _DAY_FILL = 'rgba(135, 206, 250, 0.10)';   // light sky blue
+    const _NIGHT_FILL = 'rgba(23, 49, 99, 0.16)';    // darker navy
+    const _VAN_TZ = 'America/Vancouver';
+    const _VANFMT = new Intl.DateTimeFormat('en-CA', {
+      timeZone: _VAN_TZ, year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+
+    function _mod(a, n) { return ((a % n) + n) % n; }
+    function _dayOfYear(y, m, d) { return Math.floor((Date.UTC(y, m - 1, d) - Date.UTC(y, 0, 1)) / 86400000) + 1; }
+
+    function _sunUT(year, month, day, isSunrise, lat, lon) {
+      const toRad = Math.PI / 180;
+      const N = _dayOfYear(year, month, day);
+      const lngHour = lon / 15;
+      const t = N + ((isSunrise ? 6 : 18) - lngHour) / 24;
+      const M = 0.9856 * t - 3.289;
+      const L = _mod(M + 1.916 * Math.sin(M * toRad) + 0.020 * Math.sin(2 * M * toRad) + 282.634, 360);
+      let RA = _mod(Math.atan(0.91764 * Math.tan(L * toRad)) / toRad, 360);
+      RA += (Math.floor(L / 90) * 90) - (Math.floor(RA / 90) * 90);
+      RA /= 15;
+      const sinDec = 0.39782 * Math.sin(L * toRad);
+      const cosDec = Math.cos(Math.asin(sinDec));
+      const cosH = (Math.cos(90.833 * toRad) - sinDec * Math.sin(lat * toRad)) / (cosDec * Math.cos(lat * toRad));
+      if (cosH > 1 || cosH < -1) return null;
+      let H = isSunrise ? (360 - Math.acos(cosH) / toRad) : (Math.acos(cosH) / toRad);
+      H /= 15;
+      const T = H + RA - 0.06571 * t - 6.622;
+      return _mod(T - lngHour, 24);
+    }
+
+    function _vanWall(instant) {
+      const m = {}; _VANFMT.formatToParts(instant).forEach(p => m[p.type] = p.value);
+      const hh = m.hour === '24' ? '00' : m.hour;
+      return { date: `${m.year}-${m.month}-${m.day}`, iso: `${m.year}-${m.month}-${m.day}T${hh}:${m.minute}:${m.second}` };
+    }
+
+    function _sunWall(year, month, day, isSunrise, lat, lon) {
+      const ut = _sunUT(year, month, day, isSunrise, lat, lon);
+      if (ut == null) return null;
+      let instant = new Date(Date.UTC(year, month - 1, day) + ut * 3600000);
+      let w = _vanWall(instant);
+      const target = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      if (w.date !== target) {  // snap the event back onto local date (UTC drift fix)
+        const drift = Math.round((Date.parse(target + 'T00:00:00Z') - Date.parse(w.date + 'T00:00:00Z')) / 86400000);
+        instant = new Date(instant.getTime() + drift * 86400000);
+        w = _vanWall(instant);
+      }
+      return w.iso;
+    }
+
+    // naiveTimestamps: sorted ascending "YYYY-MM-DDTHH:MM:SS" (Vancouver wall clock)
+    function buildDayNightShapes(naiveTimestamps, lat = 49.28, lon = -123.12) {
+      if (!naiveTimestamps.length) return [];
+      const start = naiveTimestamps[0];
+      const end = naiveTimestamps[naiveTimestamps.length - 1];
+      const startDate = new Date(start.slice(0, 10) + 'T00:00:00Z');
+      const endDate = new Date(end.slice(0, 10) + 'T00:00:00Z');
+      const clamp = (s) => s < start ? start : (s > end ? end : s);
+
+      // Daylight intervals per day (±1 day slack), clipped to the window
+      const dayIntervals = [];
+      for (let t = startDate.getTime() - 86400000; t <= endDate.getTime() + 86400000; t += 86400000) {
+        const dt = new Date(t);
+        const y = dt.getUTCFullYear(), mo = dt.getUTCMonth() + 1, da = dt.getUTCDate();
+        const sr = _sunWall(y, mo, da, true, lat, lon);
+        const ss = _sunWall(y, mo, da, false, lat, lon);
+        if (!sr || !ss || sr >= ss) continue;
+        const a = clamp(sr), b = clamp(ss);
+        if (a < b) dayIntervals.push([a, b]);
+      }
+      dayIntervals.sort((p, q) => p[0] < q[0] ? -1 : 1);
+
+      // Night = complement of daylight within [start, end]
+      const nightIntervals = [];
+      let cursor = start;
+      for (const [a, b] of dayIntervals) {
+        if (cursor < a) nightIntervals.push([cursor, a]);
+        if (b > cursor) cursor = b;
+      }
+      if (cursor < end) nightIntervals.push([cursor, end]);
+
+      const rect = (x0, x1, color) => ({
+        type: 'rect', xref: 'x', yref: 'paper', x0, x1, y0: 0, y1: 1,
+        fillcolor: color, line: { width: 0 }, layer: 'below',
+      });
+      return [
+        ...dayIntervals.map(([a, b]) => rect(a, b, _DAY_FILL)),
+        ...nightIntervals.map(([a, b]) => rect(a, b, _NIGHT_FILL)),
+      ];
+    }
+
     function GraphView({ locationId }) {
       const [series, setSeries] = useState(null);
       const [initing, setIniting] = useState(false);
@@ -256,7 +348,9 @@
       useEffect(() => {
         if (!series || !ref.current) return;
         if (!Array.isArray(series) || series.length === 0) return;
-        const x = series.map(s => s.timestamp);
+        // Strip the tz offset → naive Vancouver wall clock, so data and the
+        // day/night shading share one consistent time frame for Plotly.
+        const x = series.map(s => String(s.timestamp).slice(0, 19));
         const traces = [
           { x, y: series.map(s => s.wind_speed), type: 'scatter', mode: 'lines+markers',
             name: 'Wind (kts)', line: { color: '#3b82f6' } },
@@ -266,6 +360,15 @@
                         type: 'scatter', mode: 'lines+markers', name: 'Wave (cm)',
                         yaxis: 'y2', line: { color: '#10b981' } });
         }
+        // Day/Night legend proxies (shapes don't appear in the legend on their own)
+        traces.push({ x: [null], y: [null], type: 'scatter', mode: 'markers', name: 'Day',
+                      marker: { size: 12, symbol: 'square', color: 'rgba(135,206,250,0.6)' } });
+        traces.push({ x: [null], y: [null], type: 'scatter', mode: 'markers', name: 'Night',
+                      marker: { size: 12, symbol: 'square', color: 'rgba(23,49,99,0.7)' } });
+
+        let shapes = [];
+        try { shapes = buildDayNightShapes(x); } catch (e) { console.warn('shading skipped', e); }
+
         Plotly.newPlot(ref.current, traces, {
           margin: { l: 50, r: 50, t: 30, b: 40 },
           // Fixed 0-35 kt range so all locations are visually comparable
@@ -273,6 +376,7 @@
           yaxis2: { title: 'Wave (cm)', overlaying: 'y', side: 'right' },
           legend: { orientation: 'h', y: -0.2 },
           height: 420,
+          shapes,
         }, { responsive: true, displayModeBar: false });
       }, [series]);
       if (series === null) return <p className="muted">Loading…</p>;
