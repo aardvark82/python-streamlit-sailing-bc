@@ -322,6 +322,15 @@ def drawChartOfForecast(draw, df, title):
 
     fig = go.Figure()
 
+    # The forecast x-axis is CATEGORICAL ('now', 'this morning',
+    # 'Tuesday evening', …) — not real clock times — so shade night
+    # *periods* by label (light grey) rather than by sun position.
+    try:
+        from sun_utils import add_categorical_night_shading
+        add_categorical_night_shading(fig, df['time'])
+    except Exception as e:
+        print(f"Forecast night shading skipped: {e}")
+
     fig.add_trace(go.Scatter(
         x=df['time'], y=df['wind speed'],
         mode='lines+markers', name='Wind Speed',

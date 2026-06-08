@@ -720,6 +720,14 @@ def plot_merged_wind_chart(container, buoy_id, forecast_url, forecast_title):
 
     fig = go.Figure()
 
+    # Light-grey night bands across the whole ±3 day window, behind the data.
+    try:
+        from sun_utils import add_day_night_shading, NIGHT_GREY, NIGHT_GREY_LEGEND
+        add_day_night_shading(fig, x_min, x_max, day_fill=None,
+                              night_fill=NIGHT_GREY, night_legend=NIGHT_GREY_LEGEND)
+    except Exception as e:
+        print(f"Wind chart day/night shading skipped: {e}")
+
     # Past: buoy observations as arrow markers
     if past_df is not None and not past_df.empty:
         df = past_df.copy()

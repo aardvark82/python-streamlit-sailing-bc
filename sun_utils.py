@@ -68,10 +68,19 @@ def _sun_event_local(d, ut, tz):
     return local
 
 
-def add_day_night_shading(fig, start, end, lat=49.28, lon=-123.12, add_legend=True):
-    """Shade fig's background: light sky-blue for daylight, darker navy for
-    night, across the [start, end] window. Bands sit BELOW the data.
-    `start`/`end` should be tz-aware datetimes."""
+# Light grey night, no day fill — used on the wind charts.
+NIGHT_GREY = 'rgba(120, 120, 120, 0.18)'
+NIGHT_GREY_LEGEND = 'rgba(120, 120, 120, 0.75)'
+
+
+def add_day_night_shading(fig, start, end, lat=49.28, lon=-123.12, add_legend=True,
+                          day_fill=DAY_FILL, night_fill=NIGHT_FILL,
+                          day_legend=DAY_LEGEND, night_legend=NIGHT_LEGEND):
+    """Shade fig's background by sun position across [start, end]. Bands sit
+    BELOW the data. `start`/`end` should be tz-aware datetimes.
+
+    Pass day_fill=None to draw only night bands (e.g. light-grey nights on
+    the wind charts). Colors are overridable for per-chart styling."""
     tz = VAN_TZ
     start = start.astimezone(tz)
     end = end.astimezone(tz)
@@ -101,21 +110,60 @@ def add_day_night_shading(fig, start, end, lat=49.28, lon=-123.12, add_legend=Tr
     if cursor < end:
         night_intervals.append((cursor, end))
 
-    for a, b in day_intervals:
-        fig.add_shape(type='rect', xref='x', yref='paper',
-                      x0=pd.Timestamp(a), x1=pd.Timestamp(b), y0=0, y1=1,
-                      fillcolor=DAY_FILL, line_width=0, layer='below')
-    for a, b in night_intervals:
-        fig.add_shape(type='rect', xref='x', yref='paper',
-                      x0=pd.Timestamp(a), x1=pd.Timestamp(b), y0=0, y1=1,
-                      fillcolor=NIGHT_FILL, line_width=0, layer='below')
+    if day_fill:
+        for a, b in day_intervals:
+            fig.add_shape(type='rect', xref='x', yref='paper',
+                          x0=pd.Timestamp(a), x1=pd.Timestamp(b), y0=0, y1=1,
+                          fillcolor=day_fill, line_width=0, layer='below')
+    if night_fill:
+        for a, b in night_intervals:
+            fig.add_shape(type='rect', xref='x', yref='paper',
+                          x0=pd.Timestamp(a), x1=pd.Timestamp(b), y0=0, y1=1,
+                          fillcolor=night_fill, line_width=0, layer='below')
 
     if add_legend:
         # Use a real in-window datetime as x (with y=None so nothing draws).
         # x=[None] would leave the x-axis type ambiguous and, combined with a
         # numeric add_vline elsewhere, can flip the whole axis to linear.
         x_anchor = pd.Timestamp(start)
-        fig.add_trace(go.Scatter(x=[x_anchor], y=[None], mode='markers', name='Day',
-                                 marker=dict(size=12, color=DAY_LEGEND, symbol='square')))
-        fig.add_trace(go.Scatter(x=[x_anchor], y=[None], mode='markers', name='Night',
-                                 marker=dict(size=12, color=NIGHT_LEGEND, symbol='square')))
+        if day_fill:
+            fig.add_trace(go.Scatter(x=[x_anchor], y=[None], mode='markers', name='Day',
+                                     marker=dict(size=12, color=day_legend, symbol='square')))
+        if night_fill:
+            fig.add_trace(go.Scatter(x=[x_anchor], y=[None], mode='markers', name='Night',
+                                     marker=dict(size=12, color=night_legend, symbol='square')))
+
+
+_NIGHT_WORDS = ('evening', 'night', 'tonight', 'overnight')
+
+
+def is_night_period(label) -> bool:
+    """Classify a marine-forecast period label as night. Used to shade the
+    *categorical* forecast chart (which plots 'now', 'this morning',
+    'Tuesday evening', … — not real clock times). 'now' falls back to the
+    current Vancouver hour (night if before 6am or after 9pm)."""
+    s = str(label or '').strip().lower()
+    if not s or s == 'now':
+        h = datetime.now(VAN_TZ).hour
+        return h < 6 or h >= 21
+    return any(w in s for w in _NIGHT_WORDS)
+
+
+def add_categorical_night_shading(fig, time_labels,
+                                  night_fill=NIGHT_GREY, night_legend=NIGHT_GREY_LEGEND,
+                                  add_legend=True):
+    """Shade night periods on a categorical-x chart by column index. Each
+    label maps to category index i; night labels get a grey band over
+    [i-0.5, i+0.5]. Returns the count of night bands drawn."""
+    labels = list(time_labels)
+    n = 0
+    for i, label in enumerate(labels):
+        if is_night_period(label):
+            fig.add_shape(type='rect', xref='x', yref='paper',
+                          x0=i - 0.5, x1=i + 0.5, y0=0, y1=1,
+                          fillcolor=night_fill, line_width=0, layer='below')
+            n += 1
+    if add_legend and n:
+        fig.add_trace(go.Scatter(x=[labels[0]], y=[None], mode='markers', name='Night',
+                                 marker=dict(size=12, color=night_legend, symbol='square')))
+    return n
