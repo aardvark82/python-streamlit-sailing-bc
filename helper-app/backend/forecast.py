@@ -22,7 +22,7 @@ import pytz
 import requests
 from bs4 import BeautifulSoup
 
-from . import openai_log, settings
+from . import ai_provider, settings
 
 log = logging.getLogger("helper.forecast")
 VAN_TZ = pytz.timezone("America/Vancouver")
@@ -110,11 +110,11 @@ def _parse_summary(html: str) -> dict:
     return out
 
 
-def _openai_parse(html: str, reason: str = "forecast parsing") -> str:
-    key = settings.get_openai_key()
-    if not key:
-        raise RuntimeError("OpenAI key not set (Settings tab or OPENAI_API_KEY env)")
-
+def _ai_parse(html: str, reason: str = "forecast parsing",
+              source_label: str = "Marine forecast HTML") -> str:
+    """Hand the marine-forecast HTML to whichever provider is configured
+    (OpenAI or Ollama) and get back the CSV table. ai_provider handles
+    logging + cost calc + the provider switch."""
     now = datetime.now(VAN_TZ)
     now_str = now.strftime("%A %H:%M %Z")
     is_evening = now.hour >= 19
@@ -135,29 +135,15 @@ def _openai_parse(html: str, reason: str = "forecast parsing") -> str:
         + "\n\nHere's the forecast HTML:\n" + html
     )
 
-    r = requests.post(
-        "https://api.openai.com/v1/chat/completions",
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"},
-        json={"model": OPENAI_MODEL,
-              "messages": [
-                  {"role": "system", "content": "You are an expert meteorologist."},
-                  {"role": "user", "content": prompt},
-              ]},
-        timeout=60,
+    result = ai_provider.chat(
+        messages=[
+            {"role": "system", "content": "You are an expert meteorologist."},
+            {"role": "user", "content": prompt},
+        ],
+        reason=reason,
+        source_data=source_label,
     )
-    r.raise_for_status()
-    body = r.json()
-    usage = body.get("usage", {}) or {}
-    try:
-        openai_log.record(
-            reason=reason,
-            model=OPENAI_MODEL,
-            prompt_tokens=usage.get("prompt_tokens", 0),
-            completion_tokens=usage.get("completion_tokens", 0),
-        )
-    except Exception as e:
-        log.warning("openai_log.record failed: %s", e)
-    return body["choices"][0]["message"]["content"]
+    return result.content
 
 
 def _csv_to_rows(csv_text: str) -> list[dict]:
@@ -246,7 +232,11 @@ def get_forecast(region: str = "howe_sound", allow_fetch: bool = True) -> dict:
         rows = []
         ai_error = None
         try:
-            rows = _csv_to_rows(_openai_parse(html, reason=f"forecast parsing ({meta['name']})"))
+            rows = _csv_to_rows(_ai_parse(
+                html,
+                reason=f"forecast parsing ({meta['name']})",
+                source_label=f"Marine forecast HTML — {meta['name']}",
+            ))
         except Exception as e:
             ai_error = str(e)
             log.warning("OpenAI forecast parse failed for %s: %s", region, e)

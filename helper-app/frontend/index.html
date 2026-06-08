@@ -970,10 +970,13 @@ URLSession.shared.dataTask(with: url) { data, _, _ in
           {test && test.error && <p style={{ color: '#dc2626' }}>{test.error}</p>}
 
           <hr style={{ margin: '1.5rem 0', border: 0, borderTop: '1px solid #e2e8f0' }} />
+          <AIProviderBlock settings={info} onChange={load} />
+
+          <hr style={{ margin: '1.5rem 0', border: 0, borderTop: '1px solid #e2e8f0' }} />
           <UsageBlock />
 
           <hr style={{ margin: '1.5rem 0', border: 0, borderTop: '1px solid #e2e8f0' }} />
-          <OpenAILogBlock />
+          <AILogBlock />
 
           <hr style={{ margin: '1.5rem 0', border: 0, borderTop: '1px solid #e2e8f0' }} />
           <CleanupBlock />
@@ -981,15 +984,106 @@ URLSession.shared.dataTask(with: url) { data, _, _ in
       );
     }
 
-    function OpenAILogBlock() {
-      const [d, setD] = useState(null);
-      const load = () => fetch('/api/openai_log').then(r => r.json()).then(setD);
-      useEffect(load, []);
-      if (!d) return <p className="muted">Loading OpenAI log…</p>;
-      const money = (v) => v == null ? '—' : '$' + Number(v).toFixed(v < 1 ? 4 : 2);
+    function AIProviderBlock({ settings: s, onChange }) {
+      const [ollama, setOllama] = useState(null);
+      const [pulling, setPulling] = useState(false);
+      const [msg, setMsg] = useState(null);
+      const reload = () => fetch('/api/ollama/status').then(r => r.json()).then(setOllama);
+      useEffect(reload, []);
+      if (!s) return <p className="muted">Loading…</p>;
+      const post = async (body) => {
+        await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                         body: JSON.stringify(body) });
+        onChange?.();
+      };
+      const pull = async () => {
+        setPulling(true); setMsg(null);
+        try {
+          const r = await fetch('/api/ollama/pull', { method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ model: s.ollama_model }) });
+          const j = await r.json();
+          setMsg(j.ok ? `Pulled ${j.model} ✓` : `Pull failed: ${j.error || 'unknown'}`);
+          reload();
+        } catch (e) { setMsg(String(e)); }
+        setPulling(false);
+      };
+      const active = s.ai_provider || 'openai';
+      const btn = (id, label) => (
+        <button onClick={() => post({ ai_provider: id })}
+                style={{ background: active === id ? '#1d4ed8' : '#64748b',
+                          fontWeight: active === id ? 700 : 400 }}>
+          {label}{active === id ? ' ✓' : ''}
+        </button>
+      );
       return (
         <div>
-          <h3 style={{ marginTop: 0 }}>OpenAI usage log</h3>
+          <h3 style={{ marginTop: 0 }}>AI provider</h3>
+          <p className="muted">All AI calls (currently marine-forecast parsing) route through this toggle.</p>
+          <div className="row-flex">
+            {btn('openai', '☁️ OpenAI')}
+            {btn('ollama', '🖥 Ollama (local CPU)')}
+          </div>
+
+          <div className="trend-grid" style={{ marginTop: 12 }}>
+            <div className="trend-cell">
+              <h4>OpenAI model</h4>
+              <input type="text" value={s.openai_model || ''} style={{ width: '100%' }}
+                     onBlur={e => post({ openai_model: e.target.value })}
+                     onChange={e => onChange?.()} defaultValue={s.openai_model || ''} />
+              <div className="muted" style={{ fontSize: '0.78rem' }}>e.g. gpt-5-mini, gpt-4o-mini</div>
+            </div>
+            <div className="trend-cell">
+              <h4>Ollama model</h4>
+              <input type="text" style={{ width: '100%' }}
+                     defaultValue={s.ollama_model || 'llama3.2:3b'}
+                     onBlur={e => post({ ollama_model: e.target.value })} />
+              <div className="muted" style={{ fontSize: '0.78rem' }}>e.g. llama3.2:3b, qwen2.5:3b, gemma2:2b</div>
+            </div>
+          </div>
+
+          <div style={{ marginTop: 12, padding: 10, background: '#f8fafc', borderRadius: 6 }}>
+            <strong>Ollama server</strong>:
+            {ollama
+              ? (ollama.ok
+                  ? <span style={{ color: '#16a34a', marginLeft: 6 }}>
+                      ✓ reachable at {ollama.url} — installed: {ollama.models.length
+                        ? <code>{ollama.models.join(', ')}</code> : <em>none</em>}
+                    </span>
+                  : <span style={{ color: '#dc2626', marginLeft: 6 }}>
+                      ✗ unreachable ({ollama.error})
+                    </span>)
+              : <span className="muted"> checking…</span>}
+            <div className="row-flex" style={{ marginTop: 8 }}>
+              <button onClick={pull} disabled={pulling}>
+                {pulling ? 'Pulling…' : `⬇ Pull "${s.ollama_model || 'llama3.2:3b'}"`}
+              </button>
+              <button onClick={reload} style={{ background: '#64748b' }}>Refresh status</button>
+              {msg && <span style={{ marginLeft: 8 }}>{msg}</span>}
+            </div>
+            <p className="muted" style={{ fontSize: '0.78rem', marginTop: 6 }}>
+              First pull downloads the model (~2 GB for llama3.2:3b). CPU inference is slow —
+              expect 30-90s per forecast parse on a 10-core/20-thread iMac. Falls back to OpenAI
+              if the toggle is on OpenAI.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+
+    function AILogBlock() {
+      const [d, setD] = useState(null);
+      const load = () => fetch('/api/ai_log').then(r => r.json()).then(setD);
+      useEffect(load, []);
+      if (!d) return <p className="muted">Loading AI log…</p>;
+      const money = (v) => v == null ? '—' : '$' + Number(v).toFixed(v < 1 ? 4 : 2);
+      const provBadge = (p) => p === 'ollama'
+        ? <span className="badge" style={{ background: '#dbeafe', color: '#1d4ed8' }}>🖥 ollama</span>
+        : <span className="badge" style={{ background: '#dcfce7', color: '#166534' }}>☁️ openai</span>;
+      return (
+        <div>
+          <h3 style={{ marginTop: 0 }}>AI usage log</h3>
           <div className="trend-grid" style={{ marginBottom: 12 }}>
             <div className="trend-cell">
               <h4>Total tokens</h4>
@@ -999,6 +1093,7 @@ URLSession.shared.dataTask(with: url) { data, _, _ in
             <div className="trend-cell">
               <h4>Total cost</h4>
               <div className="trend-stat"><strong>{money(d.total_cost_usd)}</strong></div>
+              <div className="muted" style={{ fontSize: '0.78rem' }}>OpenAI only — Ollama is $0</div>
             </div>
             <div className="trend-cell">
               <h4>Est. / month</h4>
@@ -1006,6 +1101,20 @@ URLSession.shared.dataTask(with: url) { data, _, _ in
               <div className="muted" style={{ fontSize: '0.78rem' }}>extrapolated</div>
             </div>
           </div>
+
+          {d.by_provider && Object.keys(d.by_provider).length > 0 && (
+            <details style={{ marginBottom: 6 }}>
+              <summary className="muted" style={{ cursor: 'pointer' }}>By provider</summary>
+              <table className="log-table" style={{ marginTop: 6 }}>
+                <thead><tr><th>Provider</th><th>Calls</th><th>Tokens</th><th>Cost</th></tr></thead>
+                <tbody>
+                  {Object.entries(d.by_provider).map(([p, b]) => (
+                    <tr key={p}><td>{provBadge(p)}</td><td>{b.calls}</td><td>{b.tokens.toLocaleString()}</td><td>{money(b.cost_usd)}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            </details>
+          )}
 
           {Object.keys(d.by_reason || {}).length > 0 && (
             <details style={{ marginBottom: 10 }}>
@@ -1022,15 +1131,20 @@ URLSession.shared.dataTask(with: url) { data, _, _ in
           )}
 
           <table className="log-table">
-            <thead><tr><th>Time</th><th>Reason</th><th>Model</th><th>Tokens (in/out)</th><th>Cost</th></tr></thead>
+            <thead><tr>
+              <th>Time</th><th>Provider</th><th>Model</th><th>Source data</th>
+              <th>Tokens (in/out)</th><th>Time</th><th>Cost</th>
+            </tr></thead>
             <tbody>
-              {d.entries.length === 0 && <tr><td colSpan="5" className="muted">No OpenAI calls logged yet.</td></tr>}
+              {d.entries.length === 0 && <tr><td colSpan="7" className="muted">No AI calls logged yet.</td></tr>}
               {d.entries.map((e, i) => (
                 <tr key={i}>
                   <td>{new Date(e.ts).toLocaleString()}</td>
-                  <td>{e.reason}</td>
-                  <td>{e.model}</td>
+                  <td>{provBadge(e.provider || 'openai')}</td>
+                  <td><code>{e.model}</code></td>
+                  <td style={{ maxWidth: 240, fontSize: '0.85rem' }}>{e.source_data || e.reason}</td>
                   <td>{e.prompt_tokens.toLocaleString()} / {e.completion_tokens.toLocaleString()}</td>
+                  <td>{e.elapsed_sec != null ? e.elapsed_sec.toFixed(2) + 's' : '—'}</td>
                   <td>{money(e.cost_usd)}</td>
                 </tr>
               ))}
@@ -1039,8 +1153,8 @@ URLSession.shared.dataTask(with: url) { data, _, _ in
           <div className="row-flex" style={{ marginTop: 8 }}>
             <button onClick={load} style={{ background: '#64748b' }}>Refresh</button>
             <button style={{ background: '#dc2626' }} onClick={async () => {
-              if (!confirm('Clear the OpenAI usage log? Totals and the monthly estimate restart from zero (use after a model switch).')) return;
-              await fetch('/api/openai_log/reset', { method: 'POST' });
+              if (!confirm('Clear the AI usage log? Totals and monthly estimate restart from zero.')) return;
+              await fetch('/api/ai_log/reset', { method: 'POST' });
               load();
             }}>Reset log</button>
           </div>

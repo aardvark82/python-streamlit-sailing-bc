@@ -22,7 +22,8 @@ from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from . import alexa, cleanup, db, forecast, openai_log, reconcile, settings, usage, wave_model
+from . import (ai_log, ai_provider, alexa, cleanup, db, forecast,
+                  openai_log, reconcile, settings, usage, wave_model)
 from .buoy_fetcher import BUOYS, BUOY_BY_ID, fetch_buoy
 from .envutil import getenv_ci
 from .kv_client import read_history, write_reading, VAN_TZ, invalidate_history
@@ -267,6 +268,9 @@ def api_settings_get():
     return jsonify({
         "openai_api_key_set": bool(key),
         "openai_api_key_masked": (key[:6] + "…" + key[-4:]) if len(key) >= 12 else None,
+        "ai_provider": ai_provider.get_provider(),
+        "openai_model": ai_provider.get_openai_model(),
+        "ollama_model": ai_provider.get_ollama_model(),
     })
 
 
@@ -279,14 +283,47 @@ def api_settings_post():
         if v:
             updates["openai_api_key"] = v
         else:
-            # Empty value clears the key
             current = settings.load()
             current.pop("openai_api_key", None)
             settings.SETTINGS_PATH.write_text(__import__("json").dumps(current, indent=2))
             return jsonify(ok=True, cleared=True)
+    if "ai_provider" in body:
+        v = (body["ai_provider"] or "").strip().lower()
+        if v in ("openai", "ollama"):
+            updates["ai_provider"] = v
+    if "ollama_model" in body:
+        v = (body["ollama_model"] or "").strip()
+        if v:
+            updates["ollama_model"] = v
+    if "openai_model" in body:
+        v = (body["openai_model"] or "").strip()
+        if v:
+            updates["openai_model"] = v
     if updates:
         settings.save(updates)
-    return jsonify(ok=True)
+    return jsonify(ok=True, updates=updates)
+
+
+@app.route("/api/ollama/status")
+def api_ollama_status():
+    return jsonify(ai_provider.ollama_status())
+
+
+@app.route("/api/ollama/pull", methods=["POST"])
+def api_ollama_pull():
+    body = request.get_json(silent=True) or {}
+    model = (body.get("model") or ai_provider.get_ollama_model()).strip()
+    return jsonify(ai_provider.ollama_pull(model))
+
+
+@app.route("/api/ai_log")
+def api_ai_log():
+    return jsonify(ai_log.snapshot())
+
+
+@app.route("/api/ai_log/reset", methods=["POST"])
+def api_ai_log_reset():
+    return jsonify(ok=True, cleared=ai_log.reset())
 
 
 @app.route("/api/settings/test", methods=["POST"])
@@ -400,14 +437,15 @@ def api_db_stats():
     return jsonify(db.stats())
 
 
+# Back-compat: old /api/openai_log routes now serve the unified ai_log.
 @app.route("/api/openai_log")
-def api_openai_log():
-    return jsonify(openai_log.snapshot())
+def api_openai_log_compat():
+    return jsonify(ai_log.snapshot())
 
 
 @app.route("/api/openai_log/reset", methods=["POST"])
-def api_openai_log_reset():
-    return jsonify(ok=True, cleared=openai_log.reset())
+def api_openai_log_reset_compat():
+    return jsonify(ok=True, cleared=ai_log.reset())
 
 
 @app.route("/api/forecast")
