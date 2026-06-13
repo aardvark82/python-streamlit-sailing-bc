@@ -142,10 +142,24 @@ def _ollama_chat(messages, *, reason, source_data, model):
             json={"model": model, "messages": messages, "stream": False},
             timeout=600,    # CPU inference is slow; first call may pull the model
         )
-        r.raise_for_status()
     except requests.exceptions.ConnectionError as e:
         raise RuntimeError(f"Ollama unreachable at {url} ({e}). "
                             "Check the Ollama endpoint in Settings.") from e
+
+    # Ollama returns 404 on /api/chat when the requested MODEL isn't pulled.
+    # Surface its actual message instead of a bare '404 Not Found'.
+    if r.status_code == 404:
+        detail = ""
+        try:
+            detail = (r.json() or {}).get("error", "")
+        except Exception:
+            detail = (r.text or "")[:200]
+        raise RuntimeError(
+            f"Model '{model}' not found on the Ollama server ({url}). "
+            f"Pull it first (Settings → Pull, or `ollama pull {model}`), or set the "
+            f"Ollama model field to one that's installed. Server said: {detail or '404'}"
+        )
+    r.raise_for_status()
     body = r.json()
     elapsed = _time.time() - t0
     content = (body.get("message") or {}).get("content", "") or body.get("response", "")
