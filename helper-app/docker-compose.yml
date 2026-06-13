@@ -5,8 +5,6 @@ services:
     build: .
     container_name: pysail-helper-app-5111
     restart: unless-stopped
-    depends_on:
-      - ollama
     ports:
       - "5111:5111"
     # Load every line from .env directly into container env with its
@@ -16,29 +14,10 @@ services:
       - .env
     environment:
       FETCH_INTERVAL_MIN: "60"
-      # Internal DNS — both containers on the default compose network.
-      OLLAMA_URL: "http://ollama:11434"
+    # NOTE: Ollama now runs as its OWN Coolify resource (Ollama + Open WebUI),
+    # not as a service here. Reach it over Coolify's predefined network by
+    # setting OLLAMA_URL in .env to the ollama container's network address,
+    # e.g.  OLLAMA_URL=http://<ollama-container-name>:11434
+    # (ai_provider.py reads OLLAMA_URL; see README for the exact value).
     volumes:
       - ./data:/data
-
-  # Local CPU-only Ollama. Used by ai_provider when Settings → AI provider
-  # is toggled to 'ollama'. Default model llama3.2:3b is ~2GB on disk and
-  # ~3-4GB RSS during inference — well under the 16GB ceiling, leaves
-  # plenty of headroom on a 64GB iMac that shares load with other apps.
-  ollama:
-    image: ollama/ollama:latest
-    container_name: pysail-helper-app-5111-ollama
-    restart: unless-stopped
-    # No port published — only the helper-app container talks to it
-    # over the internal compose network. Uncomment if you want to hit
-    # http://localhost:11434 from the host for debugging.
-    # ports:
-    #   - "11434:11434"
-    volumes:
-      - ./ollama_data:/root/.ollama   # persist downloaded models
-    mem_limit: 16g          # hard ceiling — bursts allowed up to here
-    memswap_limit: 16g      # no swap escape beyond the limit
-    cpus: 8.0               # cap to 8 of the iMac's 20 threads
-    environment:
-      OLLAMA_KEEP_ALIVE: "5m"     # unload model 5 min after last use → idle ~50MB
-      OLLAMA_NUM_PARALLEL: "1"    # CPU inference: serialize, don't thrash
