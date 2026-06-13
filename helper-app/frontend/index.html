@@ -1006,6 +1006,64 @@ URLSession.shared.dataTask(with: url) { data, _, _ in
       );
     }
 
+    function HealthCheckBlock() {
+      const [data, setData] = useState(null);
+      const [running, setRunning] = useState(false);
+      const run = async () => {
+        setRunning(true); setData(null);
+        try {
+          const r = await fetch('/api/healthcheck', { method: 'POST' });
+          setData(await r.json());
+        } catch (e) {
+          setData({ error: String(e) });
+        }
+        setRunning(false);
+      };
+      const ICON = { pass: '✅', warn: '⚠️', fail: '❌', skip: '⏭️', info: 'ℹ️' };
+      const COLOR = { pass: '#16a34a', warn: '#b45309', fail: '#dc2626', skip: '#64748b', info: '#475569' };
+      return (
+        <div>
+          <h3 style={{ marginTop: 0 }}>🩺 Health check</h3>
+          <p className="muted">Validates Cloudflare, OpenAI, Ollama (server/model/generation),
+            rate limits, local data, forecast cache, and the Alexa briefing in one shot.</p>
+          <button onClick={run} disabled={running} style={{ background: '#0ea5e9' }}>
+            {running ? 'Running checks…' : 'Run health check'}
+          </button>
+          {running && <p className="muted" style={{ marginTop: 6 }}>
+            (If Ollama is the active provider, this runs a real CPU inference — can take ~1-2 min.)
+          </p>}
+
+          {data && data.error && <p style={{ color: '#dc2626' }}>{data.error}</p>}
+          {data && !data.error && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ marginBottom: 8 }}>
+                {['pass', 'warn', 'fail', 'skip', 'info'].filter(k => data.summary[k]).map(k => (
+                  <span key={k} style={{ marginRight: 12, fontWeight: 600, color: COLOR[k] }}>
+                    {ICON[k]} {data.summary[k]} {k}
+                  </span>
+                ))}
+                <span className="muted" style={{ fontSize: '0.8rem' }}>
+                  · {new Date(data.ran_at).toLocaleTimeString()}
+                </span>
+              </div>
+              <table className="log-table">
+                <thead><tr><th></th><th>Check</th><th>Detail</th></tr></thead>
+                <tbody>
+                  {data.checks.map((c, i) => (
+                    <tr key={i}>
+                      <td style={{ fontSize: '1.1rem' }}>{ICON[c.status] || '•'}</td>
+                      <td style={{ fontWeight: 600, color: COLOR[c.status], whiteSpace: 'nowrap' }}>{c.name}</td>
+                      <td style={{ fontSize: '0.85rem' }}>{c.detail}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      );
+    }
+
     function SettingsView() {
       const [info, setInfo] = useState(null);
       const [val, setVal] = useState('');
@@ -1047,6 +1105,10 @@ URLSession.shared.dataTask(with: url) { data, _, _ in
       return (
         <div className="card settings-form">
           <h2>Settings</h2>
+
+          <HealthCheckBlock />
+          <hr style={{ margin: '1.5rem 0', border: 0, borderTop: '1px solid #e2e8f0' }} />
+
           <label>OpenAI API key</label>
           {info && (
             <p className="muted">

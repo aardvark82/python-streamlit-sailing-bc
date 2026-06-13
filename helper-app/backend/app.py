@@ -23,7 +23,7 @@ from flask import Flask, jsonify, request, send_from_directory
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from . import (ai_log, ai_provider, alexa, cleanup, db, forecast,
-                  openai_log, reconcile, settings, usage, wave_model)
+                  healthcheck, openai_log, reconcile, settings, usage, wave_model)
 from .buoy_fetcher import BUOYS, BUOY_BY_ID, fetch_buoy
 from .envutil import getenv_ci
 from .kv_client import read_history, write_reading, VAN_TZ, invalidate_history
@@ -368,6 +368,11 @@ def api_ollama_pull():
     body = request.get_json(silent=True) or {}
     model = (body.get("model") or ai_provider.get_ollama_model()).strip()
     return jsonify(ai_provider.ollama_pull(model))
+
+
+@app.route("/api/healthcheck", methods=["POST"])
+def api_healthcheck():
+    return jsonify(healthcheck.run_all())
 
 
 @app.route("/api/ai_log")
