@@ -1158,10 +1158,17 @@ URLSession.shared.dataTask(with: url) { data, _, _ in
             </div>
             <div className="trend-cell">
               <h4>Ollama model</h4>
-              <input type="text" style={{ width: '100%' }}
+              <input type="text" style={{ width: '100%' }} list="ollama-installed"
                      defaultValue={s.ollama_model || 'llama3.2:3b'}
                      onBlur={e => post({ ollama_model: e.target.value })} />
-              <div className="muted" style={{ fontSize: '0.78rem' }}>e.g. llama3.2:3b, qwen2.5:3b, gemma2:2b</div>
+              <datalist id="ollama-installed">
+                {(ollama && ollama.models || []).map(m => <option key={m} value={m} />)}
+              </datalist>
+              <div className="muted" style={{ fontSize: '0.78rem' }}>
+                Pick an installed model (dropdown) or type one to pull. For text parsing
+                use a <strong>text</strong> model like <code>qwen2.5:3b</code> — avoid
+                <code> vl</code>/<code>-vision</code> tags (slower, vision-only need).
+              </div>
             </div>
           </div>
 
