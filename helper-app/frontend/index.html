@@ -1096,8 +1096,14 @@ URLSession.shared.dataTask(with: url) { data, _, _ in
       const [msg, setMsg] = useState(null);
       const [testing, setTesting] = useState(false);
       const [testResult, setTestResult] = useState(null);
-      const reload = () => fetch('/api/ollama/status').then(r => r.json()).then(setOllama);
-      useEffect(reload, []);
+      const [loadingModels, setLoadingModels] = useState(false);
+      const [pullName, setPullName] = useState('');
+      const reload = () => {
+        setLoadingModels(true);
+        return fetch('/api/ollama/status').then(r => r.json()).then(setOllama)
+          .finally(() => setLoadingModels(false));
+      };
+      useEffect(() => { reload(); }, []);
       if (!s) return <p className="muted">Loading…</p>;
 
       const runForecastTest = async () => {
@@ -1120,11 +1126,13 @@ URLSession.shared.dataTask(with: url) { data, _, _ in
         onChange?.();
       };
       const pull = async () => {
+        const name = (pullName || '').trim();
+        if (!name) { setMsg('Enter a model name to pull, e.g. qwen2.5:3b'); return; }
         setPulling(true); setMsg(null);
         try {
           const r = await fetch('/api/ollama/pull', { method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ model: s.ollama_model }) });
+              body: JSON.stringify({ model: name }) });
           const j = await r.json();
           setMsg(j.ok ? `Pulled ${j.model} ✓` : `Pull failed: ${j.error || 'unknown'}`);
           reload();
@@ -1148,62 +1156,75 @@ URLSession.shared.dataTask(with: url) { data, _, _ in
             {btn('ollama', '🖥 Ollama (local CPU)')}
           </div>
 
-          <div className="trend-grid" style={{ marginTop: 12 }}>
-            <div className="trend-cell">
-              <h4>OpenAI model</h4>
-              <input type="text" value={s.openai_model || ''} style={{ width: '100%' }}
-                     onBlur={e => post({ openai_model: e.target.value })}
-                     onChange={e => onChange?.()} defaultValue={s.openai_model || ''} />
-              <div className="muted" style={{ fontSize: '0.78rem' }}>e.g. gpt-5-mini, gpt-4o-mini</div>
-            </div>
-            <div className="trend-cell">
-              <h4>Ollama model</h4>
-              <input type="text" style={{ width: '100%' }} list="ollama-installed"
-                     defaultValue={s.ollama_model || 'llama3.2:3b'}
-                     onBlur={e => post({ ollama_model: e.target.value })} />
-              <datalist id="ollama-installed">
-                {(ollama && ollama.models || []).map(m => <option key={m} value={m} />)}
-              </datalist>
-              <div className="muted" style={{ fontSize: '0.78rem' }}>
-                Pick an installed model (dropdown) or type one to pull. For text parsing
-                use a <strong>text</strong> model like <code>qwen2.5:3b</code> — avoid
-                <code> vl</code>/<code>-vision</code> tags (slower, vision-only need).
-              </div>
-            </div>
+          <div style={{ marginTop: 12 }}>
+            <h4 style={{ margin: '0 0 4px' }}>OpenAI model</h4>
+            <input type="text" style={{ width: '100%', maxWidth: 360 }}
+                   onBlur={e => post({ openai_model: e.target.value })}
+                   defaultValue={s.openai_model || ''} />
+            <div className="muted" style={{ fontSize: '0.78rem' }}>e.g. gpt-5-mini, gpt-4o-mini</div>
           </div>
 
           <div style={{ marginTop: 12, padding: 10, background: '#f8fafc', borderRadius: 6 }}>
             <h4 style={{ margin: '0 0 4px' }}>Ollama endpoint</h4>
-            <input type="text" style={{ width: '100%' }}
-                   defaultValue={s.ollama_url || ''}
-                   placeholder="http://ollama-api-xxxx:11434"
-                   onBlur={e => { post({ ollama_url: e.target.value }); setTimeout(reload, 400); }} />
-            <div className="muted" style={{ fontSize: '0.78rem', marginBottom: 10 }}>
+            <div className="row-flex">
+              <input type="text" style={{ flex: 1, minWidth: 240 }}
+                     defaultValue={s.ollama_url || ''}
+                     placeholder="http://ollama-api-xxxx:11434"
+                     onBlur={e => { post({ ollama_url: e.target.value }); }} />
+              <button onClick={reload} disabled={loadingModels}>
+                {loadingModels ? 'Loading…' : '🔄 Load models'}
+              </button>
+            </div>
+            <div className="muted" style={{ fontSize: '0.78rem', marginTop: 4 }}>
               Coolify container name + port (predefined network). A trailing <code>/v1</code> is
               auto-stripped — the app uses Ollama's native API. Blank = use OLLAMA_URL env / default.
+              Click <strong>Load models</strong> to validate the endpoint and refresh the list.
             </div>
-            <strong>Ollama server</strong>:
-            {ollama
-              ? (ollama.ok
-                  ? <span style={{ color: '#16a34a', marginLeft: 6 }}>
-                      ✓ reachable at {ollama.url} — installed: {ollama.models.length
-                        ? <code>{ollama.models.join(', ')}</code> : <em>none</em>}
-                    </span>
-                  : <span style={{ color: '#dc2626', marginLeft: 6 }}>
-                      ✗ unreachable ({ollama.error})
-                    </span>)
-              : <span className="muted"> checking…</span>}
-            <div className="row-flex" style={{ marginTop: 8 }}>
+
+            <div style={{ marginTop: 4 }}>
+              {ollama
+                ? (ollama.ok
+                    ? <span style={{ color: '#16a34a' }}>✓ reachable at {ollama.url} — {ollama.models.length} model(s)</span>
+                    : <span style={{ color: '#dc2626' }}>✗ unreachable ({ollama.error})</span>)
+                : <span className="muted">checking…</span>}
+            </div>
+
+            {/* Ollama model selector — a real dropdown of detected models */}
+            <h4 style={{ margin: '12px 0 4px' }}>Ollama model</h4>
+            {ollama && ollama.ok && ollama.models.length ? (
+              <select style={{ width: '100%', maxWidth: 360, padding: 4 }}
+                      value={s.ollama_model || ''}
+                      onChange={e => post({ ollama_model: e.target.value })}>
+                {!ollama.models.includes(s.ollama_model) && s.ollama_model &&
+                  <option value={s.ollama_model}>{s.ollama_model} (not installed)</option>}
+                {ollama.models.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            ) : (
+              <p className="muted" style={{ fontSize: '0.85rem' }}>
+                No models detected — Load models above, or pull one below.
+              </p>
+            )}
+            <div className="muted" style={{ fontSize: '0.78rem', marginTop: 4 }}>
+              For text parsing use a <strong>text</strong> model like <code>qwen2.5:3b</code> —
+              avoid <code>vl</code>/<code>-vision</code> tags (slower, vision-only).
+            </div>
+
+            {/* Pull a NEW model not yet installed */}
+            <h4 style={{ margin: '12px 0 4px' }}>Pull a model</h4>
+            <div className="row-flex">
+              <input type="text" style={{ flex: 1, minWidth: 200 }}
+                     placeholder="qwen2.5:3b"
+                     value={pullName}
+                     onChange={e => setPullName(e.target.value)} />
               <button onClick={pull} disabled={pulling}>
-                {pulling ? 'Pulling…' : `⬇ Pull "${s.ollama_model || 'llama3.2:3b'}"`}
+                {pulling ? 'Pulling…' : '⬇ Pull'}
               </button>
-              <button onClick={reload} style={{ background: '#64748b' }}>Refresh status</button>
               {msg && <span style={{ marginLeft: 8 }}>{msg}</span>}
             </div>
             <p className="muted" style={{ fontSize: '0.78rem', marginTop: 6 }}>
-              First pull downloads the model (~2 GB for llama3.2:3b). CPU inference is slow —
-              expect 30-90s per forecast parse on a 10-core/20-thread iMac. Falls back to OpenAI
-              if the toggle is on OpenAI.
+              First pull downloads the model (~2 GB for a 3B). CPU inference is slow — expect
+              ~10-90s per forecast parse on a 10-core iMac depending on model size. Falls back
+              to OpenAI when the toggle is on OpenAI.
             </p>
           </div>
 
