@@ -1166,6 +1166,15 @@ URLSession.shared.dataTask(with: url) { data, _, _ in
           </div>
 
           <div style={{ marginTop: 12, padding: 10, background: '#f8fafc', borderRadius: 6 }}>
+            <h4 style={{ margin: '0 0 4px' }}>Ollama endpoint</h4>
+            <input type="text" style={{ width: '100%' }}
+                   defaultValue={s.ollama_url || ''}
+                   placeholder="http://ollama-api-xxxx:11434"
+                   onBlur={e => { post({ ollama_url: e.target.value }); setTimeout(reload, 400); }} />
+            <div className="muted" style={{ fontSize: '0.78rem', marginBottom: 10 }}>
+              Coolify container name + port (predefined network). A trailing <code>/v1</code> is
+              auto-stripped — the app uses Ollama's native API. Blank = use OLLAMA_URL env / default.
+            </div>
             <strong>Ollama server</strong>:
             {ollama
               ? (ollama.ok

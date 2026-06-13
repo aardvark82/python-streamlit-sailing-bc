@@ -22,7 +22,27 @@ log = logging.getLogger("helper.ai")
 DEFAULT_OPENAI_MODEL = "gpt-5-mini"
 DEFAULT_OLLAMA_MODEL = "llama3.2:3b"
 
-OLLAMA_URL = (getenv_ci("OLLAMA_URL") or "http://ollama:11434").rstrip("/")
+# Default Ollama endpoint (the standalone Coolify resource, joined via the
+# predefined network). Overridable in Settings (persisted) or OLLAMA_URL env.
+DEFAULT_OLLAMA_URL = "http://ollama-api-gkv762rc1urjlhnvu8y4m5vb:11434"
+
+
+def _normalize_ollama_url(raw: str) -> str:
+    """Trim to the native-API base. We call /api/tags, /api/chat, /api/pull
+    which live at the ROOT — so strip a trailing '/v1' (the OpenAI-compat
+    path) and any trailing slash if the user pasted that form."""
+    raw = (raw or "").strip().rstrip("/")
+    if raw.endswith("/v1"):
+        raw = raw[:-3].rstrip("/")
+    return raw
+
+
+def get_ollama_url() -> str:
+    """Resolve the Ollama base URL: Settings (persisted) → OLLAMA_URL env →
+    default. Read live so editing it in the UI takes effect on the next
+    call without a container restart."""
+    raw = settings.load().get("ollama_url") or getenv_ci("OLLAMA_URL") or DEFAULT_OLLAMA_URL
+    return _normalize_ollama_url(raw)
 
 
 @dataclass
@@ -86,20 +106,22 @@ def _openai_chat(messages, *, reason, source_data, model):
 
 def ollama_status() -> dict:
     """Cheap reachability + installed-models probe for the Settings UI."""
+    url = get_ollama_url()
     try:
-        r = requests.get(f"{OLLAMA_URL}/api/tags", timeout=3)
+        r = requests.get(f"{url}/api/tags", timeout=3)
         r.raise_for_status()
         models = [m.get("name") for m in r.json().get("models", []) if m.get("name")]
-        return {"ok": True, "url": OLLAMA_URL, "models": models}
+        return {"ok": True, "url": url, "models": models}
     except Exception as e:
-        return {"ok": False, "url": OLLAMA_URL, "error": str(e), "models": []}
+        return {"ok": False, "url": url, "error": str(e), "models": []}
 
 
 def ollama_pull(model: str) -> dict:
     """Trigger model download. Streaming progress is collapsed to a
     final ok/error to keep the HTTP response simple."""
+    url = get_ollama_url()
     try:
-        with requests.post(f"{OLLAMA_URL}/api/pull",
+        with requests.post(f"{url}/api/pull",
                            json={"name": model, "stream": False},
                            timeout=1800) as r:
             r.raise_for_status()
@@ -112,17 +134,18 @@ def _ollama_chat(messages, *, reason, source_data, model):
     # Ollama supports the OpenAI-compatible /v1/chat/completions endpoint
     # AND a native /api/chat. The native one returns token counts more
     # reliably across model versions, so we use it.
+    url = get_ollama_url()
     t0 = _time.time()
     try:
         r = requests.post(
-            f"{OLLAMA_URL}/api/chat",
+            f"{url}/api/chat",
             json={"model": model, "messages": messages, "stream": False},
             timeout=600,    # CPU inference is slow; first call may pull the model
         )
         r.raise_for_status()
     except requests.exceptions.ConnectionError as e:
-        raise RuntimeError(f"Ollama unreachable at {OLLAMA_URL} ({e}). "
-                            "Make sure the 'ollama' container is up.") from e
+        raise RuntimeError(f"Ollama unreachable at {url} ({e}). "
+                            "Check the Ollama endpoint in Settings.") from e
     body = r.json()
     elapsed = _time.time() - t0
     content = (body.get("message") or {}).get("content", "") or body.get("response", "")

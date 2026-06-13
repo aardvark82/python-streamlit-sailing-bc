@@ -279,6 +279,7 @@ def api_settings_get():
         "ai_provider": ai_provider.get_provider(),
         "openai_model": ai_provider.get_openai_model(),
         "ollama_model": ai_provider.get_ollama_model(),
+        "ollama_url": ai_provider.get_ollama_url(),
     })
 
 
@@ -307,6 +308,16 @@ def api_settings_post():
         v = (body["openai_model"] or "").strip()
         if v:
             updates["openai_model"] = v
+    if "ollama_url" in body:
+        v = (body["ollama_url"] or "").strip()
+        if v:
+            updates["ollama_url"] = v
+        else:
+            # Empty value clears the override → falls back to env/default
+            current = settings.load()
+            current.pop("ollama_url", None)
+            settings.SETTINGS_PATH.write_text(__import__("json").dumps(current, indent=2))
+            return jsonify(ok=True, cleared="ollama_url")
     if updates:
         settings.save(updates)
     return jsonify(ok=True, updates=updates)
