@@ -320,14 +320,27 @@
 
     function GraphView({ locationId }) {
       const [series, setSeries] = useState(null);
+      const [days, setDays] = useState(3);   // default 3-day series; 7 / 30 offered
       const [initing, setIniting] = useState(false);
       const [initMsg, setInitMsg] = useState(null);
       const ref = useRef(null);
       const reload = () => {
         setSeries(null);
-        fetch(`/api/series?location=${locationId}&days=3`).then(r => r.json()).then(setSeries);
+        fetch(`/api/series?location=${locationId}&days=${days}`).then(r => r.json()).then(setSeries);
       };
-      useEffect(reload, [locationId]);
+      useEffect(reload, [locationId, days]);
+
+      const rangeButtons = (
+        <div className="row-flex" style={{ marginBottom: 10 }}>
+          {[3, 7, 30].map(d => (
+            <button key={d} onClick={() => setDays(d)}
+                    style={{ background: days === d ? '#1d4ed8' : '#64748b',
+                              fontWeight: days === d ? 700 : 400 }}>
+              {d} days{days === d ? ' ✓' : ''}
+            </button>
+          ))}
+        </div>
+      );
 
       const runInit = async () => {
         if (!confirm('Bootstrap SQLite from Cloudflare KV for ALL buoys? Reads all historical keys — can take a minute on cold deploy.')) return;
@@ -379,26 +392,32 @@
           shapes,
         }, { responsive: true, displayModeBar: false });
       }, [series]);
-      if (series === null) return <p className="muted">Loading…</p>;
+      if (series === null) {
+        return <div className="card">{rangeButtons}<p className="muted">Loading…</p></div>;
+      }
       if (!Array.isArray(series) || series.length === 0) {
         return (
-          <div className="card" style={{ textAlign: 'center', padding: '2.5rem 1rem' }}>
-            <h2 style={{ marginTop: 0 }}>No local data yet</h2>
-            <p className="muted">
-              SQLite is empty for this location. Bootstrap it by pulling every existing
-              key from Cloudflare KV — runs for all buoys in one shot so the whole
-              dashboard becomes usable.
-            </p>
-            <button onClick={runInit} disabled={initing} style={{ background: '#10b981', fontSize: '1rem', padding: '0.7rem 1.5rem' }}>
-              {initing ? 'Initializing…' : '⚡ INIT — pull all data from KV'}
-            </button>
-            {initMsg && <p style={{ marginTop: 12 }}>{initMsg}</p>}
+          <div className="card">
+            {rangeButtons}
+            <div style={{ textAlign: 'center', padding: '2rem 1rem' }}>
+              <h2 style={{ marginTop: 0 }}>No data for the last {days} days</h2>
+              <p className="muted">
+                SQLite has no readings for this location in this window. Bootstrap it by
+                pulling every existing key from Cloudflare KV (runs for all buoys), or try a
+                wider range above.
+              </p>
+              <button onClick={runInit} disabled={initing} style={{ background: '#10b981', fontSize: '1rem', padding: '0.7rem 1.5rem' }}>
+                {initing ? 'Initializing…' : '⚡ INIT — pull all data from KV'}
+              </button>
+              {initMsg && <p style={{ marginTop: 12 }}>{initMsg}</p>}
+            </div>
           </div>
         );
       }
       return (
         <div className="card">
-          <h2>3-day series</h2>
+          {rangeButtons}
+          <h2 style={{ marginTop: 0 }}>{days}-day series</h2>
           <div ref={ref} />
         </div>
       );
