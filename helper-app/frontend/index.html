@@ -414,11 +414,55 @@
           </div>
         );
       }
+      // Average wind by 4-hour period of day, over the loaded window.
+      // Hour is read straight from the Vancouver wall-clock string
+      // ("…T13:00:00") so there's no timezone drift.
+      const PERIODS = [
+        ['12am – 4am', 0], ['4am – 8am', 4], ['8am – 12pm', 8],
+        ['12pm – 4pm', 12], ['4pm – 8pm', 16], ['8pm – 12am', 20],
+      ];
+      const buckets = PERIODS.map(([label, start]) => ({ label, start, sum: 0, n: 0, max: 0 }));
+      for (const s of series) {
+        if (s.wind_speed == null) continue;
+        const hh = parseInt(String(s.timestamp).slice(11, 13), 10);
+        if (isNaN(hh)) continue;
+        const b = buckets[Math.floor(hh / 4)];
+        if (!b) continue;
+        b.sum += s.wind_speed; b.n += 1; b.max = Math.max(b.max, s.wind_speed);
+      }
+      const windColor = (v) => v == null ? '#475569' : (v >= 15 ? '#dc2626' : (v >= 10 ? '#b45309' : '#16a34a'));
+      const calmest = buckets.filter(b => b.n).reduce((m, b) => (m == null || b.sum / b.n < m.sum / m.n) ? b : m, null);
+
       return (
         <div className="card">
           {rangeButtons}
           <h2 style={{ marginTop: 0 }}>{days}-day series</h2>
           <div ref={ref} />
+
+          <h3 style={{ marginTop: 18, marginBottom: 6 }}>Average wind by time of day ({days}-day)</h3>
+          <table className="log-table">
+            <thead><tr><th>Period</th><th>Avg wind</th><th>Max</th><th>Samples</th></tr></thead>
+            <tbody>
+              {buckets.map((b, i) => {
+                const avg = b.n ? b.sum / b.n : null;
+                const isCalmest = calmest && b === calmest;
+                return (
+                  <tr key={i} style={isCalmest ? { background: '#dcfce7' } : {}}>
+                    <td style={{ fontWeight: 600 }}>{b.label}{isCalmest ? ' 🟢' : ''}</td>
+                    <td style={{ fontWeight: 700, color: windColor(avg) }}>
+                      {avg != null ? avg.toFixed(1) + ' kts' : '—'}
+                    </td>
+                    <td>{b.n ? b.max.toFixed(0) + ' kts' : '—'}</td>
+                    <td className="muted">{b.n}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <p className="muted" style={{ fontSize: '0.78rem', marginTop: 4 }}>
+            Averaged over all readings in the {days}-day window. 🟢 = calmest period.
+            Colour: green &lt;10, amber 10-15, red ≥15 kts.
+          </p>
         </div>
       );
     }
