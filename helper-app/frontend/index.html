@@ -1310,6 +1310,19 @@ URLSession.shared.dataTask(with: url) { data, _, _ in
               Click <strong>Load models</strong> to validate the endpoint and refresh the list.
             </div>
 
+            <h4 style={{ margin: '10px 0 4px' }}>API key (optional, Bearer)</h4>
+            <input type="password" style={{ width: '100%', maxWidth: 360 }}
+                   placeholder={s.ollama_api_key_set ? '•••••••• (set — leave blank to keep)' : 'none'}
+                   onBlur={e => { if (e.target.value.trim() !== '') { post({ ollama_api_key: e.target.value }); setTimeout(reload, 400); } }} />
+            <div className="muted" style={{ fontSize: '0.78rem', marginTop: 2 }}>
+              Sent as <code>Authorization: Bearer …</code> on every Ollama request. Only needed if
+              your Ollama is behind an auth proxy. {s.ollama_api_key_set &&
+                <button onClick={() => { post({ ollama_api_key: '' }); setTimeout(reload, 400); }}
+                        style={{ background: '#64748b', fontSize: '0.72rem', padding: '2px 8px', marginLeft: 6 }}>
+                  Clear key
+                </button>}
+            </div>
+
             <div style={{ marginTop: 4 }}>
               {ollama
                 ? (ollama.ok

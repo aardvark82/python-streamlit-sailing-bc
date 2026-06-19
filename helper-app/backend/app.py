@@ -280,6 +280,7 @@ def api_settings_get():
         "openai_model": ai_provider.get_openai_model(),
         "ollama_model": ai_provider.get_ollama_model(),
         "ollama_url": ai_provider.get_ollama_url(),
+        "ollama_api_key_set": bool(ai_provider.get_ollama_api_key()),
     })
 
 
@@ -318,6 +319,15 @@ def api_settings_post():
             current.pop("ollama_url", None)
             settings.SETTINGS_PATH.write_text(__import__("json").dumps(current, indent=2))
             return jsonify(ok=True, cleared="ollama_url")
+    if "ollama_api_key" in body:
+        v = (body["ollama_api_key"] or "").strip()
+        if v:
+            updates["ollama_api_key"] = v
+        else:
+            current = settings.load()
+            current.pop("ollama_api_key", None)
+            settings.SETTINGS_PATH.write_text(__import__("json").dumps(current, indent=2))
+            return jsonify(ok=True, cleared="ollama_api_key")
     if updates:
         settings.save(updates)
     return jsonify(ok=True, updates=updates)

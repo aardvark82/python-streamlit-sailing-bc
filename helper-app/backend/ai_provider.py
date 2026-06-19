@@ -45,6 +45,22 @@ def get_ollama_url() -> str:
     return _normalize_ollama_url(raw)
 
 
+def get_ollama_api_key() -> str:
+    """Optional Bearer token for an authed/proxied Ollama. Settings →
+    OLLAMA_API_KEY env. Empty string when not configured."""
+    return (settings.load().get("ollama_api_key") or getenv_ci("OLLAMA_API_KEY") or "").strip()
+
+
+def _ollama_headers(json_body: bool = False) -> dict:
+    h = {}
+    if json_body:
+        h["Content-Type"] = "application/json"
+    key = get_ollama_api_key()
+    if key:
+        h["Authorization"] = f"Bearer {key}"
+    return h
+
+
 @dataclass
 class AIResult:
     content: str
@@ -108,7 +124,7 @@ def ollama_status() -> dict:
     """Cheap reachability + installed-models probe for the Settings UI."""
     url = get_ollama_url()
     try:
-        r = requests.get(f"{url}/api/tags", timeout=3)
+        r = requests.get(f"{url}/api/tags", headers=_ollama_headers(), timeout=3)
         r.raise_for_status()
         models = [m.get("name") for m in r.json().get("models", []) if m.get("name")]
         return {"ok": True, "url": url, "models": models}
@@ -121,7 +137,7 @@ def ollama_pull(model: str) -> dict:
     final ok/error to keep the HTTP response simple."""
     url = get_ollama_url()
     try:
-        with requests.post(f"{url}/api/pull",
+        with requests.post(f"{url}/api/pull", headers=_ollama_headers(json_body=True),
                            json={"name": model, "stream": False},
                            timeout=1800) as r:
             r.raise_for_status()
@@ -138,7 +154,7 @@ def _ollama_chat(messages, *, reason, source_data, model):
     t0 = _time.time()
     try:
         r = requests.post(
-            f"{url}/api/chat",
+            f"{url}/api/chat", headers=_ollama_headers(json_body=True),
             json={"model": model, "messages": messages, "stream": False},
             timeout=600,    # CPU inference is slow; first call may pull the model
         )
