@@ -435,6 +435,20 @@ def _get_overall(factors):
     return 'go', 'GO'
 
 
+def _red_reason_pills_html(factors):
+    """Red (no-go) reasons as inline pill tags. Warnings/caution are
+    ignored — only the factors that actually drive a NO-GO are listed."""
+    reds = [f['label'] for f in factors.values() if f.get('status') == 'nogo']
+    if not reds:
+        return None
+    return " ".join(
+        '<span style="background:#e74c3c;color:#fff;padding:3px 10px;'
+        'border-radius:12px;font-size:0.82rem;font-weight:600;'
+        'margin:2px 6px 2px 0;display:inline-block;">🔴 ' + str(r) + '</span>'
+        for r in reds
+    )
+
+
 # ──────────────────────────────────────────────
 # Sidebar: compact badge only
 # ──────────────────────────────────────────────
@@ -448,7 +462,12 @@ def display_gonogo_sidebar():
 
     st.sidebar.badge(overall_label, color=_BADGE[overall])
 
-    # One-line summary of worst factors
+    # Red (no-go) reasons as tags directly under the verdict
+    pills = _red_reason_pills_html(factors)
+    if pills:
+        st.sidebar.markdown(pills, unsafe_allow_html=True)
+
+    # One-line summary of worst factors (caution + nogo)
     bad = [f['label'] for f in factors.values() if f['status'] != 'go']
     if bad:
         st.sidebar.caption(", ".join(bad))
@@ -615,6 +634,11 @@ def display_gonogo_page(container=None, page_links=None):
 
     # Overall verdict
     draw.badge(overall_label, color=_BADGE[overall])
+
+    # Red reasons (no-go factors only) as tags, right above the snapshot
+    pills = _red_reason_pills_html(factors)
+    if pills:
+        draw.markdown(pills, unsafe_allow_html=True)
 
     # ── Snapshot metrics at the top ──
     _draw_snapshot(draw, weather)
