@@ -52,15 +52,17 @@ def openAIFetchForecastForURL(url):
     else:
         bucket = 'day'
 
-    return _openAIFetchForecastForURL_cached(url, bucket)
+    # Include provider+model in the cache key so switching provider in
+    # Settings invalidates stale results.
+    import ai_st
+    sig = f"{ai_st.get_provider()}:{ai_st.get_openai_model()}:{ai_st.get_ollama_model()}"
+    return _openAIFetchForecastForURL_cached(url, bucket, sig)
 
 
 @st.cache_data(ttl=1800)
-def _openAIFetchForecastForURL_cached(url, time_bucket):
-    """Cached implementation — keyed on (url, time_bucket) so crossings trigger refresh."""
-    openai_api_key = st.secrets["OpenAI_key"]
-    if openai_api_key is None:
-        raise ValueError("OpenAI API key is not set in environment variables.")
+def _openAIFetchForecastForURL_cached(url, time_bucket, provider_sig):
+    """Cached implementation — keyed on (url, time_bucket, provider_sig)."""
+    import ai_st
 
     response = cached_fetch_url(url)
     response.raise_for_status()
@@ -96,27 +98,19 @@ def _openAIFetchForecastForURL_cached(url, time_bucket):
     # smaller/cheaper prompt and far more reliable parsing.
     chat_gpt_msg = chat_gpt_msg + _extract_forecast_text(response.text)
 
-    url_api = "https://api.openai.com/v1/chat/completions"
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {openai_api_key}"
-    }
-
-    data = {
-        "model": "gpt-5-mini",
-        "messages": [
-            {"role": "system", "content": "You are an expert meteorologist."},
-            {"role": "user", "content": chat_gpt_msg}
-        ]
-    }
-
-    response = requests.post(url_api, headers=headers, json=data)
-
-    if response.status_code == 200:
-        return response.json()['choices'][0]['message']['content']
-    else:
-        print("Error:", response.status_code, response.text)
-        return f"Error: {response.status_code} {response.text}"
+    # Route through ai_st — OpenAI or hosted Ollama per Settings; logs the call.
+    try:
+        return ai_st.chat(
+            messages=[
+                {"role": "system", "content": "You are an expert meteorologist."},
+                {"role": "user", "content": chat_gpt_msg},
+            ],
+            reason="forecast parsing",
+            source_data=f"Marine forecast text — {url.split('siteID=')[-1] if 'siteID=' in url else url}",
+        )
+    except Exception as e:
+        print("AI forecast parse error:", e)
+        return f"Error: {e}"
 
 
 @st.cache_data(ttl=1800)

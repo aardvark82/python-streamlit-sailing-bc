@@ -246,6 +246,14 @@ def page_lionsbay():
         st.error(f"Failed to load Lions Bay weather: {e}")
 
 
+def page_ai_settings():
+    try:
+        import ai_st
+        ai_st.render_settings_page(container=st)
+    except Exception as e:
+        st.error(f"Failed to load AI settings: {e}")
+
+
 def page_kiosk():
     try:
         # _pg_gonogo is defined later at module scope; safe to reference here
@@ -1063,6 +1071,7 @@ _pg_beach = st.Page(page_beach, title="Beach", icon="🏖️")
 _pg_squamish = st.Page(page_squamish, title="Squamish W", icon="⛰️")
 _pg_lionsbay = st.Page(page_lionsbay, title="Lions Bay W", icon="⛰️")
 _pg_kiosk = st.Page(page_kiosk, title="Kiosk Mode", icon="📺")
+_pg_ai_settings = st.Page(page_ai_settings, title="AI Settings", icon="⚙️")
 
 # Store page_link targets so page_gonogo can reference them
 PAGE_LINKS = {
@@ -1079,6 +1088,7 @@ pages = {
     "Forecast & Tides": [_pg_forecast, _pg_tides, _pg_beach],
     "Regional Weather": [_pg_squamish, _pg_lionsbay],
     "Display": [_pg_kiosk, _pg_iot],
+    "Setup": [_pg_ai_settings],
 }
 
 pg = st.navigation(pages)

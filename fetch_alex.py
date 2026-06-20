@@ -945,6 +945,19 @@ def _bytes_to_kb(b):
 
 
 def display_iot_usage_page(container=None):
+    """IoT data-usage page + the AI query log underneath. The AI log
+    always renders even if the flespi section errors out early."""
+    draw = container or st
+    _iot_usage_body(draw)
+    draw.divider()
+    try:
+        import ai_st
+        ai_st.render_ai_log(draw)
+    except Exception as e:
+        draw.caption(f"AI log unavailable: {e}")
+
+
+def _iot_usage_body(draw):
     """Standalone sidebar page bundling everything IoT-data-usage related:
        - 2 KB metric cards at the top: Flespi Data, 1NCE Data
        - device identifier caption + flespi token expiry reminder
@@ -953,7 +966,6 @@ def display_iot_usage_page(container=None):
     Independent of the live tracker — has its own secret check + flespi
     device ID resolution so it works even when the Alex page hasn't been
     loaded this session."""
-    draw = container or st
     draw.subheader("📡 IoT Data usage")
 
     # Resolve flespi device id (cached 10 min)

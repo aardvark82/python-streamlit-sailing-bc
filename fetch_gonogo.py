@@ -19,6 +19,7 @@ from fetch_forecast import (
 from fetch_tides import (
     beautifulSoupFetchTidesForURL,
     fetch_tide_extremes_selenium,
+    fetch_iwls_tide_extremes_pt_atkinson,
     process_tide_data,
     parse_tide_datetime,
     extract_meters,
@@ -101,18 +102,32 @@ def _get_tide_data():
     falls back to the BeautifulSoup scraper if Selenium is unavailable."""
     data = None
 
-    # Preferred: Selenium-fetched CSV — matches what the Tides page uses
+    # Preferred: DFO IWLS REST API — the SAME source the Tides page uses
+    # (reliable on Streamlit Cloud, where Selenium can't run). This is why
+    # the sidebar Tides chart worked but Go/No-Go said 'tide unavailable'.
     try:
-        extremes_list = fetch_tide_extremes_selenium()
+        extremes_list = fetch_iwls_tide_extremes_pt_atkinson()
         if extremes_list:
             data = {'data': [
                 {'height': e['Height'], 'time': e['Time (PDT)& Date'], 'type': e['type']}
                 for e in extremes_list
             ]}
     except Exception as e:
-        print(f"Go/NoGo Selenium tide source failed: {e}")
+        print(f"Go/NoGo IWLS tide source failed: {e}")
 
-    # Fallback: BeautifulSoup scraper
+    # Fallback: Selenium-fetched CSV (only works locally with Chrome)
+    if not data or not data.get('data'):
+        try:
+            extremes_list = fetch_tide_extremes_selenium()
+            if extremes_list:
+                data = {'data': [
+                    {'height': e['Height'], 'time': e['Time (PDT)& Date'], 'type': e['type']}
+                    for e in extremes_list
+                ]}
+        except Exception as e:
+            print(f"Go/NoGo Selenium tide source failed: {e}")
+
+    # Last resort: BeautifulSoup scraper
     if not data or not data.get('data'):
         try:
             data = beautifulSoupFetchTidesForURL("https://www.tides.gc.ca/en/stations/07795")
