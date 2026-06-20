@@ -5,6 +5,13 @@ services:
     build: .
     container_name: pysail-helper-app-5111
     restart: unless-stopped
+    # TCP-listen healthcheck (port 5111 = 0x13F7): passes when listening, no HTTP route needed.
+    healthcheck:
+      test: ["CMD-SHELL", "grep -qiE ':13F7 [0-9A-F]+:[0-9A-F]+ 0A ' /proc/net/tcp /proc/net/tcp6 2>/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
     ports:
       - "5111:5111"
     # Load every line from .env directly into container env with its
