@@ -254,6 +254,14 @@ def page_ai_settings():
         st.error(f"Failed to load AI settings: {e}")
 
 
+def page_ai_log():
+    try:
+        import ai_st
+        ai_st.render_ai_log(container=st)
+    except Exception as e:
+        st.error(f"Failed to load AI log: {e}")
+
+
 def page_kiosk():
     try:
         # _pg_gonogo is defined later at module scope; safe to reference here
@@ -1065,6 +1073,7 @@ _pg_whales = st.Page(page_whales, title="Whale boats", icon="🐋")
 _pg_whales2 = st.Page(page_whales2, title="Whale boats 2", icon="🐋")
 _pg_alex = st.Page(page_alex, title="Alex Location", icon="📍")
 _pg_iot = st.Page(page_iot_usage, title="IoT Usage", icon="📡")
+_pg_ai_log = st.Page(page_ai_log, title="AI Log", icon="🤖")
 _pg_forecast = st.Page(page_forecast, title="Marine Forecast", icon="🌊")
 _pg_tides = st.Page(page_tides, title="Tides", icon="🌊")
 _pg_beach = st.Page(page_beach, title="Beach", icon="🏖️")
@@ -1087,7 +1096,7 @@ pages = {
     "Live Data": [_pg_alex, _pg_pamrocks, _pg_whales, _pg_whales2, _pg_jericho, _pg_english_bay, _pg_atkinson, _pg_halibut],
     "Forecast & Tides": [_pg_forecast, _pg_tides, _pg_beach],
     "Regional Weather": [_pg_squamish, _pg_lionsbay],
-    "Display": [_pg_kiosk, _pg_iot],
+    "Display": [_pg_kiosk, _pg_iot, _pg_ai_log],
     "Setup": [_pg_ai_settings],
 }
 
