@@ -228,7 +228,7 @@ def _openai_chat(messages, *, reason, source_data, model):
     r = requests.post(
         "https://api.openai.com/v1/chat/completions",
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"},
-        json={"model": model, "messages": messages}, timeout=60)
+        json={"model": model, "messages": messages}, timeout=600)
     r.raise_for_status()
     body = r.json()
     usage = body.get("usage", {}) or {}

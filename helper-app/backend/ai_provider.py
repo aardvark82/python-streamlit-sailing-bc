@@ -96,7 +96,7 @@ def _openai_chat(messages, *, reason, source_data, model):
         "https://api.openai.com/v1/chat/completions",
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"},
         json={"model": model, "messages": messages},
-        timeout=60,
+        timeout=600,
     )
     r.raise_for_status()
     body = r.json()
