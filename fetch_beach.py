@@ -86,21 +86,30 @@ def _ecoli_status(value_str):
     return 'go'
 
 
-BEACH_TIDE_THRESHOLD = 2.5  # metres — at/above this the beach is covering
+BEACH_TIDE_THRESHOLD = 2.5  # metres — at/above this a FALLING tide is still too high
 
 
 def _tide_status_for_beach(height, direction):
-    """Beach access is best at LOW tide (more exposed sand), and improving as
-    the tide drops. Rule:
-       - GO   : tide is low/mid (<= 2.5 m) AND going DOWN (falling)
-       - NO-GO: tide is high (> 2.5 m), OR mid/low but RISING (will cover)."""
+    """Beach access is best at LOW tide (more exposed sand).
+
+    Falling tide (improving):
+       - GO    : low/mid (<= 2.5 m)
+       - NO-GO : high (> 2.5 m) — still underwater, even if dropping
+    Rising tide (worsening, but time left when low):
+       - GO     : under 2 m (plenty of time to enjoy before it covers)
+       - CAUTION: 2 m to 3 m (covering soon)
+       - NO-GO  : over 3 m (high / underwater)"""
     if height is None:
         return 'caution'
-    if height > BEACH_TIDE_THRESHOLD:
-        return 'nogo'            # high tide — beach underwater
     if direction == 'falling':
-        return 'go'              # low/mid and dropping — exposed & improving
-    return 'nogo'                # rising (or slack/unknown) — will cover soon
+        return 'go' if height <= BEACH_TIDE_THRESHOLD else 'nogo'
+    if direction == 'rising':
+        if height < 2.0:
+            return 'go'
+        if height < 3.0:
+            return 'caution'
+        return 'nogo'
+    return 'caution'  # slack / unknown direction
 
 
 def _worst_status(*statuses):
@@ -229,9 +238,10 @@ def display_beach_gonogo_table(draw, ecoli_status_value):
     draw.markdown("**Beach Go/No-Go — next 24h (2-hour increments)**")
     draw.plotly_chart(fig, width='stretch')
     draw.caption(
-        "Rules: water quality must be < 200 MPN, AND the beach must be exposed — "
-        "GO when tide is low/mid (≤ 2.5 m) and falling; NO-GO when tide is high "
-        "(> 2.5 m) or rising. At high tide Sandy Cove is fully underwater."
+        "Rules: water quality must be < 200 MPN, AND a usable tide. "
+        "Falling → GO ≤ 2.5 m, else NO-GO. "
+        "Rising → GO under 2 m, CAUTION 2–3 m, NO-GO over 3 m. "
+        "At high tide Sandy Cove is fully underwater."
     )
 
 
