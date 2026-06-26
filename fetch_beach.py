@@ -93,8 +93,9 @@ def _tide_status_for_beach(height, direction):
     """Beach access is best at LOW tide (more exposed sand).
 
     Falling tide (improving):
-       - GO    : low/mid (<= 2.5 m)
-       - NO-GO : high (> 2.5 m) — still underwater, even if dropping
+       - GO     : low/mid (<= 2.5 m)
+       - CAUTION: 2.5 m to 3 m (still high but dropping toward usable)
+       - NO-GO  : over 3 m (underwater)
     Rising tide (worsening, but time left when low):
        - GO     : under 2 m (plenty of time to enjoy before it covers)
        - CAUTION: 2 m to 3 m (covering soon)
@@ -102,7 +103,11 @@ def _tide_status_for_beach(height, direction):
     if height is None:
         return 'caution'
     if direction == 'falling':
-        return 'go' if height <= BEACH_TIDE_THRESHOLD else 'nogo'
+        if height <= BEACH_TIDE_THRESHOLD:
+            return 'go'
+        if height <= 3.0:
+            return 'caution'
+        return 'nogo'
     if direction == 'rising':
         if height < 2.0:
             return 'go'
@@ -239,7 +244,7 @@ def display_beach_gonogo_table(draw, ecoli_status_value):
     draw.plotly_chart(fig, width='stretch')
     draw.caption(
         "Rules: water quality must be < 200 MPN, AND a usable tide. "
-        "Falling → GO ≤ 2.5 m, else NO-GO. "
+        "Falling → GO ≤ 2.5 m, CAUTION 2.5–3 m, NO-GO over 3 m. "
         "Rising → GO under 2 m, CAUTION 2–3 m, NO-GO over 3 m. "
         "At high tide Sandy Cove is fully underwater."
     )
