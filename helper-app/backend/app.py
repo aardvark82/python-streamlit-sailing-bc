@@ -23,7 +23,7 @@ from flask import Flask, jsonify, request, send_from_directory
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from . import (ai_log, ai_provider, alexa, cleanup, db, forecast,
-                  healthcheck, openai_log, reconcile, settings, usage, wave_model)
+                  healthcheck, openai_log, reconcile, settings, tides, usage, wave_model)
 from .buoy_fetcher import BUOYS, BUOY_BY_ID, fetch_buoy
 from .envutil import getenv_ci
 from .kv_client import read_history, write_reading, VAN_TZ, invalidate_history
@@ -178,6 +178,11 @@ def api_v1_current_one(bid):
     if not c:
         return jsonify(error="no data available", id=bid), 503
     return jsonify(c)
+
+
+@app.route("/api/annual_tides")
+def api_annual_tides():
+    return jsonify(tides.annual_tides())
 
 
 @app.route("/api/version")
