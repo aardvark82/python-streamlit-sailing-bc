@@ -3,7 +3,7 @@
 # Streamlit serializes a DataFrame ("Segmentation fault" in the deploy log,
 # app shows "Error running app"). These versions are the exact stack that
 # runs the app cleanly locally. Bump deliberately, together — never auto.
-streamlit==1.45.0        # has st.badge / st.navigation used by the app
+streamlit==1.54.0        # has st.badge / st.navigation used by the app
 pandas==2.2.3
 numpy==2.2.5
 pyarrow==20.0.0
