@@ -6,7 +6,7 @@
 streamlit==1.45.0        # has st.badge / st.navigation used by the app
 pandas==2.2.3
 numpy==2.2.5
-pyarrow==20.0.0
+pyarrow==23.0.1
 scipy==1.15.2
 plotly==6.0.1
 
