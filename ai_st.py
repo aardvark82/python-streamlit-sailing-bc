@@ -25,10 +25,13 @@ VAN_TZ = pytz.timezone("America/Vancouver")
 
 
 def _pick_writable_dir() -> Path:
-    """Prefer AI_DATA_DIR / the app dir, fall back to the temp dir if those
-    aren't writable (Streamlit Cloud filesystem can be locked down)."""
+    """Where to persist ai_settings.json / ai_log.json. Prefer an explicit
+    AI_DATA_DIR, else a dedicated temp subdir. We deliberately do NOT write
+    into the app/git directory — on Streamlit Cloud it can be read-only and
+    writes there could trip the file watcher into reruns."""
     import tempfile
-    for cand in [os.environ.get("AI_DATA_DIR"), ".", tempfile.gettempdir()]:
+    default_tmp = Path(tempfile.gettempdir()) / "pysail_ai"
+    for cand in [os.environ.get("AI_DATA_DIR"), str(default_tmp), tempfile.gettempdir()]:
         if not cand:
             continue
         try:
@@ -40,7 +43,7 @@ def _pick_writable_dir() -> Path:
             return p
         except Exception:
             continue
-    return Path(".")
+    return default_tmp
 
 
 _DIR = _pick_writable_dir()
