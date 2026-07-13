@@ -3,3 +3,8 @@ __pycache__/fetch_tides.cpython-313.pyc
 *.pyc
 /.streamlit/
 /temp_downloads
+
+# ai_st runtime files (should live in temp, never committed)
+ai_log.json
+ai_settings.json
+.ai_write_test
