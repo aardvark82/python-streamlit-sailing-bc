@@ -1,18 +1,22 @@
-streamlit
-pandas
-requests
-beautifulsoup4
-arrow
-lxml #parse tides
-plotly
-numpy
-scipy
-timeago
-selenium # tides click CSV export button
-pdfplumber # beach quality values
-pytz
-streamlit-autorefresh
-websockets # AISStream.io WebSocket for whale-watching boat tracking
+# PINNED on purpose. Unpinned, Streamlit Cloud pulled bleeding-edge
+# pandas 3.0 / numpy 2.5 / pyarrow 25, whose native combo SEGFAULTS when
+# Streamlit serializes a DataFrame ("Segmentation fault" in the deploy log,
+# app shows "Error running app"). These versions are the exact stack that
+# runs the app cleanly locally. Bump deliberately, together — never auto.
+streamlit==1.45.0        # has st.badge / st.navigation used by the app
+pandas==2.2.3
+numpy==2.2.5
+pyarrow==20.0.0
+scipy==1.15.2
+plotly==6.0.1
 
-
-
+requests==2.32.3
+beautifulsoup4==4.13.4
+arrow==1.3.0
+lxml==5.4.0              # parse tides
+timeago==1.0.14
+selenium==4.32.0         # tides click CSV export button
+pdfplumber==0.11.7       # beach quality values
+pytz==2025.2
+streamlit-autorefresh==1.0.1
+websockets==15.0.1       # AISStream.io WebSocket for whale-watching boat tracking
