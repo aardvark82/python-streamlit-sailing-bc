@@ -361,32 +361,46 @@ def _gather_current_factors():
     return factors, weather
 
 
+_HOURS = list(range(8, 20))   # 08:00 … 19:00 → hourly boxes (4 per old 4h block)
+
+
+def _tide_dot_color(height):
+    """Tide-level dot: green > 2.5 m, orange 1.5–2.5 m, red < 1.5 m."""
+    if height is None:
+        return None
+    if height > 2.5:
+        return '#2ecc71'   # green
+    if height >= 1.5:
+        return '#f39c12'   # orange
+    return '#e74c3c'       # red
+
+
 def _analyze_5day_windows(weather_data):
-    """Find boating windows at 08:00, 12:00, 16:00 for each day, including tide."""
+    """Hourly boating windows (08:00–19:00) for the next 6 days. Box status
+    from wind+rain (OpenWeather is 3-hourly, so nearby hours may match);
+    a per-hour tide dot from the interpolated tide height."""
     if not weather_data or not weather_data.hourly_forecast:
         return []
 
     vancouver_tz = pytz.timezone('America/Vancouver')
-    today = datetime.now(vancouver_tz).replace(hour=0, minute=0, second=0, microsecond=0)
+    now = datetime.now(vancouver_tz)
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
-    # Pre-fetch tide extremes once
-    tide_df, _, _ = _get_tide_data()
+    # Tide extremes + interpolation arrays (interp gives per-hour height)
+    tide_df, x_ts, y_h = _get_tide_data()
 
     windows = []
-
     for day_offset in range(0, 6):
         day = today + timedelta(days=day_offset)
-
-        for period_name, center_h in [('08:00', 8), ('12:00', 12), ('16:00', 16)]:
-            target = day.replace(hour=center_h)
-
-            # Skip past times
-            if target < datetime.now(vancouver_tz) - timedelta(hours=1):
+        for hour in _HOURS:
+            target = day.replace(hour=hour)
+            if target < now - timedelta(hours=1):
                 continue
 
+            # Nearest forecast points (3-hourly source → within 2h)
             items = [
                 item for item in weather_data.hourly_forecast
-                if abs((datetime.fromtimestamp(item['dt']).astimezone(vancouver_tz) - target).total_seconds()) <= 5400
+                if abs((datetime.fromtimestamp(item['dt']).astimezone(vancouver_tz) - target).total_seconds()) <= 7200
             ]
             if not items:
                 continue
@@ -397,12 +411,6 @@ def _analyze_5day_windows(weather_data):
             )
             total_rain = sum(item.get('rain', {}).get('3h', 0) for item in items)
 
-            # Tide info for display only (not affecting go/nogo decision)
-            window_start = target - timedelta(hours=2)
-            window_end = target + timedelta(hours=2)
-            tides = _nearest_tides_in_window(tide_df, window_start, window_end)
-
-            # Go/nogo based on wind + rain only
             if max_wind > WIND_CAUTION or total_rain > PRECIP_CAUTION:
                 status = 'nogo'
             elif max_wind > WIND_GO or total_rain > PRECIP_GO:
@@ -410,14 +418,17 @@ def _analyze_5day_windows(weather_data):
             else:
                 status = 'go'
 
+            tide_h = _tide_at(x_ts, y_h, target) if x_ts is not None else None
+
             windows.append({
                 'day': day.strftime('%a %b %d'),
-                'period': period_name,
+                'period': f"{hour:02d}:00",
                 'datetime': target,
                 'status': status,
                 'wind': max_wind,
                 'rain': total_rain,
-                'tides': tides,
+                'tide_h': tide_h,
+                'tide_dot': _tide_dot_color(tide_h),
             })
 
     return windows
@@ -688,17 +699,14 @@ def display_gonogo_page(container=None, page_links=None):
                     detail = f"{w['wind']:.0f}kts"
                     if w['rain'] > 0:
                         detail += f", {w['rain']:.1f}mm rain"
-                    tides = w.get('tides', {})
-                    if tides.get('high'):
-                        detail += f", High {tides['high'][0]} ({tides['high'][1]:.1f}m)"
-                    if tides.get('low'):
-                        detail += f", Low {tides['low'][0]} ({tides['low'][1]:.1f}m)"
+                    if w.get('tide_h') is not None:
+                        detail += f", tide {w['tide_h']:.1f}m"
                     draw.caption(f"{_ICON[w['status']]} {w['day']} {w['period']} — {detail}")
 
 
 def _draw_weekly_chart(draw, windows):
-    """Draw a heatmap-style chart: days x time slots, colored green/orange/red."""
-    # Build grid: rows = time slots (08:00, 12:00, 16:00), columns = days
+    """Heatmap: days x HOURLY slots (08:00–19:00). Cell colour = wind/rain
+    status; a tide-level dot (green/orange/red) sits in each cell."""
     days = []
     seen = set()
     for w in windows:
@@ -706,28 +714,22 @@ def _draw_weekly_chart(draw, windows):
             days.append(w['day'])
             seen.add(w['day'])
 
-    periods = ['08:00', '12:00', '16:00']
+    periods = [f"{h:02d}:00" for h in _HOURS]   # 12 hourly rows
 
-    # Build matrices for the heatmap
-    z = []          # numeric values for color
-    text = []       # hover text
-    annotations = []
+    # index windows for quick lookup
+    grid = {(w['day'], w['period']): w for w in windows}
 
+    z, text = [], []
     for period in periods:
-        row_z = []
-        row_text = []
+        row_z, row_text = [], []
         for day in days:
-            match = next((w for w in windows if w['day'] == day and w['period'] == period), None)
-            if match:
-                row_z.append(_NUMERIC[match['status']])
-                parts = [f"{match['wind']:.0f}kts"]
-                if match['rain'] > 0:
-                    parts.append(f"{match['rain']:.1f}mm")
-                tides = match.get('tides', {})
-                if tides.get('high'):
-                    parts.append(f"H {tides['high'][0]} {tides['high'][1]:.1f}m")
-                if tides.get('low'):
-                    parts.append(f"L {tides['low'][0]} {tides['low'][1]:.1f}m")
+            m = grid.get((day, period))
+            if m:
+                row_z.append(_NUMERIC[m['status']])
+                th = m.get('tide_h')
+                parts = [f"{m['wind']:.0f} kts", f"tide {th:.1f} m" if th is not None else "tide —"]
+                if m['rain'] > 0:
+                    parts.append(f"{m['rain']:.1f} mm")
                 row_text.append("<br>".join(parts))
             else:
                 row_z.append(None)
@@ -735,65 +737,42 @@ def _draw_weekly_chart(draw, windows):
         z.append(row_z)
         text.append(row_text)
 
-    # Custom colorscale: red(0) → orange(0.5) → green(1)
     colorscale = [
-        [0, '#e74c3c'],
-        [0.25, '#e74c3c'],
-        [0.25, '#f39c12'],
-        [0.75, '#f39c12'],
-        [0.75, '#2ecc71'],
-        [1, '#2ecc71'],
+        [0, '#e74c3c'], [0.25, '#e74c3c'],
+        [0.25, '#f39c12'], [0.75, '#f39c12'],
+        [0.75, '#2ecc71'], [1, '#2ecc71'],
     ]
 
     fig = go.Figure(data=go.Heatmap(
-        z=z,
-        x=days,
-        y=periods,
-        text=text,
-        texttemplate="%{text}",
-        textfont=dict(size=13, color='white'),
-        colorscale=colorscale,
-        zmin=0,
-        zmax=1,
-        showscale=False,
+        z=z, x=days, y=periods, text=text,
+        colorscale=colorscale, zmin=0, zmax=1, showscale=False,
         hovertemplate="<b>%{x} %{y}</b><br>%{text}<extra></extra>",
-        xgap=3,
-        ygap=3,
+        xgap=2, ygap=2,
     ))
-
     fig.update_layout(
-        height=250,
-        margin=dict(l=60, r=20, t=10, b=40),
+        height=560,
+        margin=dict(l=55, r=20, t=30, b=10),
         yaxis=dict(autorange='reversed'),
         xaxis=dict(side='top'),
         plot_bgcolor='white',
     )
 
-    # Add annotations for status labels
-    for i, period in enumerate(periods):
-        for j, day in enumerate(days):
-            match = next((w for w in windows if w['day'] == day and w['period'] == period), None)
-            if match:
-                label = f"<b>{match['wind']:.0f}</b>kts"
-                tides = match.get('tides', {})
-                tide_parts = []
-                if tides.get('high'):
-                    tide_parts.append(f"H{tides['high'][0]}")
-                if tides.get('low'):
-                    tide_parts.append(f"L{tides['low'][0]}")
-                if tide_parts:
-                    label += f"<br><sub>{' '.join(tide_parts)}</sub>"
-                fig.add_annotation(
-                    x=day, y=period,
-                    text=label,
-                    showarrow=False,
-                    font=dict(color='white', size=12),
-                )
+    # Per-cell: tide dot on top, wind number below.
+    for period in periods:
+        for day in days:
+            m = grid.get((day, period))
+            if not m:
+                continue
+            dot = m.get('tide_dot')
+            if dot:
+                fig.add_annotation(x=day, y=period, text='●', showarrow=False,
+                                   font=dict(color=dot, size=15), yshift=11)
+            fig.add_annotation(x=day, y=period, text=f"<b>{m['wind']:.0f}</b>",
+                               showarrow=False, font=dict(color='white', size=11), yshift=-7)
 
-    # Remove default text template since we're using annotations
     fig.update_traces(texttemplate=None)
-
     draw.plotly_chart(fig, width='stretch')
+    draw.caption("Cell colour = wind/rain rule · tide dot: 🟢 > 2.5 m · 🟠 1.5–2.5 m · 🔴 < 1.5 m")
 
 
 # ──────────────────────────────────────────────
@@ -1069,14 +1048,10 @@ def _draw_kiosk_chart(windows):
             match = next((w for w in windows if w['day'] == day and w['period'] == period), None)
             if match:
                 label = f"<b>{match['wind']:.0f}</b>kts"
-                tides = match.get('tides', {})
-                tide_parts = []
-                if tides.get('high'):
-                    tide_parts.append(f"H{tides['high'][0]}")
-                if tides.get('low'):
-                    tide_parts.append(f"L{tides['low'][0]}")
-                if tide_parts:
-                    label += f"<br>{' '.join(tide_parts)}"
+                th = match.get('tide_h')
+                if th is not None:
+                    dot = match.get('tide_dot') or '#e0e0e0'
+                    label += f'<br><span style="color:{dot}">●</span> {th:.1f}m'
                 fig.add_annotation(
                     x=day, y=period,
                     text=label,
