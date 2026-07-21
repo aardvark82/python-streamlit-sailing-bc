@@ -606,6 +606,84 @@ def _format_age(unix_ts, now_van):
         return ''
 
 
+_EXT_V_KEYS = (
+    'external.powersource.voltage',
+    'external.power.voltage',
+    'power.supply.voltage',
+    'power.voltage',
+)
+_EXT_V_THRESHOLD = 12.5   # red-line / cutoff of interest
+
+
+def _msg_external_v(m):
+    """Read external supply voltage from a flespi message dict (mV → V)."""
+    for k in _EXT_V_KEYS:
+        v = m.get(k)
+        if v is None:
+            continue
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        return f / 1000.0 if f > 100 else f
+    return None
+
+
+def _draw_external_power_chart(draw, vpts, now_van):
+    """Plot external power (V) over the last 24h with a red 12.5 V line and
+    an ETA-to-12.5 V from a linear fit of the readings."""
+    import numpy as np
+    van_tz = pytz.timezone('America/Vancouver')
+    times = [datetime.fromtimestamp(t, tz=pytz.UTC).astimezone(van_tz) for t, _ in vpts]
+    volts = [v for _, v in vpts]
+    cur_v = volts[-1]
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=times, y=volts, mode='lines+markers', name='External V',
+        line=dict(color='#2ca02c', width=2), marker=dict(size=4),
+        hovertemplate="%{x|%a %H:%M}<br>%{y:.2f} V<extra></extra>",
+    ))
+    fig.add_hline(y=_EXT_V_THRESHOLD, line_dash='dash', line_color='red',
+                  annotation_text=f'{_EXT_V_THRESHOLD} V', annotation_position='bottom right')
+
+    # Linear fit (V per hour) over the window → ETA to 12.5 V
+    t0 = vpts[0][0]
+    xs = np.array([(t - t0) / 3600.0 for t, _ in vpts])
+    ys = np.array(volts)
+    est_text = None
+    if xs.std() > 0:
+        slope, intercept = np.polyfit(xs, ys, 1)   # V/hour
+        if cur_v <= _EXT_V_THRESHOLD:
+            est_text = f"⚠️ Already at/below {_EXT_V_THRESHOLD} V ({cur_v:.2f} V)."
+        elif slope < -0.001:   # discharging
+            dh = (_EXT_V_THRESHOLD - cur_v) / slope   # hours from now
+            if dh > 0:
+                eta = now_van + timedelta(hours=dh)
+                est_text = (f"📉 Trending {slope * 1000:.0f} mV/h → reaches "
+                            f"{_EXT_V_THRESHOLD} V in ~{dh:.1f} h "
+                            f"(≈ {eta.strftime('%a %H:%M')}).")
+                fig.add_trace(go.Scatter(
+                    x=[times[-1], eta], y=[cur_v, _EXT_V_THRESHOLD],
+                    mode='lines', line=dict(color='red', width=1, dash='dot'),
+                    name='Projection',
+                    hovertemplate="proj → 12.5 V<extra></extra>",
+                ))
+        else:
+            est_text = (f"🔌 Stable/charging ({slope * 1000:+.0f} mV/h) — "
+                        f"not trending toward {_EXT_V_THRESHOLD} V.")
+
+    fig.update_layout(
+        title='⚡ External Power (V) — last 24h',
+        yaxis_title='Volts', height=300,
+        margin=dict(l=45, r=20, t=45, b=30), hovermode='x unified',
+        showlegend=False,
+    )
+    draw.plotly_chart(fig, width='stretch')
+    if est_text:
+        draw.caption(est_text)
+
+
 def display_alex_page(container=None):
     draw = container or st
     draw.subheader("📍 Alex's Zodiac Pro 420 — Live Location")
@@ -661,12 +739,7 @@ def display_alex_page(container=None):
         'battery.level',
         'battery.current.voltage',
     )
-    external_v = _read_voltage(
-        'external.powersource.voltage',
-        'external.power.voltage',
-        'power.supply.voltage',
-        'power.voltage',
-    )
+    external_v = _read_voltage(*_EXT_V_KEYS)
 
     now_van = datetime.now(pytz.timezone('America/Vancouver'))
     last_seen_str = _format_age(last_ts, now_van) or "no recent fix"
@@ -903,6 +976,30 @@ def display_alex_page(container=None):
     )
 
     draw.plotly_chart(fig, width='stretch')
+
+    # ── External power (V) over last 24h + ETA to 12.5 V ──
+    try:
+        with st.spinner("Fetching 24h power history…"):
+            vmsgs = _fetch_messages_last_n_hours(device_id, hours=24)
+    except Exception as e:
+        vmsgs = []
+        draw.caption(f"Power history unavailable: {e}")
+
+    vpts = []
+    for m in vmsgs:
+        v = _msg_external_v(m)
+        ts = m.get('timestamp') or m.get('server.timestamp')
+        if v is not None and ts is not None:
+            try:
+                vpts.append((float(ts), v))
+            except (TypeError, ValueError):
+                continue
+    vpts.sort(key=lambda p: p[0])
+
+    if len(vpts) >= 2:
+        _draw_external_power_chart(draw, vpts, now_van)
+    elif external_v is not None:
+        draw.caption("⚡ Not enough external-power history yet to chart (need ≥2 readings in 24h).")
 
     # ── Last 6 hours history table (most recent first) ──
     if pts:
