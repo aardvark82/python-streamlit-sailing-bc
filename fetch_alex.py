@@ -630,14 +630,55 @@ def _msg_external_v(m):
 
 
 def _draw_external_power_chart(draw, vpts, now_van):
-    """Plot external power (V) over the last 24h with a red 12.5 V line and
-    an ETA-to-12.5 V from a linear fit of the readings."""
+    """Big 'days & hours until 12.5 V' number + external power (V) chart over
+    the last 24h, with a red 12.5 V line and a linear-fit projection."""
     import numpy as np
     van_tz = pytz.timezone('America/Vancouver')
     times = [datetime.fromtimestamp(t, tz=pytz.UTC).astimezone(van_tz) for t, _ in vpts]
     volts = [v for _, v in vpts]
     cur_v = volts[-1]
 
+    # ── Linear fit (V/hour) → hours-to-12.5 V ──
+    t0 = vpts[0][0]
+    xs = np.array([(t - t0) / 3600.0 for t, _ in vpts])
+    ys = np.array(volts)
+    slope = None
+    dh = None            # hours from now until 12.5 V (positive = future)
+    eta = None
+    if xs.std() > 0:
+        slope, _intercept = np.polyfit(xs, ys, 1)   # V per hour
+        if slope < -0.001 and cur_v > _EXT_V_THRESHOLD:
+            dh = (_EXT_V_THRESHOLD - cur_v) / slope
+            if dh > 0:
+                eta = now_van + timedelta(hours=dh)
+
+    # ── Big number: days & hours remaining ──
+    if cur_v <= _EXT_V_THRESHOLD:
+        big, color, sub = "Below 12.5 V", "#dc2626", f"now {cur_v:.2f} V"
+    elif dh is not None:
+        days = int(dh // 24)
+        hours = int(dh % 24)
+        big = (f"{days}d {hours}h" if days else f"{hours}h "
+               f"{int((dh - int(dh)) * 60)}m")
+        color = "#dc2626" if dh < 12 else ("#d97706" if dh < 48 else "#16a34a")
+        sub = f"≈ {eta.strftime('%a %d %b, %H:%M')} · {slope * 1000:.0f} mV/h · now {cur_v:.2f} V"
+    elif slope is not None and slope >= -0.001:
+        big, color, sub = "Not discharging", "#16a34a", \
+            f"{slope * 1000:+.0f} mV/h · now {cur_v:.2f} V"
+    else:
+        big, color, sub = "—", "#64748b", f"now {cur_v:.2f} V"
+
+    draw.markdown(
+        f'<div style="text-align:center;padding:0.4rem 0 0.2rem;">'
+        f'<div style="font-size:0.9rem;color:#64748b;font-weight:600;">'
+        f'⚡ Time until 12.5 V</div>'
+        f'<div style="font-size:3.2rem;font-weight:800;color:{color};line-height:1.05;">{big}</div>'
+        f'<div style="font-size:0.85rem;color:#64748b;">{sub}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── Chart ──
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=times, y=volts, mode='lines+markers', name='External V',
@@ -646,33 +687,12 @@ def _draw_external_power_chart(draw, vpts, now_van):
     ))
     fig.add_hline(y=_EXT_V_THRESHOLD, line_dash='dash', line_color='red',
                   annotation_text=f'{_EXT_V_THRESHOLD} V', annotation_position='bottom right')
-
-    # Linear fit (V per hour) over the window → ETA to 12.5 V
-    t0 = vpts[0][0]
-    xs = np.array([(t - t0) / 3600.0 for t, _ in vpts])
-    ys = np.array(volts)
-    est_text = None
-    if xs.std() > 0:
-        slope, intercept = np.polyfit(xs, ys, 1)   # V/hour
-        if cur_v <= _EXT_V_THRESHOLD:
-            est_text = f"⚠️ Already at/below {_EXT_V_THRESHOLD} V ({cur_v:.2f} V)."
-        elif slope < -0.001:   # discharging
-            dh = (_EXT_V_THRESHOLD - cur_v) / slope   # hours from now
-            if dh > 0:
-                eta = now_van + timedelta(hours=dh)
-                est_text = (f"📉 Trending {slope * 1000:.0f} mV/h → reaches "
-                            f"{_EXT_V_THRESHOLD} V in ~{dh:.1f} h "
-                            f"(≈ {eta.strftime('%a %H:%M')}).")
-                fig.add_trace(go.Scatter(
-                    x=[times[-1], eta], y=[cur_v, _EXT_V_THRESHOLD],
-                    mode='lines', line=dict(color='red', width=1, dash='dot'),
-                    name='Projection',
-                    hovertemplate="proj → 12.5 V<extra></extra>",
-                ))
-        else:
-            est_text = (f"🔌 Stable/charging ({slope * 1000:+.0f} mV/h) — "
-                        f"not trending toward {_EXT_V_THRESHOLD} V.")
-
+    if eta is not None:
+        fig.add_trace(go.Scatter(
+            x=[times[-1], eta], y=[cur_v, _EXT_V_THRESHOLD],
+            mode='lines', line=dict(color='red', width=1, dash='dot'),
+            name='Projection', hovertemplate="proj → 12.5 V<extra></extra>",
+        ))
     fig.update_layout(
         title='⚡ External Power (V) — last 24h',
         yaxis_title='Volts', height=300,
@@ -680,8 +700,6 @@ def _draw_external_power_chart(draw, vpts, now_van):
         showlegend=False,
     )
     draw.plotly_chart(fig, width='stretch')
-    if est_text:
-        draw.caption(est_text)
 
 
 def display_alex_page(container=None):
