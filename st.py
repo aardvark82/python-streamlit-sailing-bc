@@ -40,6 +40,17 @@ from pathlib import Path
 _version_file = Path(__file__).parent / "VERSION"
 APP_VERSION = int(_version_file.read_text().strip()) if _version_file.exists() else 0
 
+# MUST be the first Streamlit command. Wide layout gives charts the full width;
+# the sidebar (which holds the nav + Go/No-Go summary) starts COLLAPSED so on
+# mobile it no longer covers the page — tap ☰ to open it. Applies to every
+# st.navigation page.
+st.set_page_config(
+    page_title="Sailing BC — Howe Sound",
+    page_icon="⛵",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
+
 # Auto-refresh every 5 minutes
 st_autorefresh(interval=300000, key="data_refresher")
 
@@ -51,6 +62,18 @@ st.markdown(
         .block-container {
             padding-top: 1.2rem !important;
             padding-bottom: 2rem !important;
+        }
+        /* Mobile: keep the nav sidebar from hogging the screen when opened, and
+           give charts/tables edge-to-edge width so they stay readable. */
+        @media (max-width: 640px) {
+            .block-container { padding-left: 0.6rem !important; padding-right: 0.6rem !important; }
+            section[data-testid="stSidebar"] {
+                width: min(84vw, 300px) !important;
+                min-width: 0 !important;
+            }
+            section[data-testid="stSidebar"] [data-testid="stSidebarContent"] { width: 100% !important; }
+            /* let wide tables scroll instead of overflowing the viewport */
+            [data-testid="stDataFrame"], .stPlotlyChart { max-width: 100% !important; }
         }
     </style>
     """,
