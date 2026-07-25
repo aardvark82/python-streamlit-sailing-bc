@@ -27,8 +27,29 @@
                padding: 0.55rem 0.7rem; border-radius: 6px; cursor: pointer; font-size: 0.9rem; }
     .nav-btn:hover { background: #334155; color: #fff; }
     .nav-btn.active { background: #3b82f6; color: #fff; }
-    .main { flex: 1; padding: 1.5rem 2rem; overflow-y: auto; }
+    .main { flex: 1; min-width: 0; padding: 1.5rem 2rem; overflow-y: auto; }
     .main h2 { margin-top: 0; }
+    /* off-canvas sidebar controls — hidden on desktop, shown ≤768px */
+    .hamburger { display: none; }
+    .backdrop { display: none; }
+    @media (max-width: 768px) {
+      .hamburger {
+        display: flex; align-items: center; justify-content: center;
+        position: fixed; top: 0.5rem; left: 0.5rem; z-index: 60;
+        width: 40px; height: 40px; border: none; border-radius: 8px;
+        background: #1e293b; color: #f8fafc; font-size: 1.25rem; cursor: pointer;
+        box-shadow: 0 1px 6px rgba(0,0,0,.35);
+      }
+      .sidebar {
+        position: fixed; top: 0; left: 0; bottom: 0; z-index: 55;
+        width: 82vw; max-width: 300px; overflow-y: auto;
+        transform: translateX(-100%); transition: transform 0.25s ease;
+      }
+      .sidebar.open { transform: translateX(0); box-shadow: 4px 0 18px rgba(0,0,0,.45); }
+      .backdrop { display: block; position: fixed; inset: 0; z-index: 54; background: rgba(0,0,0,.45); }
+      .main { padding: 3.2rem 0.9rem 1.2rem; }   /* clear the fixed hamburger */
+      .location-tabs { gap: 0.4rem; }
+    }
     .location-tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
     .location-tabs button { padding: 0.4rem 0.8rem; border: 1px solid #cbd5e1; border-radius: 6px;
                              background: #fff; cursor: pointer; font-size: 0.85rem; }
@@ -141,6 +162,7 @@
       const [activeLoc, setActiveLoc] = useState(null);
       const [toast, setToast] = useState(null);
       const [version, setVersion] = useState(null);
+      const [navOpen, setNavOpen] = useState(false);   // mobile off-canvas sidebar
 
       useEffect(() => {
         fetch('/api/locations').then(r => r.json()).then(d => {
@@ -158,7 +180,10 @@
 
       return (
         <div className="app">
-          <div className="sidebar">
+          <button className="hamburger" aria-label="Toggle menu" onClick={() => setNavOpen(o => !o)}>☰</button>
+          {navOpen && <div className="backdrop" onClick={() => setNavOpen(false)} />}
+          <div className={`sidebar${navOpen ? ' open' : ''}`}
+               onClick={(e) => { if (e.target.closest('.nav-btn')) setNavOpen(false); }}>
             <h1>Sailing-BC Helper</h1>
             {version && <div className="version-badge">v{version}</div>}
             <div className="nav-section">Data</div>
