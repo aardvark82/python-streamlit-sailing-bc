@@ -711,6 +711,20 @@ def display_gonogo_page(container=None, page_links=None):
         f"Tide NO-GO < {TIDE_NOGO:.1f}m (Horseshoe Bay minimum)*"
     )
 
+    # ── Marine station map (live wind & waves) ──
+    draw.markdown("---")
+    draw.markdown("**Marine Stations — Live Wind & Waves**")
+    try:
+        from fetch_alex import build_marine_station_map
+        draw.plotly_chart(build_marine_station_map(), width='stretch')
+        draw.caption(
+            "Source: Environment Canada buoys (Pam Rocks, Halibut Bank, Pt Atkinson), "
+            "Jericho station, Howe Sound marine forecast"
+        )
+    except Exception as e:
+        print(f"Go/NoGo station map error: {e}")
+        draw.caption(f"Station map unavailable: {e}")
+
     # 5-day heatmap chart
     if weather:
         windows = _analyze_5day_windows(weather)

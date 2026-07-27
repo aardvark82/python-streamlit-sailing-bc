@@ -584,6 +584,78 @@ def _fetch_howe_sound_summary():
         return None
 
 
+def build_marine_station_map(height=460, center_lat=49.43, center_lon=-123.40, zoom=9):
+    """Standalone Plotly map of the Howe Sound marine stations with live wind
+    (and wave) values — the same station overlay used on the Alex Location
+    page, minus the vessel trace. Centered on Howe Sound so it can be embedded
+    on the Go/No-Go page. Station fetches are cached, so this is cheap to call."""
+    from wind_utils import _color_for_speed, wind_arrow_glyph
+
+    fig = go.Figure()
+
+    for s in MARINE_STATIONS:
+        try:
+            if s['kind'] == 'buoy':
+                summary = _fetch_buoy_summary(s['buoy_id'])
+            elif s['kind'] == 'jericho':
+                summary = _fetch_jericho_summary()
+            elif s['kind'] == 'howe_forecast':
+                summary = _fetch_howe_sound_summary()
+            else:
+                summary = None
+        except Exception as e:
+            print(f"Station {s['name']} fetch failed: {e}")
+            summary = None
+
+        if summary is None:
+            continue
+
+        d = summary.get('direction') or ''
+        w_kts = summary.get('wind_kts')
+        w_m = summary.get('wave_m')
+        try:
+            speed_for_color = float(w_kts) if w_kts is not None else 0
+        except (TypeError, ValueError):
+            speed_for_color = 0
+
+        arrows = wind_arrow_glyph(d, w_kts)
+        kts_text = f"{speed_for_color:.0f}kts" if w_kts is not None else "—"
+        label_lines = [arrows, kts_text]
+        if w_m is not None:
+            label_lines.append(f"{w_m * 100:.0f}cm")
+        label = "\n".join(label_lines)
+
+        hover = (
+            f"<b>{s['name']}</b><br>"
+            f"Wind: {d + ' ' if d else ''}{kts_text}"
+            + (f"<br>Wave: {w_m * 100:.0f} cm" if w_m is not None else "")
+            + "<extra></extra>"
+        )
+
+        fig.add_trace(go.Scattermapbox(
+            lat=[s['lat']], lon=[s['lon']],
+            mode='markers+text',
+            marker=dict(size=12, color=_color_for_speed(speed_for_color), opacity=0.95),
+            text=[label],
+            textposition='bottom center',
+            textfont=dict(size=14, color='#000000', family='Open Sans Bold'),
+            name=s['name'],
+            hovertemplate=hover,
+            showlegend=False,
+        ))
+
+    fig.update_layout(
+        mapbox=dict(
+            style='open-street-map',
+            center=dict(lat=center_lat, lon=center_lon),
+            zoom=zoom,
+        ),
+        margin=dict(l=0, r=0, t=0, b=0),
+        height=height,
+    )
+    return fig
+
+
 def _format_age(unix_ts, now_van):
     if not unix_ts:
         return ''
