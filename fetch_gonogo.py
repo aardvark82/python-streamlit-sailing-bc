@@ -59,6 +59,18 @@ def _status(value, go_threshold, caution_threshold, higher_is_worse=True):
 
 _BADGE = {'go': 'green', 'caution': 'orange', 'nogo': 'red'}
 _ICON = {'go': '✅', 'caution': '⚠️', 'nogo': '🔴'}
+
+# Short card titles for the Current Conditions metric cards (keyed by factor id)
+_CARD_TITLES = {
+    'tide': 'Tide',
+    'wind_now': 'Wind Now',
+    'precip': 'Rain 24h',
+    'warnings': 'Marine Warnings',
+    'pam_wind': 'Pam Rocks',
+    'buoy_wind': 'English Bay',
+    'waves': 'Waves',
+    'wind_vs_tide': 'Wind vs Tide',
+}
 _COLOR_MAP = {'go': '#2ecc71', 'caution': '#f39c12', 'nogo': '#e74c3c'}
 _NUMERIC = {'go': 1, 'caution': 0.5, 'nogo': 0}
 
@@ -616,45 +628,33 @@ def _draw_snapshot(draw, weather):
     except Exception:
         col3.metric("🌊 Tide", "N/A")
 
-    # Row 2: Current wind (Pam Rocks = Howe Sound area), Forecast wind now, Forecast wind next
-    col1, col2, col3 = draw.columns(3)
-
-    # Pam Rocks buoy — closest to Howe Sound entrance
-    try:
-        pam_wind, _ = _fetch_buoy_wind_wave('WAS')
-        if pam_wind is not None:
-            col1.metric("💨 Pam Rocks Now", f"{pam_wind}kts")
-            _render_badge(col1, _wind_badge(pam_wind))
-        else:
-            col1.metric("💨 Pam Rocks Now", "N/A")
-    except Exception:
-        col1.metric("💨 Pam Rocks Now", "N/A")
-
-    # Howe Sound marine forecast — current period + next period
+    # Row 2: Howe Sound marine forecast — current period + next period.
+    # (Pam Rocks lives in the Current Conditions cards and the station map.)
     # Use the max_wind_speed (gust) for the badge — worst case drives the decision
+    col1, col2 = draw.columns(2)
     try:
         rows = _get_howe_sound_forecast_rows()
         if rows:
             r = rows[0]
             speed = f"{r['wind_speed']:.0f}" if r.get('wind_speed') is not None else "?"
             gust = f"{r['max_wind_speed']:.0f}" if r.get('max_wind_speed') is not None else "?"
-            col2.metric(f"💨 Howe Sound ({r['time']})", f"{speed}-{gust}kts")
-            _render_badge(col2, _wind_badge(r.get('max_wind_speed')))
+            col1.metric(f"💨 Howe Sound ({r['time']})", f"{speed}-{gust}kts")
+            _render_badge(col1, _wind_badge(r.get('max_wind_speed')))
 
             if len(rows) > 1:
                 r2 = rows[1]
                 speed2 = f"{r2['wind_speed']:.0f}" if r2.get('wind_speed') is not None else "?"
                 gust2 = f"{r2['max_wind_speed']:.0f}" if r2.get('max_wind_speed') is not None else "?"
-                col3.metric(f"💨 Next ({r2['time']})", f"{speed2}-{gust2}kts")
-                _render_badge(col3, _wind_badge(r2.get('max_wind_speed')))
+                col2.metric(f"💨 Next ({r2['time']})", f"{speed2}-{gust2}kts")
+                _render_badge(col2, _wind_badge(r2.get('max_wind_speed')))
             else:
-                col3.metric("💨 Next", "N/A")
+                col2.metric("💨 Next", "N/A")
         else:
-            col2.metric("💨 Howe Sound", "N/A")
-            col3.metric("💨 Next", "N/A")
+            col1.metric("💨 Howe Sound", "N/A")
+            col2.metric("💨 Next", "N/A")
     except Exception:
-        col2.metric("💨 Howe Sound", "N/A")
-        col3.metric("💨 Next", "N/A")
+        col1.metric("💨 Howe Sound", "N/A")
+        col2.metric("💨 Next", "N/A")
 
 
 def display_gonogo_page(container=None, page_links=None):
@@ -681,28 +681,33 @@ def display_gonogo_page(container=None, page_links=None):
 
     draw.markdown("---")
 
-    # Current conditions table — problems (no-go / caution) sorted to the top
+    # Current conditions — metric cards, problems (no-go / caution) sorted first
     draw.markdown("**Current Conditions**")
-    for f in sorted(factors.values(), key=lambda f: _SEVERITY.get(f['status'], 1)):
-        page_key = f.get('page')
-        page_func = page_links.get(page_key) if page_key else None
-        badge = f.get('badge')
+    ordered = sorted(factors.items(), key=lambda kv: _SEVERITY.get(kv[1]['status'], 1))
+    n_cols = 3
+    for i in range(0, len(ordered), n_cols):
+        cols = draw.columns(n_cols)
+        for col, (key, f) in zip(cols, ordered[i:i + n_cols]):
+            icon = _ICON[f['status']]
+            title = f"{icon} {_CARD_TITLES.get(key, key.replace('_', ' ').title())}"
+            label = f['label']
+            # Card value = text after the first colon, else the label with a
+            # leading warning glyph / trailing detail clause trimmed off.
+            if ':' in label:
+                value = label.split(':', 1)[1].strip()
+            else:
+                value = label.lstrip('⚠️').strip()
+                if ' — ' in value:
+                    value = value.split(' — ', 1)[0].strip()
 
-        if badge and page_func:
-            cols = draw.columns([0.55, 0.35, 0.1])
-            cols[0].caption(f"{_ICON[f['status']]} {f['label']}")
-            cols[1].badge(badge['text'], color=badge['color'])
-            cols[2].page_link(page_func, label="🔗")
-        elif badge:
-            cols = draw.columns([0.6, 0.4])
-            cols[0].caption(f"{_ICON[f['status']]} {f['label']}")
-            cols[1].badge(badge['text'], color=badge['color'])
-        elif page_func:
-            cols = draw.columns([0.9, 0.1])
-            cols[0].caption(f"{_ICON[f['status']]} {f['label']}")
-            cols[1].page_link(page_func, label="🔗")
-        else:
-            draw.caption(f"{_ICON[f['status']]} {f['label']}")
+            col.metric(title, value, border=True)
+
+            badge = f.get('badge')
+            if badge:
+                col.badge(badge['text'], color=badge['color'])
+            page_func = page_links.get(f.get('page')) if f.get('page') else None
+            if page_func:
+                col.page_link(page_func, label="Details →")
 
     draw.markdown(
         f"*Thresholds: Wind GO < {WIND_GO}kts, CAUTION < {WIND_CAUTION}kts  |  "
