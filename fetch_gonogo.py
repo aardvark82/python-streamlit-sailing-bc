@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 
 from utils import cached_fetch_url, cached_fetch_url_live, cached_fetch_url_buoy
-from fetch_weather import fetch_from_open_weather
+from fetch_weather import fetch_from_open_weather, get_wind_direction
 from fetch_forecast import (
     fetch_beautifulsoup_marine_forecast_for_url,
     openAIFetchForecastForURL,
@@ -34,6 +34,8 @@ PRECIP_GO = 0.5     # mm — light drizzle OK
 PRECIP_CAUTION = 2.0
 TIDE_NOGO = 2.0     # meters — below this, can't launch at Horseshoe Bay (learned the hard way at 80cm)
 TIDE_CAUTION = 2.5  # meters — marginal; doable but tight
+
+_SEVERITY = {'nogo': 0, 'caution': 1, 'go': 2}   # sort order for Current Conditions
 
 VANCOUVER_LAT = 49.32
 VANCOUVER_LON = -123.16
@@ -225,10 +227,13 @@ def _gather_current_factors():
     """Gather all current condition factors. Returns (factors dict, weather_data)."""
     factors = {}
     weather = None
+    tide_dir_now = None     # "Rising" / "Falling"
+    wind_deg_now = None     # degrees the wind is coming FROM
 
     # 0. Tide — collected first so it displays at the top (mission-critical for launch)
     try:
         tide_h, tide_dir = _get_current_tide_height()
+        tide_dir_now = tide_dir
         if tide_h is not None:
             arrow = ""
             if tide_dir == "Rising":
@@ -275,9 +280,11 @@ def _gather_current_factors():
         weather = fetch_from_open_weather(VANCOUVER_LAT, VANCOUVER_LON, api_key)
         if weather:
             wind_kts = weather.wind_speed_now * 1.94384
+            wind_deg_now = weather.wind_direction_now
+            wind_dir = get_wind_direction(weather.wind_direction_now)   # e.g. "NW"
             factors['wind_now'] = {
                 'status': _status(wind_kts, WIND_GO, WIND_CAUTION),
-                'label': f"Wind Now: {wind_kts:.0f}kts",
+                'label': f"Wind Now: {wind_dir} {wind_kts:.0f}kts",
                 'value': wind_kts,
                 'page': 'Dashboard',
             }
@@ -357,6 +364,24 @@ def _gather_current_factors():
             }
     except Exception as e:
         print(f"Go/NoGo buoy error: {e}")
+
+    # Wind-against-tide — steep chop when wind opposes the tidal stream.
+    # Howe Sound runs ~N–S: ebb (Falling) sets OUT/south, flood (Rising) sets IN/north.
+    # Opposing wind = blowing up-sound on an ebb (from the S) or down-sound on a flood (from the N).
+    try:
+        wind_kts = weather.wind_speed_now * 1.94384 if weather else 0
+        if wind_deg_now is not None and tide_dir_now and wind_kts >= WIND_GO:
+            from_south = 90 <= wind_deg_now <= 270
+            against = (tide_dir_now == "Falling" and from_south) or \
+                      (tide_dir_now == "Rising" and not from_south)
+            if against:
+                factors['wind_vs_tide'] = {
+                    'status': 'caution',
+                    'label': f"⚠️ Wind against tide ({tide_dir_now.lower()}) — expect steep chop",
+                    'page': 'Tides',
+                }
+    except Exception as e:
+        print(f"Go/NoGo wind-vs-tide error: {e}")
 
     return factors, weather
 
@@ -656,9 +681,9 @@ def display_gonogo_page(container=None, page_links=None):
 
     draw.markdown("---")
 
-    # Current conditions table
+    # Current conditions table — problems (no-go / caution) sorted to the top
     draw.markdown("**Current Conditions**")
-    for f in factors.values():
+    for f in sorted(factors.values(), key=lambda f: _SEVERITY.get(f['status'], 1)):
         page_key = f.get('page')
         page_func = page_links.get(page_key) if page_key else None
         badge = f.get('badge')
@@ -911,8 +936,8 @@ def display_kiosk_page(home_page=None):
     # ── Snapshot metrics row (dark-styled) ──
     _draw_kiosk_snapshot(weather)
 
-    # Current conditions — large text
-    for f in factors.values():
+    # Current conditions — large text (problems sorted to the top)
+    for f in sorted(factors.values(), key=lambda f: _SEVERITY.get(f['status'], 1)):
         icon = _ICON[f['status']]
         st.markdown(
             f'<div class="kiosk-factor">{icon} {f["label"]}</div>',
