@@ -64,7 +64,7 @@ _ICON = {'go': '✅', 'caution': '⚠️', 'nogo': '🔴'}
 _CARD_TITLES = {
     'tide': 'Tide',
     'wind_now': 'Wind Now',
-    'precip': 'Rain 24h',
+    'howe_current': 'Howe Sound',
     'warnings': 'Marine Warnings',
     'pam_wind': 'Pam Rocks',
     'buoy_wind': 'English Bay',
@@ -94,6 +94,9 @@ def _fetch_buoy_wind_wave(buoy_id='46304'):
         wind_text = rows[0].find_all('td')[0].text.strip()
         winds = re.findall(r'\d+', wind_text)
         max_wind = max(int(w) for w in winds) if winds else None
+        # Leading token is the cardinal direction (e.g. "NW 15") when present.
+        parts = wind_text.split()
+        direction = parts[0] if parts and not parts[0][0].isdigit() else None
 
         wave_height = None
         if buoy_id in ('46146', '46304') and len(rows) > 1:
@@ -101,10 +104,10 @@ def _fetch_buoy_wind_wave(buoy_id='46304'):
             wave_nums = re.findall(r'[-+]?\d*\.\d+|\d+', wave_text)
             wave_height = float(wave_nums[0]) if wave_nums else None
 
-        return max_wind, wave_height
+        return max_wind, wave_height, direction
     except Exception as e:
         print(f"Go/NoGo buoy fetch error: {e}")
-        return None, None
+        return None, None, None
 
 
 def _get_tide_data():
@@ -300,69 +303,88 @@ def _gather_current_factors():
                 'value': wind_kts,
                 'page': 'Dashboard',
             }
-            factors['precip'] = {
-                'status': _status(weather.next_24_hours_precipitation, PRECIP_GO, PRECIP_CAUTION),
-                'label': f"Rain 24h: {weather.next_24_hours_precipitation:.1f}mm",
-                'value': weather.next_24_hours_precipitation,
-                'page': 'Dashboard',
+            # Temperature — context only; merged in as an informational card
+            factors['temp'] = {
+                'status': 'go',
+                'informational': True,
+                'sort_last': True,
+                'card_title': '🌡️ Temperature',
+                'label': f"{weather.temperature:.0f}°C",
             }
     except Exception as e:
         print(f"Go/NoGo weather error: {e}")
 
-    # 2. Marine forecast — Howe Sound warnings + parsed wind (used as a badge)
-    forecast_badge = None
+    # 2. Marine forecast — Howe Sound warnings. Kept OUT of the card grid
+    #    (hide_card) but still drives the verdict + red-reason pills.
     try:
         forecast = fetch_beautifulsoup_marine_forecast_for_url(URL_HOWE_SOUND, "Howe Sound")
         if forecast and not forecast.get('error'):
             if forecast.get('strong_wind_warning'):
-                factors['warnings'] = {'status': 'nogo', 'label': 'Strong Wind Warning!', 'page': 'Marine_Forecast'}
+                factors['warnings'] = {'status': 'nogo', 'label': 'Strong Wind Warning!', 'page': 'Marine_Forecast', 'hide_card': True}
             elif forecast.get('wind_warning'):
-                factors['warnings'] = {'status': 'caution', 'label': 'Wind Warning', 'page': 'Marine_Forecast'}
+                factors['warnings'] = {'status': 'caution', 'label': 'Wind Warning', 'page': 'Marine_Forecast', 'hide_card': True}
             else:
-                factors['warnings'] = {'status': 'go', 'label': 'No Warnings', 'page': 'Marine_Forecast'}
-
-            try:
-                csv_text = openAIFetchForecastForURL(url=URL_HOWE_SOUND)
-                if csv_text:
-                    csv_clean = csv_text.replace('```csv', '').replace('```', '')
-                    df = pd.read_csv(io.StringIO(csv_clean), sep=',', on_bad_lines='skip')
-                    df = df.dropna(how='all').reset_index(drop=True)
-                    df.columns = df.columns.str.strip().str.lower()
-
-                    if 'max wind speed' in df.columns:
-                        df['max wind speed'] = df['max wind speed'].apply(clean_wind_speed)
-                        current_wind = df['max wind speed'].iloc[:2].max() if len(df) >= 2 else df['max wind speed'].iloc[0]
-                        time_label = df['time'].iloc[0] if 'time' in df.columns else "now"
-                        forecast_badge = {
-                            'text': f"Forecast {current_wind:.0f}kts ({time_label})",
-                            'color': _BADGE[_status(current_wind, WIND_GO, WIND_CAUTION)],
-                        }
-            except Exception:
-                pass
+                factors['warnings'] = {'status': 'go', 'label': 'No Warnings', 'page': 'Marine_Forecast', 'hide_card': True}
     except Exception as e:
         print(f"Go/NoGo forecast error: {e}")
 
+    # 2b. Howe Sound marine forecast wind — current period (drives the verdict)
+    #     + next period (informational). Both carry wind direction when parsed.
+    try:
+        rows = _get_howe_sound_forecast_rows()
+        if rows:
+            def _fmt_range(r):
+                spd, gust, d = r.get('wind_speed'), r.get('max_wind_speed'), r.get('direction')
+                dtxt = f"{d} " if d else ""
+                if spd is not None and gust is not None:
+                    return f"{dtxt}{spd:.0f}-{gust:.0f}kts"
+                if gust is not None:
+                    return f"{dtxt}{gust:.0f}kts"
+                return f"{dtxt}n/a"
+
+            r = rows[0]
+            gust = r.get('max_wind_speed')
+            factors['howe_current'] = {
+                'status': _status(gust, WIND_GO, WIND_CAUTION) if gust is not None else 'caution',
+                'label': f"Howe Sound: {_fmt_range(r)} ({r.get('time', 'now')})",
+                'page': 'Marine_Forecast',
+            }
+            if len(rows) > 1:
+                r2 = rows[1]
+                gust2 = r2.get('max_wind_speed')
+                factors['howe_next'] = {
+                    'status': _status(gust2, WIND_GO, WIND_CAUTION) if gust2 is not None else 'go',
+                    'informational': True,
+                    'sort_last': True,
+                    'card_title': f"💨 Next ({r2.get('time', '')})",
+                    'label': _fmt_range(r2),
+                    'page': 'Marine_Forecast',
+                }
+    except Exception as e:
+        print(f"Go/NoGo Howe Sound forecast error: {e}")
+
     # 3. Pam Rocks buoy (WAS) — real wind observed at Howe Sound entrance
     try:
-        pam_wind, _ = _fetch_buoy_wind_wave('WAS')
+        pam_wind, _, pam_dir = _fetch_buoy_wind_wave('WAS')
         if pam_wind is not None:
+            dtxt = f"{pam_dir} " if pam_dir else ""
             factors['pam_wind'] = {
                 'status': _status(pam_wind, WIND_GO, WIND_CAUTION),
-                'label': f"Pam Rocks: {pam_wind}kts",
+                'label': f"Pam Rocks: {dtxt}{pam_wind}kts",
                 'value': pam_wind,
                 'page': 'Marine_Forecast',
-                'badge': forecast_badge,
             }
     except Exception as e:
         print(f"Go/NoGo Pam Rocks error: {e}")
 
     # 4. English Bay buoy (46304) — wind + waves, closer to Horseshoe Bay launch
     try:
-        buoy_wind, buoy_wave = _fetch_buoy_wind_wave('46304')
+        buoy_wind, buoy_wave, bay_dir = _fetch_buoy_wind_wave('46304')
         if buoy_wind is not None:
+            dtxt = f"{bay_dir} " if bay_dir else ""
             factors['buoy_wind'] = {
                 'status': _status(buoy_wind, WIND_GO, WIND_CAUTION),
-                'label': f"English Bay: {buoy_wind}kts",
+                'label': f"English Bay: {dtxt}{buoy_wind}kts",
                 'value': buoy_wind,
                 'page': 'English_Bay',
             }
@@ -380,16 +402,35 @@ def _gather_current_factors():
     # Wind-against-tide — steep chop when wind opposes the tidal stream.
     # Howe Sound runs ~N–S: ebb (Falling) sets OUT/south, flood (Rising) sets IN/north.
     # Opposing wind = blowing up-sound on an ebb (from the S) or down-sound on a flood (from the N).
+    # Always rendered as a card so the indicator is visible even when clear.
     try:
-        wind_kts = weather.wind_speed_now * 1.94384 if weather else 0
-        if wind_deg_now is not None and tide_dir_now and wind_kts >= WIND_GO:
+        wind_kts = weather.wind_speed_now * 1.94384 if weather else None
+        if wind_deg_now is None or not tide_dir_now or wind_kts is None:
+            factors['wind_vs_tide'] = {
+                'status': 'go',
+                'label': "Wind vs Tide: data unavailable",
+                'page': 'Tides',
+            }
+        elif wind_kts < WIND_GO:
+            factors['wind_vs_tide'] = {
+                'status': 'go',
+                'label': "Wind vs Tide: light wind",
+                'page': 'Tides',
+            }
+        else:
             from_south = 90 <= wind_deg_now <= 270
             against = (tide_dir_now == "Falling" and from_south) or \
                       (tide_dir_now == "Rising" and not from_south)
             if against:
                 factors['wind_vs_tide'] = {
                     'status': 'caution',
-                    'label': f"⚠️ Wind against tide ({tide_dir_now.lower()}) — expect steep chop",
+                    'label': f"Wind vs Tide: against ({tide_dir_now.lower()}) — steep chop",
+                    'page': 'Tides',
+                }
+            else:
+                factors['wind_vs_tide'] = {
+                    'status': 'go',
+                    'label': f"Wind vs Tide: clear ({tide_dir_now.lower()})",
                     'page': 'Tides',
                 }
     except Exception as e:
@@ -475,7 +516,7 @@ def _get_overall(factors):
     """Compute overall status from factors dict."""
     if not factors:
         return 'caution', 'N/A'
-    statuses = [f['status'] for f in factors.values()]
+    statuses = [f['status'] for f in factors.values() if not f.get('informational')]
     if 'nogo' in statuses:
         return 'nogo', 'NO-GO'
     if 'caution' in statuses:
@@ -486,7 +527,8 @@ def _get_overall(factors):
 def _red_reason_pills_html(factors):
     """Red (no-go) reasons as inline pill tags. Warnings/caution are
     ignored — only the factors that actually drive a NO-GO are listed."""
-    reds = [f['label'] for f in factors.values() if f.get('status') == 'nogo']
+    reds = [f['label'] for f in factors.values()
+            if f.get('status') == 'nogo' and not f.get('informational')]
     if not reds:
         return None
     return " ".join(
@@ -516,7 +558,8 @@ def display_gonogo_sidebar():
         st.sidebar.markdown(pills, unsafe_allow_html=True)
 
     # One-line summary of worst factors (caution + nogo)
-    bad = [f['label'] for f in factors.values() if f['status'] != 'go']
+    bad = [f['label'] for f in factors.values()
+           if f['status'] != 'go' and not f.get('informational')]
     if bad:
         st.sidebar.caption(", ".join(bad))
     else:
@@ -542,6 +585,13 @@ def _get_howe_sound_forecast_rows():
         for _, row in df.head(2).iterrows():
             r = {}
             r['time'] = str(row.get('time', ''))
+            # Wind direction column varies in the GPT output ('wind direction',
+            # 'direction', 'wind_direction'); take the first that's present.
+            r['direction'] = None
+            for dcol in ('wind direction', 'wind_direction', 'direction'):
+                if dcol in df.columns and pd.notna(row.get(dcol)):
+                    r['direction'] = str(row[dcol]).strip() or None
+                    break
             if 'wind_speed' in df.columns:
                 r['wind_speed'] = clean_wind_speed(row['wind_speed'])
             elif 'wind speed' in df.columns:
@@ -560,103 +610,6 @@ def _get_howe_sound_forecast_rows():
         return []
 
 
-def _temp_badge(temp_c):
-    """Badge for outside temperature (comfort in a 14ft RIB)."""
-    if temp_c is None:
-        return None
-    if temp_c < 5:
-        return {'text': f'Cold {temp_c:.0f}°C', 'color': 'red'}
-    if temp_c < 10:
-        return {'text': f'Chilly {temp_c:.0f}°C', 'color': 'orange'}
-    return {'text': f'OK {temp_c:.0f}°C', 'color': 'green'}
-
-
-def _wind_badge(kts):
-    """Badge for wind based on WIND_GO / WIND_CAUTION thresholds."""
-    if kts is None:
-        return None
-    status = _status(kts, WIND_GO, WIND_CAUTION)
-    return {'text': f'{kts:.0f}kts', 'color': _BADGE[status]}
-
-
-def _precip_badge(mm):
-    """Badge for precipitation based on PRECIP_GO / PRECIP_CAUTION thresholds."""
-    if mm is None:
-        return None
-    status = _status(mm, PRECIP_GO, PRECIP_CAUTION)
-    return {'text': f'{mm:.1f}mm', 'color': _BADGE[status]}
-
-
-def _tide_badge(tide_h):
-    """Badge for tide against TIDE_NOGO / TIDE_CAUTION (higher is better)."""
-    if tide_h is None:
-        return None
-    status = _status(tide_h, TIDE_NOGO, TIDE_CAUTION, higher_is_worse=False)
-    return {'text': f'{tide_h:.2f}m', 'color': _BADGE[status]}
-
-
-def _render_badge(col, badge):
-    if badge:
-        col.badge(badge['text'], color=badge['color'])
-
-
-def _draw_snapshot(draw, weather):
-    """Draw the quick-glance metrics row at the top of Go/No-Go,
-    with a threshold-based badge under each metric."""
-
-    # Row 1: Temp, Rain 3h, Tide
-    col1, col2, col3 = draw.columns(3)
-
-    # Outside temperature
-    if weather:
-        col1.metric("🌡️ Temperature", f"{weather.temperature:.0f}°C")
-        _render_badge(col1, _temp_badge(weather.temperature))
-        col2.metric("🌧️ Rain (3h)", f"{weather.next_3_hours_precipitation:.1f}mm")
-        _render_badge(col2, _precip_badge(weather.next_3_hours_precipitation))
-    else:
-        col1.metric("🌡️ Temperature", "N/A")
-        col2.metric("🌧️ Rain (3h)", "N/A")
-
-    # Tide
-    try:
-        tide_h, tide_dir = _get_current_tide_height()
-        if tide_h is not None:
-            col3.metric("🌊 Tide", f"{tide_h:.1f}m", delta=tide_dir, delta_color="off")
-            _render_badge(col3, _tide_badge(tide_h))
-        else:
-            col3.metric("🌊 Tide", "N/A")
-    except Exception:
-        col3.metric("🌊 Tide", "N/A")
-
-    # Row 2: Howe Sound marine forecast — current period + next period.
-    # (Pam Rocks lives in the Current Conditions cards and the station map.)
-    # Use the max_wind_speed (gust) for the badge — worst case drives the decision
-    col1, col2 = draw.columns(2)
-    try:
-        rows = _get_howe_sound_forecast_rows()
-        if rows:
-            r = rows[0]
-            speed = f"{r['wind_speed']:.0f}" if r.get('wind_speed') is not None else "?"
-            gust = f"{r['max_wind_speed']:.0f}" if r.get('max_wind_speed') is not None else "?"
-            col1.metric(f"💨 Howe Sound ({r['time']})", f"{speed}-{gust}kts")
-            _render_badge(col1, _wind_badge(r.get('max_wind_speed')))
-
-            if len(rows) > 1:
-                r2 = rows[1]
-                speed2 = f"{r2['wind_speed']:.0f}" if r2.get('wind_speed') is not None else "?"
-                gust2 = f"{r2['max_wind_speed']:.0f}" if r2.get('max_wind_speed') is not None else "?"
-                col2.metric(f"💨 Next ({r2['time']})", f"{speed2}-{gust2}kts")
-                _render_badge(col2, _wind_badge(r2.get('max_wind_speed')))
-            else:
-                col2.metric("💨 Next", "N/A")
-        else:
-            col1.metric("💨 Howe Sound", "N/A")
-            col2.metric("💨 Next", "N/A")
-    except Exception:
-        col1.metric("💨 Howe Sound", "N/A")
-        col2.metric("💨 Next", "N/A")
-
-
 def display_gonogo_page(container=None, page_links=None):
     """Full Go/No-Go page with heatmap chart and current conditions."""
     draw = container or st
@@ -671,34 +624,39 @@ def display_gonogo_page(container=None, page_links=None):
     # Overall verdict
     draw.badge(overall_label, color=_BADGE[overall])
 
-    # Red reasons (no-go factors only) as tags, right above the snapshot
+    # Red reasons (no-go factors only) as tags, right above the conditions grid
     pills = _red_reason_pills_html(factors)
     if pills:
         draw.markdown(pills, unsafe_allow_html=True)
 
-    # ── Snapshot metrics at the top ──
-    _draw_snapshot(draw, weather)
-
     draw.markdown("---")
 
-    # Current conditions — metric cards, problems (no-go / caution) sorted first
+    # Current conditions — one unified metric-card grid. Decision factors sort
+    # by severity (no-go / caution first); informational context cards
+    # (temperature, next forecast period) sort to the end. Hidden factors
+    # (marine warnings) drive the verdict/pills but aren't shown as cards.
     draw.markdown("**Current Conditions**")
-    ordered = sorted(factors.items(), key=lambda kv: _SEVERITY.get(kv[1]['status'], 1))
+    cards = [(k, f) for k, f in factors.items() if not f.get('hide_card')]
+    cards.sort(key=lambda kv: (
+        1 if kv[1].get('sort_last') else 0,
+        _SEVERITY.get(kv[1]['status'], 1),
+    ))
     n_cols = 3
-    for i in range(0, len(ordered), n_cols):
+    for i in range(0, len(cards), n_cols):
         cols = draw.columns(n_cols)
-        for col, (key, f) in zip(cols, ordered[i:i + n_cols]):
-            icon = _ICON[f['status']]
-            title = f"{icon} {_CARD_TITLES.get(key, key.replace('_', ' ').title())}"
+        for col, (key, f) in zip(cols, cards[i:i + n_cols]):
             label = f['label']
-            # Card value = text after the first colon, else the label with a
-            # leading warning glyph / trailing detail clause trimmed off.
-            if ':' in label:
-                value = label.split(':', 1)[1].strip()
+            # Card value = text after the first colon, with any trailing
+            # " — detail" clause trimmed for a compact metric value.
+            value = label.split(':', 1)[1].strip() if ':' in label else label
+            if ' — ' in value:
+                value = value.split(' — ', 1)[0].strip()
+
+            if f.get('informational'):
+                # Context card — its own emoji title, no pass/fail status icon.
+                title = f.get('card_title', _CARD_TITLES.get(key, key.title()))
             else:
-                value = label.lstrip('⚠️').strip()
-                if ' — ' in value:
-                    value = value.split(' — ', 1)[0].strip()
+                title = f"{_ICON[f['status']]} {_CARD_TITLES.get(key, key.replace('_', ' ').title())}"
 
             col.metric(title, value, border=True)
 
@@ -712,7 +670,6 @@ def display_gonogo_page(container=None, page_links=None):
     draw.markdown(
         f"*Thresholds: Wind GO < {WIND_GO}kts, CAUTION < {WIND_CAUTION}kts  |  "
         f"Waves GO < {int(WAVE_GO * 100)}cm  |  "
-        f"Rain GO < {PRECIP_GO}mm  |  "
         f"Tide NO-GO < {TIDE_NOGO:.1f}m (Horseshoe Bay minimum)*"
     )
 
@@ -955,11 +912,18 @@ def display_kiosk_page(home_page=None):
     # ── Snapshot metrics row (dark-styled) ──
     _draw_kiosk_snapshot(weather)
 
-    # Current conditions — large text (problems sorted to the top)
+    # Current conditions — large text (problems sorted to the top). Hidden
+    # factors (marine warnings) drive the verdict but aren't listed here.
     for f in sorted(factors.values(), key=lambda f: _SEVERITY.get(f['status'], 1)):
-        icon = _ICON[f['status']]
+        if f.get('hide_card'):
+            continue
+        if f.get('informational'):
+            title = f.get('card_title', '')
+            text = f"{title}: {f['label']}" if title else f['label']
+        else:
+            text = f"{_ICON[f['status']]} {f['label']}"
         st.markdown(
-            f'<div class="kiosk-factor">{icon} {f["label"]}</div>',
+            f'<div class="kiosk-factor">{text}</div>',
             unsafe_allow_html=True,
         )
 
