@@ -101,6 +101,15 @@ _DIRECTION_TO_DOWNWIND_ARROW = {
 }
 
 
+def direction_degrees(direction):
+    """Compass bearing (degrees the wind comes FROM) for a direction string,
+    or None if it can't be resolved. e.g. 'N' → 0, 'SE' → 135."""
+    canonical = _normalize_direction(direction)
+    if not canonical:
+        return None
+    return _DIRECTION_DEGREES.get(canonical)
+
+
 def direction_arrow(direction):
     """Single unicode arrow pointing DOWNWIND for a compass direction
     (e.g. 'NW' → '↘', since a NW wind blows toward the SE).

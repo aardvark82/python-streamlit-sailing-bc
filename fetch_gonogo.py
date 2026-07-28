@@ -11,7 +11,7 @@ from bs4 import BeautifulSoup
 
 from utils import cached_fetch_url, cached_fetch_url_live, cached_fetch_url_buoy
 from fetch_weather import fetch_from_open_weather, get_wind_direction
-from wind_utils import direction_arrow
+from wind_utils import direction_arrow, direction_degrees
 from fetch_forecast import (
     fetch_beautifulsoup_marine_forecast_for_url,
     openAIFetchForecastForURL,
@@ -64,7 +64,7 @@ _ICON = {'go': '✅', 'caution': '⚠️', 'nogo': '🔴'}
 # Short card titles for the Current Conditions metric cards (keyed by factor id)
 _CARD_TITLES = {
     'tide': 'Tide',
-    'wind_now': 'Wind Now',
+    'wind_now': 'Wind Now · W Van',
     'howe_current': 'Howe Sound',
     'warnings': 'Marine Warnings',
     'pam_wind': 'Pam Rocks',
@@ -244,7 +244,9 @@ def _gather_current_factors():
     factors = {}
     weather = None
     tide_dir_now = None     # "Rising" / "Falling"
-    wind_deg_now = None     # degrees the wind is coming FROM
+    wind_deg_now = None     # degrees the wind is coming FROM (OpenWeather, W Van)
+    pam_deg_now = None      # degrees the wind comes FROM at Pam Rocks (entrance)
+    pam_kts_now = None      # wind speed (kts) at Pam Rocks
 
     # 0. Tide — collected first so it displays at the top (mission-critical for launch)
     try:
@@ -303,7 +305,9 @@ def _gather_current_factors():
             factors['wind_now'] = {
                 'status': _status(wind_kts, WIND_GO, WIND_CAUTION),
                 'label': f"Wind Now: {pref}{wind_kts:.0f}kts",
-                'help': f"Wind from {wind_dir} (arrow points downwind)" if wind_dir else None,
+                'help': (f"OpenWeather · West Vancouver ({VANCOUVER_LAT}°N, "
+                         f"{abs(VANCOUVER_LON)}°W)"
+                         + (f" · wind from {wind_dir}" if wind_dir else "")),
                 'value': wind_kts,
                 'page': 'Dashboard',
             }
@@ -377,6 +381,8 @@ def _gather_current_factors():
     # 3. Pam Rocks buoy (WAS) — real wind observed at Howe Sound entrance
     try:
         pam_wind, _, pam_dir = _fetch_buoy_wind_wave('WAS')
+        pam_kts_now = pam_wind
+        pam_deg_now = direction_degrees(pam_dir)
         if pam_wind is not None:
             arrow = direction_arrow(pam_dir)
             dtxt = f"{arrow} " if arrow else ""
@@ -414,38 +420,54 @@ def _gather_current_factors():
     except Exception as e:
         print(f"Go/NoGo buoy error: {e}")
 
-    # Wind-against-tide — steep chop when wind opposes the tidal stream.
-    # Howe Sound runs ~N–S: ebb (Falling) sets OUT/south, flood (Rising) sets IN/north.
-    # Opposing wind = blowing up-sound on an ebb (from the S) or down-sound on a flood (from the N).
-    # Always rendered as a card so the indicator is visible even when clear.
+    # Wind-against-tide at the Howe Sound entrance — steep chop when the wind
+    # opposes the tidal stream. Howe Sound runs ~N–S and opens south to the
+    # Strait, so the Pt Atkinson tide is the stream proxy:
+    #   Rising tide  = FLOOD, water setting IN/up-sound (northward, toward ~N)
+    #   Falling tide = EBB,   water setting OUT/down-sound (southward, toward ~S)
+    # Wind is taken at PAM ROCKS (entrance) when available, else the local
+    # OpenWeather reading. A current is opposed by wind blowing against its
+    # flow: flood (→N) is opposed by wind FROM the north; ebb (→S) by wind
+    # FROM the south. Always rendered as a card so the state is always visible.
     try:
-        wind_kts = weather.wind_speed_now * 1.94384 if weather else None
-        if wind_deg_now is None or not tide_dir_now or wind_kts is None:
+        entrance_deg = pam_deg_now if pam_deg_now is not None else wind_deg_now
+        entrance_kts = pam_kts_now if pam_kts_now is not None else \
+            (weather.wind_speed_now * 1.94384 if weather else None)
+        wind_src = "Pam Rocks" if pam_deg_now is not None else "local wind"
+
+        if entrance_deg is None or not tide_dir_now or entrance_kts is None:
             factors['wind_vs_tide'] = {
                 'status': 'go',
                 'label': "Wind vs Tide: data unavailable",
                 'page': 'Tides',
             }
-        elif wind_kts < WIND_GO:
+        elif entrance_kts < WIND_GO:
             factors['wind_vs_tide'] = {
                 'status': 'go',
                 'label': "Wind vs Tide: light wind",
+                'help': f"{wind_src} {entrance_kts:.0f}kts — too light to build wind-against-tide chop",
                 'page': 'Tides',
             }
         else:
-            from_south = 90 <= wind_deg_now <= 270
-            against = (tide_dir_now == "Falling" and from_south) or \
-                      (tide_dir_now == "Rising" and not from_south)
+            flood = (tide_dir_now == "Rising")   # tide setting into the sound
+            stream = "flood (into sound)" if flood else "ebb (out of sound)"
+            # Wind FROM the southerly half (E→S→W, 90–270°) blows up-sound.
+            from_south = 90 <= entrance_deg <= 270
+            # Against flood = wind from the north; against ebb = wind from the south.
+            against = (not from_south) if flood else from_south
+            help_txt = f"{wind_src} wind vs {stream}"
             if against:
                 factors['wind_vs_tide'] = {
                     'status': 'caution',
-                    'label': f"Wind vs Tide: against ({tide_dir_now.lower()}) — steep chop",
+                    'label': f"Wind vs Tide: against {stream} — steep chop",
+                    'help': help_txt,
                     'page': 'Tides',
                 }
             else:
                 factors['wind_vs_tide'] = {
                     'status': 'go',
-                    'label': f"Wind vs Tide: clear ({tide_dir_now.lower()})",
+                    'label': f"Wind vs Tide: with {stream}",
+                    'help': help_txt,
                     'page': 'Tides',
                 }
     except Exception as e:
