@@ -11,6 +11,7 @@ from bs4 import BeautifulSoup
 
 from utils import cached_fetch_url, cached_fetch_url_live, cached_fetch_url_buoy
 from fetch_weather import fetch_from_open_weather, get_wind_direction
+from wind_utils import direction_arrow
 from fetch_forecast import (
     fetch_beautifulsoup_marine_forecast_for_url,
     openAIFetchForecastForURL,
@@ -297,9 +298,12 @@ def _gather_current_factors():
             wind_kts = weather.wind_speed_now * 1.94384
             wind_deg_now = weather.wind_direction_now
             wind_dir = get_wind_direction(weather.wind_direction_now)   # e.g. "NW"
+            arrow = direction_arrow(wind_dir)
+            pref = f"{arrow} " if arrow else ""
             factors['wind_now'] = {
                 'status': _status(wind_kts, WIND_GO, WIND_CAUTION),
-                'label': f"Wind Now: {wind_dir} {wind_kts:.0f}kts",
+                'label': f"Wind Now: {pref}{wind_kts:.0f}kts",
+                'help': f"Wind from {wind_dir} (arrow points downwind)" if wind_dir else None,
                 'value': wind_kts,
                 'page': 'Dashboard',
             }
@@ -335,18 +339,24 @@ def _gather_current_factors():
         if rows:
             def _fmt_range(r):
                 spd, gust, d = r.get('wind_speed'), r.get('max_wind_speed'), r.get('direction')
-                dtxt = f"{d} " if d else ""
+                arrow = direction_arrow(d)
+                dtxt = f"{arrow} " if arrow else ""
                 if spd is not None and gust is not None:
                     return f"{dtxt}{spd:.0f}-{gust:.0f}kts"
                 if gust is not None:
                     return f"{dtxt}{gust:.0f}kts"
                 return f"{dtxt}n/a"
 
+            def _wind_help(r):
+                d = r.get('direction')
+                return f"Wind from {d} (arrow points downwind)" if d else None
+
             r = rows[0]
             gust = r.get('max_wind_speed')
             factors['howe_current'] = {
                 'status': _status(gust, WIND_GO, WIND_CAUTION) if gust is not None else 'caution',
                 'label': f"Howe Sound: {_fmt_range(r)} ({r.get('time', 'now')})",
+                'help': _wind_help(r),
                 'page': 'Marine_Forecast',
             }
             if len(rows) > 1:
@@ -358,6 +368,7 @@ def _gather_current_factors():
                     'sort_last': True,
                     'card_title': f"💨 Next ({r2.get('time', '')})",
                     'label': _fmt_range(r2),
+                    'help': _wind_help(r2),
                     'page': 'Marine_Forecast',
                 }
     except Exception as e:
@@ -367,10 +378,12 @@ def _gather_current_factors():
     try:
         pam_wind, _, pam_dir = _fetch_buoy_wind_wave('WAS')
         if pam_wind is not None:
-            dtxt = f"{pam_dir} " if pam_dir else ""
+            arrow = direction_arrow(pam_dir)
+            dtxt = f"{arrow} " if arrow else ""
             factors['pam_wind'] = {
                 'status': _status(pam_wind, WIND_GO, WIND_CAUTION),
                 'label': f"Pam Rocks: {dtxt}{pam_wind}kts",
+                'help': f"Wind from {pam_dir} (arrow points downwind)" if pam_dir else None,
                 'value': pam_wind,
                 'page': 'Marine_Forecast',
             }
@@ -381,10 +394,12 @@ def _gather_current_factors():
     try:
         buoy_wind, buoy_wave, bay_dir = _fetch_buoy_wind_wave('46304')
         if buoy_wind is not None:
-            dtxt = f"{bay_dir} " if bay_dir else ""
+            arrow = direction_arrow(bay_dir)
+            dtxt = f"{arrow} " if arrow else ""
             factors['buoy_wind'] = {
                 'status': _status(buoy_wind, WIND_GO, WIND_CAUTION),
                 'label': f"English Bay: {dtxt}{buoy_wind}kts",
+                'help': f"Wind from {bay_dir} (arrow points downwind)" if bay_dir else None,
                 'value': buoy_wind,
                 'page': 'English_Bay',
             }
@@ -658,7 +673,7 @@ def display_gonogo_page(container=None, page_links=None):
             else:
                 title = f"{_ICON[f['status']]} {_CARD_TITLES.get(key, key.replace('_', ' ').title())}"
 
-            col.metric(title, value, border=True)
+            col.metric(title, value, border=True, help=f.get('help'))
 
             badge = f.get('badge')
             if badge:

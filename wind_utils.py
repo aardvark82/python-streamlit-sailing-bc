@@ -101,6 +101,16 @@ _DIRECTION_TO_DOWNWIND_ARROW = {
 }
 
 
+def direction_arrow(direction):
+    """Single unicode arrow pointing DOWNWIND for a compass direction
+    (e.g. 'NW' → '↘', since a NW wind blows toward the SE).
+    Returns '' when the direction can't be resolved (variable / unknown)."""
+    canonical = _normalize_direction(direction)
+    if not canonical:
+        return ''
+    return _DIRECTION_TO_DOWNWIND_ARROW.get(canonical, '')
+
+
 def wind_arrow_glyph(direction, kts):
     """Return a string of unicode arrows where:
        - the arrow CHARACTER points downwind based on `direction`

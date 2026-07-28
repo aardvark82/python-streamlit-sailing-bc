@@ -589,7 +589,7 @@ def build_marine_station_map(height=460, center_lat=49.43, center_lon=-123.40, z
     (and wave) values — the same station overlay used on the Alex Location
     page, minus the vessel trace. Centered on Howe Sound so it can be embedded
     on the Go/No-Go page. Station fetches are cached, so this is cheap to call."""
-    from wind_utils import _color_for_speed, wind_arrow_glyph
+    from wind_utils import _color_for_speed, direction_arrow
 
     fig = go.Figure()
 
@@ -618,12 +618,15 @@ def build_marine_station_map(height=460, center_lat=49.43, center_lon=-123.40, z
         except (TypeError, ValueError):
             speed_for_color = 0
 
-        arrows = wind_arrow_glyph(d, w_kts)
+        color = _color_for_speed(speed_for_color)
+        # Single large arrow pointing downwind (glyph shape encodes direction);
+        # falls back to a dot when the direction can't be resolved.
+        arrow = direction_arrow(d) or '•'
         kts_text = f"{speed_for_color:.0f}kts" if w_kts is not None else "—"
-        label_lines = [arrows, kts_text]
+        value_lines = [kts_text]
         if w_m is not None:
-            label_lines.append(f"{w_m * 100:.0f}cm")
-        label = "\n".join(label_lines)
+            value_lines.append(f"{w_m * 100:.0f}cm")
+        value_text = "\n".join(value_lines)
 
         hover = (
             f"<b>{s['name']}</b><br>"
@@ -632,15 +635,27 @@ def build_marine_station_map(height=460, center_lat=49.43, center_lon=-123.40, z
             + "<extra></extra>"
         )
 
+        # Dot + big direction arrow above it, both colored by wind speed.
         fig.add_trace(go.Scattermapbox(
             lat=[s['lat']], lon=[s['lon']],
             mode='markers+text',
-            marker=dict(size=12, color=_color_for_speed(speed_for_color), opacity=0.95),
-            text=[label],
-            textposition='bottom center',
-            textfont=dict(size=14, color='#000000', family='Open Sans Bold'),
+            marker=dict(size=12, color=color, opacity=0.95),
+            text=[arrow],
+            textposition='top center',
+            textfont=dict(size=26, color=color, family='Open Sans Bold'),
             name=s['name'],
             hovertemplate=hover,
+            showlegend=False,
+        ))
+        # Wind (and wave) values below the dot.
+        fig.add_trace(go.Scattermapbox(
+            lat=[s['lat']], lon=[s['lon']],
+            mode='markers+text',
+            marker=dict(size=1, color='rgba(0,0,0,0)'),
+            text=[value_text],
+            textposition='bottom center',
+            textfont=dict(size=13, color='#000000', family='Open Sans Bold'),
+            hoverinfo='skip',
             showlegend=False,
         ))
 
