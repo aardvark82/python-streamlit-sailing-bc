@@ -692,8 +692,10 @@ def build_marine_station_map(height=460, center_lat=49.36, center_lon=-123.45, z
     )
 
     forecast_points = [
-        {'name': 'Howe Sound',    'url': URL_HOWE_SOUND,    'lat': 49.580, 'lon': -123.300},
-        {'name': 'S. of Nanaimo', 'url': URL_SOUTH_NANAIMO, 'lat': 49.120, 'lon': -123.520},
+        # Nudged 5 km W of Pam Rocks so the forecast line doesn't cover its live reading.
+        {'name': 'Howe Sound',    'url': URL_HOWE_SOUND,    'lat': 49.580, 'lon': -123.370},
+        # Nudged 15 km NW so it isn't stranded off the bottom of the map.
+        {'name': 'S. of Nanaimo', 'url': URL_SOUTH_NANAIMO, 'lat': 49.216, 'lon': -123.666},
     ]
 
     for fp in forecast_points:
