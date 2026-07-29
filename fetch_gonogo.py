@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 
 from utils import cached_fetch_url, cached_fetch_url_live, cached_fetch_url_buoy
-from fetch_weather import fetch_from_open_weather, get_wind_direction
+from fetch_weather import fetch_from_open_weather
 from wind_utils import direction_arrow, direction_degrees
 from fetch_forecast import (
     fetch_beautifulsoup_marine_forecast_for_url,
@@ -41,6 +41,7 @@ _SEVERITY = {'nogo': 0, 'caution': 1, 'go': 2}   # sort order for Current Condit
 VANCOUVER_LAT = 49.32
 VANCOUVER_LON = -123.16
 URL_HOWE_SOUND = 'https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=06400'
+URL_SOUTH_NANAIMO = 'https://weather.gc.ca/marine/forecast_e.html?mapID=02&siteID=14305'
 
 
 def _status(value, go_threshold, caution_threshold, higher_is_worse=True):
@@ -64,14 +65,38 @@ _ICON = {'go': '✅', 'caution': '⚠️', 'nogo': '🔴'}
 # Short card titles for the Current Conditions metric cards (keyed by factor id)
 _CARD_TITLES = {
     'tide': 'Tide',
-    'wind_now': 'Wind Now · W Van',
-    'howe_current': 'Howe Sound',
+    'howe_current': 'Howe Sound Forecast',
     'warnings': 'Marine Warnings',
-    'pam_wind': 'Pam Rocks',
-    'buoy_wind': 'English Bay',
-    'waves': 'Waves',
-    'wind_vs_tide': 'Wind vs Tide',
+    'wind_vs_tide': 'Wind vs Tide (Howe Sound)',
 }
+
+# Fixed display order for the Current Conditions cards. Row 1 = tide /
+# wind-vs-tide / temperature; row 2 = the two marine forecasts + rain;
+# the "Next" forecast period trails at the end. Keys not listed sort last.
+_CARD_ORDER = [
+    'tide', 'wind_vs_tide', 'temp',
+    'howe_current', 'south_nanaimo', 'rain',
+    'howe_next',
+]
+
+
+def _fmt_forecast_range(r):
+    """Compact wind string for a parsed marine-forecast row, e.g. '↘ 10-15kts'.
+    Leads with a downwind arrow when the direction is known."""
+    spd, gust, d = r.get('wind_speed'), r.get('max_wind_speed'), r.get('direction')
+    arrow = direction_arrow(d)
+    dtxt = f"{arrow} " if arrow else ""
+    if spd is not None and gust is not None:
+        return f"{dtxt}{spd:.0f}-{gust:.0f}kts"
+    if gust is not None:
+        return f"{dtxt}{gust:.0f}kts"
+    return f"{dtxt}n/a"
+
+
+def _forecast_wind_help(r, area):
+    """Tooltip for a forecast card: area + cardinal direction when known."""
+    d = r.get('direction')
+    return f"EC marine forecast — {area}" + (f" · wind from {d}" if d else "")
 _COLOR_MAP = {'go': '#2ecc71', 'caution': '#f39c12', 'nogo': '#e74c3c'}
 _NUMERIC = {'go': 1, 'caution': 0.5, 'nogo': 0}
 
@@ -297,27 +322,28 @@ def _gather_current_factors():
         api_key = st.secrets["openweather_api_key"]
         weather = fetch_from_open_weather(VANCOUVER_LAT, VANCOUVER_LON, api_key)
         if weather:
-            wind_kts = weather.wind_speed_now * 1.94384
+            # Kept for the Wind vs Tide fallback when Pam Rocks is unavailable;
+            # the West-Van OpenWeather wind is no longer shown as its own card.
             wind_deg_now = weather.wind_direction_now
-            wind_dir = get_wind_direction(weather.wind_direction_now)   # e.g. "NW"
-            arrow = direction_arrow(wind_dir)
-            pref = f"{arrow} " if arrow else ""
-            factors['wind_now'] = {
-                'status': _status(wind_kts, WIND_GO, WIND_CAUTION),
-                'label': f"Wind Now: {pref}{wind_kts:.0f}kts",
-                'help': (f"OpenWeather · West Vancouver ({VANCOUVER_LAT}°N, "
-                         f"{abs(VANCOUVER_LON)}°W)"
-                         + (f" · wind from {wind_dir}" if wind_dir else "")),
-                'value': wind_kts,
-                'page': 'Dashboard',
-            }
-            # Temperature — context only; merged in as an informational card
+
+            # Temperature — context only; informational card (no verdict impact)
             factors['temp'] = {
                 'status': 'go',
                 'informational': True,
-                'sort_last': True,
                 'card_title': '🌡️ Temperature',
                 'label': f"{weather.temperature:.0f}°C",
+            }
+            # Rain over the next 6 hours (OpenWeather is 3-hourly → first 2 slots)
+            rain_6h = sum(
+                item.get('rain', {}).get('3h', 0)
+                for item in (weather.hourly_forecast or [])[:2]
+            )
+            factors['rain'] = {
+                'status': 'go',
+                'informational': True,
+                'card_title': '🌧️ Rain (Next 6h)',
+                'label': f"{rain_6h:.1f}mm",
+                'help': "Next 6 hours — OpenWeather (West Vancouver)",
             }
     except Exception as e:
         print(f"Go/NoGo weather error: {e}")
@@ -339,28 +365,14 @@ def _gather_current_factors():
     # 2b. Howe Sound marine forecast wind — current period (drives the verdict)
     #     + next period (informational). Both carry wind direction when parsed.
     try:
-        rows = _get_howe_sound_forecast_rows()
+        rows = _get_marine_forecast_rows(URL_HOWE_SOUND)
         if rows:
-            def _fmt_range(r):
-                spd, gust, d = r.get('wind_speed'), r.get('max_wind_speed'), r.get('direction')
-                arrow = direction_arrow(d)
-                dtxt = f"{arrow} " if arrow else ""
-                if spd is not None and gust is not None:
-                    return f"{dtxt}{spd:.0f}-{gust:.0f}kts"
-                if gust is not None:
-                    return f"{dtxt}{gust:.0f}kts"
-                return f"{dtxt}n/a"
-
-            def _wind_help(r):
-                d = r.get('direction')
-                return f"Wind from {d} (arrow points downwind)" if d else None
-
             r = rows[0]
             gust = r.get('max_wind_speed')
             factors['howe_current'] = {
                 'status': _status(gust, WIND_GO, WIND_CAUTION) if gust is not None else 'caution',
-                'label': f"Howe Sound: {_fmt_range(r)} ({r.get('time', 'now')})",
-                'help': _wind_help(r),
+                'label': f"Howe Sound: {_fmt_forecast_range(r)} ({r.get('time', 'now')})",
+                'help': _forecast_wind_help(r, "Howe Sound (morning & afternoon)"),
                 'page': 'Marine_Forecast',
             }
             if len(rows) > 1:
@@ -369,45 +381,61 @@ def _gather_current_factors():
                 factors['howe_next'] = {
                     'status': _status(gust2, WIND_GO, WIND_CAUTION) if gust2 is not None else 'go',
                     'informational': True,
-                    'sort_last': True,
-                    'card_title': f"💨 Next ({r2.get('time', '')})",
-                    'label': _fmt_range(r2),
-                    'help': _wind_help(r2),
+                    'card_title': f"💨 Next · Howe Sound ({r2.get('time', '')})",
+                    'label': _fmt_forecast_range(r2),
+                    'help': _forecast_wind_help(r2, "Howe Sound"),
                     'page': 'Marine_Forecast',
                 }
     except Exception as e:
         print(f"Go/NoGo Howe Sound forecast error: {e}")
 
-    # 3. Pam Rocks buoy (WAS) — real wind observed at Howe Sound entrance
+    # 2c. Strait of Georgia, south of Nanaimo — informational marine forecast
+    #     (broader area context; shown but not driving the verdict).
+    try:
+        srows = _get_marine_forecast_rows(URL_SOUTH_NANAIMO)
+        if srows:
+            sr = srows[0]
+            factors['south_nanaimo'] = {
+                'status': 'go',
+                'informational': True,
+                'card_title': f"💨 S. of Nanaimo ({sr.get('time', 'now')})",
+                'label': _fmt_forecast_range(sr),
+                'help': _forecast_wind_help(sr, "Strait of Georgia, south of Nanaimo"),
+                'page': 'Marine_Forecast',
+            }
+    except Exception as e:
+        print(f"Go/NoGo South of Nanaimo forecast error: {e}")
+
+    # 3. Pam Rocks buoy (WAS) — observed entrance wind. No card (removed from
+    #    the grid); kept as a hidden verdict factor and feeds Wind vs Tide.
     try:
         pam_wind, _, pam_dir = _fetch_buoy_wind_wave('WAS')
         pam_kts_now = pam_wind
         pam_deg_now = direction_degrees(pam_dir)
         if pam_wind is not None:
-            arrow = direction_arrow(pam_dir)
-            dtxt = f"{arrow} " if arrow else ""
+            dtxt = f"{pam_dir} " if pam_dir else ""
             factors['pam_wind'] = {
                 'status': _status(pam_wind, WIND_GO, WIND_CAUTION),
                 'label': f"Pam Rocks: {dtxt}{pam_wind}kts",
-                'help': f"Wind from {pam_dir} (arrow points downwind)" if pam_dir else None,
                 'value': pam_wind,
                 'page': 'Marine_Forecast',
+                'hide_card': True,
             }
     except Exception as e:
         print(f"Go/NoGo Pam Rocks error: {e}")
 
-    # 4. English Bay buoy (46304) — wind + waves, closer to Horseshoe Bay launch
+    # 4. English Bay buoy (46304) — observed wind + waves. No cards (waves moved
+    #    to the map); kept as hidden verdict factors so big wind/seas still count.
     try:
         buoy_wind, buoy_wave, bay_dir = _fetch_buoy_wind_wave('46304')
         if buoy_wind is not None:
-            arrow = direction_arrow(bay_dir)
-            dtxt = f"{arrow} " if arrow else ""
+            dtxt = f"{bay_dir} " if bay_dir else ""
             factors['buoy_wind'] = {
                 'status': _status(buoy_wind, WIND_GO, WIND_CAUTION),
                 'label': f"English Bay: {dtxt}{buoy_wind}kts",
-                'help': f"Wind from {bay_dir} (arrow points downwind)" if bay_dir else None,
                 'value': buoy_wind,
                 'page': 'English_Bay',
+                'hide_card': True,
             }
         if buoy_wave is not None:
             wave_cm = buoy_wave * 100
@@ -416,6 +444,7 @@ def _gather_current_factors():
                 'label': f"Waves: {wave_cm:.0f}cm",
                 'value': buoy_wave,
                 'page': 'English_Bay',
+                'hide_card': True,
             }
     except Exception as e:
         print(f"Go/NoGo buoy error: {e}")
@@ -607,11 +636,12 @@ def display_gonogo_sidebar():
 # Full page: detailed view with chart
 # ──────────────────────────────────────────────
 
-def _get_howe_sound_forecast_rows():
-    """Get the first 2 rows of the GPT-parsed Howe Sound forecast.
-    Returns list of dicts with 'time', 'wind_speed', 'max_wind_speed' or empty list."""
+def _get_marine_forecast_rows(url):
+    """Get the first 2 rows of the GPT-parsed marine forecast for a siteID URL.
+    Returns list of dicts with 'time', 'direction', 'wind_speed',
+    'max_wind_speed' or an empty list."""
     try:
-        csv_text = openAIFetchForecastForURL(url=URL_HOWE_SOUND)
+        csv_text = openAIFetchForecastForURL(url=url)
         if not csv_text:
             return []
         csv_clean = csv_text.replace('```csv', '').replace('```', '')
@@ -647,6 +677,11 @@ def _get_howe_sound_forecast_rows():
         return []
 
 
+def _get_howe_sound_forecast_rows():
+    """Howe Sound marine-forecast rows (kept for callers like fetch_alex)."""
+    return _get_marine_forecast_rows(URL_HOWE_SOUND)
+
+
 def display_gonogo_page(container=None, page_links=None):
     """Full Go/No-Go page with heatmap chart and current conditions."""
     draw = container or st
@@ -674,10 +709,8 @@ def display_gonogo_page(container=None, page_links=None):
     # (marine warnings) drive the verdict/pills but aren't shown as cards.
     draw.markdown("**Current Conditions**")
     cards = [(k, f) for k, f in factors.items() if not f.get('hide_card')]
-    cards.sort(key=lambda kv: (
-        1 if kv[1].get('sort_last') else 0,
-        _SEVERITY.get(kv[1]['status'], 1),
-    ))
+    cards.sort(key=lambda kv: _CARD_ORDER.index(kv[0])
+               if kv[0] in _CARD_ORDER else len(_CARD_ORDER))
     n_cols = 3
     for i in range(0, len(cards), n_cols):
         cols = draw.columns(n_cols)

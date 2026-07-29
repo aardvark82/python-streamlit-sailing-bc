@@ -34,6 +34,8 @@ MARINE_STATIONS = [
      'lat': 49.490, 'lon': -123.300, 'color': '#9333ea'},
     {'name': 'Halibut Bank',  'kind': 'buoy', 'buoy_id': '46146',
      'lat': 49.340, 'lon': -123.720, 'color': '#0891b2'},
+    {'name': 'English Bay',   'kind': 'buoy', 'buoy_id': '46304',
+     'lat': 49.325, 'lon': -123.243, 'color': '#7c3aed'},
     {'name': 'Pt Atkinson',   'kind': 'buoy', 'buoy_id': 'WSB',
      'lat': 49.3304, 'lon': -123.2646, 'color': '#16a34a'},
     {'name': 'Jericho',       'kind': 'jericho',
@@ -622,11 +624,12 @@ def build_marine_station_map(height=460, center_lat=49.43, center_lon=-123.40, z
         # Single large arrow pointing downwind (glyph shape encodes direction);
         # falls back to a dot when the direction can't be resolved.
         arrow = direction_arrow(d) or '•'
-        kts_text = f"{speed_for_color:.0f}kts" if w_kts is not None else "—"
+        kts_text = f"{speed_for_color:.0f}kn" if w_kts is not None else "—"
         value_lines = [kts_text]
         if w_m is not None:
-            value_lines.append(f"{w_m * 100:.0f}cm")
-        value_text = "\n".join(value_lines)
+            value_lines.append(f"{w_m * 100:.0f} cm")
+        # Plotly map text uses <br> for line breaks (\n does not wrap).
+        value_text = "<br>".join(value_lines)
 
         hover = (
             f"<b>{s['name']}</b><br>"
