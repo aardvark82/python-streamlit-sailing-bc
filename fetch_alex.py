@@ -591,9 +591,26 @@ def build_marine_station_map(height=460, center_lat=49.36, center_lon=-123.45, z
     (and wave) values — the same station overlay used on the Alex Location
     page, minus the vessel trace. Centered on Howe Sound so it can be embedded
     on the Go/No-Go page. Station fetches are cached, so this is cheap to call."""
-    from wind_utils import _color_for_speed, direction_arrow, direction_degrees
+    from wind_utils import _color_for_speed, direction_degrees
 
     fig = go.Figure()
+
+    def _offset(lat, lon, bearing_deg, dist_km):
+        """Point dist_km from (lat,lon) along a compass bearing (deg cw from N)."""
+        dlat = (dist_km / 111.0) * math.cos(math.radians(bearing_deg))
+        dlon = (dist_km / (111.0 * math.cos(math.radians(lat)))) * math.sin(math.radians(bearing_deg))
+        return lat + dlat, lon + dlon
+
+    def _arrow_lines(lat, lon, downwind_deg, length_km=4.0, head_km=1.6):
+        """lat/lon lists (None-separated) for a downwind shaft + arrowhead, drawn
+        as map LINES — unicode arrow glyphs don't render on the OSM basemap."""
+        tip_lat, tip_lon = _offset(lat, lon, downwind_deg, length_km)
+        back = (downwind_deg + 180) % 360
+        ha = _offset(tip_lat, tip_lon, (back - 28) % 360, head_km)
+        hb = _offset(tip_lat, tip_lon, (back + 28) % 360, head_km)
+        lats = [lat, tip_lat, None, tip_lat, ha[0], None, tip_lat, hb[0]]
+        lons = [lon, tip_lon, None, tip_lon, ha[1], None, tip_lon, hb[1]]
+        return lats, lons
 
     for s in MARINE_STATIONS:
         # Marine forecasts are drawn separately as white dotted lines below.
@@ -622,9 +639,6 @@ def build_marine_station_map(height=460, center_lat=49.36, center_lon=-123.45, z
             speed_for_color = 0
 
         color = _color_for_speed(speed_for_color)
-        # Single large arrow pointing downwind (glyph shape encodes direction);
-        # falls back to a dot when the direction can't be resolved.
-        arrow = direction_arrow(d) or '•'
         kts_text = f"{speed_for_color:.0f}kn" if w_kts is not None else "—"
         value_lines = [kts_text]
         if w_m is not None:
@@ -639,14 +653,20 @@ def build_marine_station_map(height=460, center_lat=49.36, center_lon=-123.45, z
             + "<extra></extra>"
         )
 
-        # Dot + big direction arrow above it, both colored by wind speed.
+        # Wind-direction arrow (downwind), drawn as lines and colored by speed.
+        deg_from = direction_degrees(d)
+        if deg_from is not None:
+            alat, alon = _arrow_lines(s['lat'], s['lon'], (deg_from + 180) % 360, 4.0, 1.6)
+            fig.add_trace(go.Scattermapbox(
+                lat=alat, lon=alon, mode='lines',
+                line=dict(color=color, width=3),
+                hoverinfo='skip', showlegend=False,
+            ))
+        # Station dot, colored by wind speed.
         fig.add_trace(go.Scattermapbox(
             lat=[s['lat']], lon=[s['lon']],
-            mode='markers+text',
+            mode='markers',
             marker=dict(size=12, color=color, opacity=0.95),
-            text=[arrow],
-            textposition='top center',
-            textfont=dict(size=26, color=color, family='Open Sans Bold'),
             name=s['name'],
             hovertemplate=hover,
             showlegend=False,
@@ -675,12 +695,6 @@ def build_marine_station_map(height=460, center_lat=49.36, center_lon=-123.45, z
         {'name': 'Howe Sound',    'url': URL_HOWE_SOUND,    'lat': 49.580, 'lon': -123.300},
         {'name': 'S. of Nanaimo', 'url': URL_SOUTH_NANAIMO, 'lat': 49.120, 'lon': -123.520},
     ]
-
-    def _offset(lat, lon, bearing_deg, dist_km):
-        """Point dist_km from (lat,lon) along a compass bearing (deg cw from N)."""
-        dlat = (dist_km / 111.0) * math.cos(math.radians(bearing_deg))
-        dlon = (dist_km / (111.0 * math.cos(math.radians(lat)))) * math.sin(math.radians(bearing_deg))
-        return lat + dlat, lon + dlon
 
     for fp in forecast_points:
         try:
@@ -726,15 +740,26 @@ def build_marine_station_map(height=460, center_lat=49.36, center_lon=-123.45, z
                 marker=dict(size=5, color='#ffffff', opacity=0.9),
                 hoverinfo='skip', showlegend=False,
             ))
-            # Arrowhead glyph + knots at the end (transparent marker anchors the text).
-            end_lat, end_lon = _offset(fp['lat'], fp['lon'], downwind, seg_km * (n_dots + 1))
+            # White arrowhead (lines) at the tip of the dotted shaft.
+            tip_lat, tip_lon = _offset(fp['lat'], fp['lon'], downwind, seg_km * n_dots)
+            back = (downwind + 180) % 360
+            ha = _offset(tip_lat, tip_lon, (back - 28) % 360, 2.2)
+            hb = _offset(tip_lat, tip_lon, (back + 28) % 360, 2.2)
             fig.add_trace(go.Scattermapbox(
-                lat=[end_lat], lon=[end_lon],
+                lat=[tip_lat, ha[0], None, tip_lat, hb[0]],
+                lon=[tip_lon, ha[1], None, tip_lon, hb[1]],
+                mode='lines', line=dict(color='#ffffff', width=3),
+                hoverinfo='skip', showlegend=False,
+            ))
+            # Knots label just beyond the arrowhead.
+            lab_lat, lab_lon = _offset(fp['lat'], fp['lon'], downwind, seg_km * (n_dots + 1))
+            fig.add_trace(go.Scattermapbox(
+                lat=[lab_lat], lon=[lab_lon],
                 mode='markers+text',
                 marker=dict(size=1, color='rgba(0,0,0,0)'),
-                text=[f"{direction_arrow(fdir)} {fkts_text}"],
+                text=[fkts_text],
                 textposition='middle center',
-                textfont=dict(size=16, color='#ffffff', family='Open Sans Bold'),
+                textfont=dict(size=14, color='#ffffff'),
                 hoverinfo='skip', showlegend=False,
             ))
         else:

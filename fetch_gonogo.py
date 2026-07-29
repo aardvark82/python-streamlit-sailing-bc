@@ -75,8 +75,8 @@ _CARD_TITLES = {
 # the "Next" forecast period trails at the end. Keys not listed sort last.
 _CARD_ORDER = [
     'tide', 'wind_vs_tide', 'temp',
-    'howe_current', 'howe_next', 'south_nanaimo',
-    'south_nanaimo_next', 'rain', 'rain_24',
+    'howe_current', 'south_nanaimo', 'rain',
+    'howe_next', 'south_nanaimo_next', 'rain_24',
 ]
 
 
