@@ -75,8 +75,8 @@ _CARD_TITLES = {
 # the "Next" forecast period trails at the end. Keys not listed sort last.
 _CARD_ORDER = [
     'tide', 'wind_vs_tide', 'temp',
-    'howe_current', 'south_nanaimo', 'rain',
-    'howe_next',
+    'howe_current', 'howe_next', 'south_nanaimo',
+    'south_nanaimo_next', 'rain', 'rain_24',
 ]
 
 
@@ -345,6 +345,13 @@ def _gather_current_factors():
                 'label': f"{rain_6h:.1f}mm",
                 'help': "Next 6 hours — OpenWeather (West Vancouver)",
             }
+            factors['rain_24'] = {
+                'status': 'go',
+                'informational': True,
+                'card_title': '🌧️ Rain (24 hours)',
+                'label': f"{weather.next_24_hours_precipitation:.1f}mm",
+                'help': "Next 24 hours — OpenWeather (West Vancouver)",
+            }
     except Exception as e:
         print(f"Go/NoGo weather error: {e}")
 
@@ -369,9 +376,12 @@ def _gather_current_factors():
         if rows:
             r = rows[0]
             gust = r.get('max_wind_speed')
+            period = r.get('time') or 'now'
+            period_disp = period[:1].upper() + period[1:]
             factors['howe_current'] = {
                 'status': _status(gust, WIND_GO, WIND_CAUTION) if gust is not None else 'caution',
-                'label': f"Howe Sound: {_fmt_forecast_range(r)} ({r.get('time', 'now')})",
+                'card_title': f"Howe Sound Forecast ({period_disp})",
+                'label': f"Howe Sound: {_fmt_forecast_range(r)}",
                 'help': _forecast_wind_help(r, "Howe Sound (morning & afternoon)"),
                 'page': 'Marine_Forecast',
             }
@@ -403,6 +413,16 @@ def _gather_current_factors():
                 'help': _forecast_wind_help(sr, "Strait of Georgia, south of Nanaimo"),
                 'page': 'Marine_Forecast',
             }
+            if len(srows) > 1:
+                sr2 = srows[1]
+                factors['south_nanaimo_next'] = {
+                    'status': 'go',
+                    'informational': True,
+                    'card_title': f"💨 S. of Nanaimo ({sr2.get('time', 'next')})",
+                    'label': _fmt_forecast_range(sr2),
+                    'help': _forecast_wind_help(sr2, "Strait of Georgia, south of Nanaimo"),
+                    'page': 'Marine_Forecast',
+                }
     except Exception as e:
         print(f"Go/NoGo South of Nanaimo forecast error: {e}")
 
@@ -722,11 +742,12 @@ def display_gonogo_page(container=None, page_links=None):
             if ' — ' in value:
                 value = value.split(' — ', 1)[0].strip()
 
+            base_title = f.get('card_title') or _CARD_TITLES.get(key, key.replace('_', ' ').title())
             if f.get('informational'):
                 # Context card — its own emoji title, no pass/fail status icon.
-                title = f.get('card_title', _CARD_TITLES.get(key, key.title()))
+                title = base_title
             else:
-                title = f"{_ICON[f['status']]} {_CARD_TITLES.get(key, key.replace('_', ' ').title())}"
+                title = f"{_ICON[f['status']]} {base_title}"
 
             col.metric(title, value, border=True, help=f.get('help'))
 
