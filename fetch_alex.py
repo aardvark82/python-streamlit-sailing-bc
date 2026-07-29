@@ -586,23 +586,24 @@ def _fetch_howe_sound_summary():
         return None
 
 
-def build_marine_station_map(height=460, center_lat=49.43, center_lon=-123.40, zoom=9):
+def build_marine_station_map(height=460, center_lat=49.36, center_lon=-123.45, zoom=8.4):
     """Standalone Plotly map of the Howe Sound marine stations with live wind
     (and wave) values — the same station overlay used on the Alex Location
     page, minus the vessel trace. Centered on Howe Sound so it can be embedded
     on the Go/No-Go page. Station fetches are cached, so this is cheap to call."""
-    from wind_utils import _color_for_speed, direction_arrow
+    from wind_utils import _color_for_speed, direction_arrow, direction_degrees
 
     fig = go.Figure()
 
     for s in MARINE_STATIONS:
+        # Marine forecasts are drawn separately as white dotted lines below.
+        if s['kind'] == 'howe_forecast':
+            continue
         try:
             if s['kind'] == 'buoy':
                 summary = _fetch_buoy_summary(s['buoy_id'])
             elif s['kind'] == 'jericho':
                 summary = _fetch_jericho_summary()
-            elif s['kind'] == 'howe_forecast':
-                summary = _fetch_howe_sound_summary()
             else:
                 summary = None
         except Exception as e:
@@ -661,6 +662,92 @@ def build_marine_station_map(height=460, center_lat=49.43, center_lon=-123.40, z
             hoverinfo='skip',
             showlegend=False,
         ))
+
+    # ── Marine wind FORECASTS (Howe Sound + South of Nanaimo) ──
+    # Drawn as a WHITE DOTTED LINE pointing downwind with an arrowhead + the
+    # forecast wind in knots, so forecasts read differently from the solid,
+    # speed-colored observed buoy markers above.
+    from fetch_gonogo import (
+        _get_marine_forecast_rows, URL_HOWE_SOUND, URL_SOUTH_NANAIMO,
+    )
+
+    forecast_points = [
+        {'name': 'Howe Sound',    'url': URL_HOWE_SOUND,    'lat': 49.580, 'lon': -123.300},
+        {'name': 'S. of Nanaimo', 'url': URL_SOUTH_NANAIMO, 'lat': 49.120, 'lon': -123.520},
+    ]
+
+    def _offset(lat, lon, bearing_deg, dist_km):
+        """Point dist_km from (lat,lon) along a compass bearing (deg cw from N)."""
+        dlat = (dist_km / 111.0) * math.cos(math.radians(bearing_deg))
+        dlon = (dist_km / (111.0 * math.cos(math.radians(lat)))) * math.sin(math.radians(bearing_deg))
+        return lat + dlat, lon + dlon
+
+    for fp in forecast_points:
+        try:
+            rows = _get_marine_forecast_rows(fp['url'])
+        except Exception as e:
+            print(f"Forecast {fp['name']} failed: {e}")
+            rows = None
+        if not rows:
+            continue
+        r = rows[0]
+        fkts = r.get('max_wind_speed') or r.get('wind_speed')
+        fdir = r.get('direction')
+        deg_from = direction_degrees(fdir)
+        fkts_text = f"{fkts:.0f}kn" if fkts is not None else "n/a"
+        hover = (f"<b>{fp['name']} forecast</b><br>"
+                 f"Wind: {(fdir + ' ') if fdir else ''}{fkts_text}<extra></extra>")
+
+        # Forecast origin — hollow white marker + label.
+        fig.add_trace(go.Scattermapbox(
+            lat=[fp['lat']], lon=[fp['lon']],
+            mode='markers+text',
+            marker=dict(size=9, color='#ffffff', opacity=0.95),
+            text=[f"{fp['name']} (fcst)"],
+            textposition='top center',
+            textfont=dict(size=11, color='#ffffff', family='Open Sans Bold'),
+            name=fp['name'],
+            hovertemplate=hover,
+            showlegend=False,
+        ))
+
+        if deg_from is not None:
+            downwind = (deg_from + 180) % 360
+            n_dots, seg_km = 6, 2.0
+            dot_lats, dot_lons = [], []
+            for i in range(1, n_dots + 1):
+                la, lo = _offset(fp['lat'], fp['lon'], downwind, seg_km * i)
+                dot_lats.append(la)
+                dot_lons.append(lo)
+            # White dotted shaft.
+            fig.add_trace(go.Scattermapbox(
+                lat=dot_lats, lon=dot_lons,
+                mode='markers',
+                marker=dict(size=5, color='#ffffff', opacity=0.9),
+                hoverinfo='skip', showlegend=False,
+            ))
+            # Arrowhead glyph + knots at the end (transparent marker anchors the text).
+            end_lat, end_lon = _offset(fp['lat'], fp['lon'], downwind, seg_km * (n_dots + 1))
+            fig.add_trace(go.Scattermapbox(
+                lat=[end_lat], lon=[end_lon],
+                mode='markers+text',
+                marker=dict(size=1, color='rgba(0,0,0,0)'),
+                text=[f"{direction_arrow(fdir)} {fkts_text}"],
+                textposition='middle center',
+                textfont=dict(size=16, color='#ffffff', family='Open Sans Bold'),
+                hoverinfo='skip', showlegend=False,
+            ))
+        else:
+            # Unknown direction — just show the knots at the point.
+            fig.add_trace(go.Scattermapbox(
+                lat=[fp['lat']], lon=[fp['lon']],
+                mode='markers+text',
+                marker=dict(size=1, color='rgba(0,0,0,0)'),
+                text=[fkts_text],
+                textposition='bottom center',
+                textfont=dict(size=13, color='#ffffff', family='Open Sans Bold'),
+                hoverinfo='skip', showlegend=False,
+            ))
 
     fig.update_layout(
         mapbox=dict(
