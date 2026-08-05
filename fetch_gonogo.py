@@ -96,6 +96,17 @@ def _forecast_wind_help(r, area):
     """Tooltip for a forecast card: area + cardinal direction when known."""
     d = r.get('direction')
     return f"EC marine forecast — {area}" + (f" · wind from {d}" if d else "")
+
+
+def _fcst_status(gust):
+    """Forecast-wind status for the coloured cards: green < 10, orange 10-20,
+    red 20+ kts (thresholds asked for on the forecast cards)."""
+    return _status(gust, 10, 20) if gust is not None else 'go'
+
+
+def _fcst_icon(gust):
+    """Status icon (✅/⚠️/🔴) for a forecast card, keyed on the gust."""
+    return _ICON[_fcst_status(gust)]
 _COLOR_MAP = {'go': '#2ecc71', 'caution': '#f39c12', 'nogo': '#e74c3c'}
 _NUMERIC = {'go': 1, 'caution': 0.5, 'nogo': 0}
 
@@ -381,10 +392,17 @@ def _gather_current_factors():
                 item.get('rain', {}).get('3h', 0)
                 for item in (weather.hourly_forecast or [])[:2]
             )
+            # Rain colour: green at 0 mm, orange up to 10 mm, red above 10 mm.
+            if rain_6h < 0.05:
+                rain_status = 'go'
+            elif rain_6h <= 10:
+                rain_status = 'caution'
+            else:
+                rain_status = 'nogo'
             factors['rain'] = {
-                'status': 'go',
+                'status': rain_status,
                 'informational': True,
-                'card_title': '🌧️ Rain (6 hours)',
+                'card_title': f"{_ICON[rain_status]} Rain (6 hours)",
                 'label': f"{rain_6h:.1f}mm",
                 'help': "Next 6 hours — OpenWeather (West Vancouver)",
             }
@@ -411,6 +429,10 @@ def _gather_current_factors():
         rows = _get_marine_forecast_rows(URL_HOWE_SOUND)
         if rows:
             r = rows[0]
+            # The "current conditions" row often omits direction (e.g. "light
+            # winds") — borrow the next period's direction so the arrow shows.
+            if not r.get('direction') and len(rows) > 1:
+                r = {**r, 'direction': rows[1].get('direction')}
             gust = r.get('max_wind_speed')
             period = r.get('time') or 'now'
             period_disp = period[:1].upper() + period[1:]
@@ -425,9 +447,9 @@ def _gather_current_factors():
                 r2 = rows[1]
                 gust2 = r2.get('max_wind_speed')
                 factors['howe_next'] = {
-                    'status': _status(gust2, WIND_GO, WIND_CAUTION) if gust2 is not None else 'go',
+                    'status': _fcst_status(gust2),
                     'informational': True,
-                    'card_title': f"💨 Next · Howe Sound ({r2.get('time', '')})",
+                    'card_title': f"{_fcst_icon(gust2)} Next · Howe Sound ({r2.get('time', '')})",
                     'label': _fmt_forecast_range(r2),
                     'help': _forecast_wind_help(r2, "Howe Sound"),
                     'page': 'Marine_Forecast',
@@ -442,9 +464,9 @@ def _gather_current_factors():
         if srows:
             sr = srows[0]
             factors['south_nanaimo'] = {
-                'status': 'go',
+                'status': _fcst_status(sr.get('max_wind_speed')),
                 'informational': True,
-                'card_title': f"💨 S. of Nanaimo ({sr.get('time', 'now')})",
+                'card_title': f"{_fcst_icon(sr.get('max_wind_speed'))} S. of Nanaimo ({sr.get('time', 'now')})",
                 'label': _fmt_forecast_range(sr),
                 'help': _forecast_wind_help(sr, "Strait of Georgia, south of Nanaimo"),
                 'page': 'Marine_Forecast',
@@ -452,9 +474,9 @@ def _gather_current_factors():
             if len(srows) > 1:
                 sr2 = srows[1]
                 factors['south_nanaimo_next'] = {
-                    'status': 'go',
+                    'status': _fcst_status(sr2.get('max_wind_speed')),
                     'informational': True,
-                    'card_title': f"💨 S. of Nanaimo ({sr2.get('time', 'next')})",
+                    'card_title': f"{_fcst_icon(sr2.get('max_wind_speed'))} S. of Nanaimo ({sr2.get('time', 'next')})",
                     'label': _fmt_forecast_range(sr2),
                     'help': _forecast_wind_help(sr2, "Strait of Georgia, south of Nanaimo"),
                     'page': 'Marine_Forecast',
