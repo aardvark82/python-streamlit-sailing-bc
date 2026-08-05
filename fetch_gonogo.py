@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 
 from utils import cached_fetch_url, cached_fetch_url_live, cached_fetch_url_buoy
-from fetch_weather import fetch_from_open_weather
+from fetch_weather import fetch_from_open_weather, get_wind_direction
 from wind_utils import direction_arrow, direction_degrees
 from fetch_forecast import (
     fetch_beautifulsoup_marine_forecast_for_url,
@@ -67,16 +67,15 @@ _CARD_TITLES = {
     'tide': 'Tide',
     'howe_current': 'Howe Sound Forecast',
     'warnings': 'Marine Warnings',
-    'wind_vs_tide': 'Wind vs Tide (Howe Sound)',
 }
 
 # Fixed display order for the Current Conditions cards. Row 1 = tide /
 # wind-vs-tide / temperature; row 2 = the two marine forecasts + rain;
 # the "Next" forecast period trails at the end. Keys not listed sort last.
 _CARD_ORDER = [
-    'tide', 'wind_vs_tide', 'temp',
-    'howe_current', 'south_nanaimo', 'rain',
-    'howe_next', 'south_nanaimo_next', 'rain_24',
+    'tide', 'rain', 'temp',
+    'howe_current', 'south_nanaimo', 'wind_vs_tide',
+    'howe_next', 'south_nanaimo_next', 'wind_vs_tide_3h',
 ]
 
 
@@ -264,6 +263,50 @@ def _get_current_tide_height():
     return current_h, direction
 
 
+def _flood_at(x_ts, y_h, target_dt):
+    """True if the tide is flooding (rising, setting INTO Howe Sound) at
+    target_dt, False if ebbing, None if it can't be determined."""
+    h0 = _tide_at(x_ts, y_h, target_dt)
+    h1 = _tide_at(x_ts, y_h, target_dt + timedelta(minutes=30))
+    if h0 is None or h1 is None:
+        return None
+    return h1 > h0
+
+
+def _near_slack(x_ts, target_dt, within_min=60):
+    """True if target_dt is within `within_min` of a tide extreme (slack water).
+    x_ts holds the extreme (high/low) timestamps."""
+    if x_ts is None or len(x_ts) == 0:
+        return False
+    ts = target_dt.timestamp()
+    return min(abs(ts - t) for t in x_ts) <= within_min * 60
+
+
+def _classify_wind_tide(is_flood, wind_deg, wind_kts, near_slack):
+    """Five-state wind-vs-tide readout for Howe Sound (N–S axis: flood sets
+    ~N/into the sound, ebb sets ~S/out). Returns (label, status).
+
+      Calm       — within 1 h of slack and wind < 5 kts
+      Aligned N  — flood + southerly wind (both driving north)
+      Aligned S  — ebb + northerly wind (both driving south)
+      Light chop — wind opposes the tide, <= 10 kts
+      Heavy chop — wind opposes the tide, 11+ kts
+    """
+    if is_flood is None or wind_deg is None or wind_kts is None:
+        return None, None
+    if near_slack and wind_kts < 5:
+        return "Calm", 'go'
+    from_south = 90 <= wind_deg <= 270      # wind FROM the southerly half → blows ~N
+    if is_flood and from_south:
+        return "Aligned N", 'go'
+    if (not is_flood) and (not from_south):
+        return "Aligned S", 'go'
+    # wind opposes the tidal stream → chop
+    if wind_kts <= 10:
+        return "Light chop", 'go'
+    return "Heavy chop", 'caution'
+
+
 def _gather_current_factors():
     """Gather all current condition factors. Returns (factors dict, weather_data)."""
     factors = {}
@@ -341,16 +384,9 @@ def _gather_current_factors():
             factors['rain'] = {
                 'status': 'go',
                 'informational': True,
-                'card_title': '🌧️ Rain (Next 6h)',
+                'card_title': '🌧️ Rain (6 hours)',
                 'label': f"{rain_6h:.1f}mm",
                 'help': "Next 6 hours — OpenWeather (West Vancouver)",
-            }
-            factors['rain_24'] = {
-                'status': 'go',
-                'informational': True,
-                'card_title': '🌧️ Rain (24 hours)',
-                'label': f"{weather.next_24_hours_precipitation:.1f}mm",
-                'help': "Next 24 hours — OpenWeather (West Vancouver)",
             }
     except Exception as e:
         print(f"Go/NoGo weather error: {e}")
@@ -469,56 +505,51 @@ def _gather_current_factors():
     except Exception as e:
         print(f"Go/NoGo buoy error: {e}")
 
-    # Wind-against-tide at the Howe Sound entrance — steep chop when the wind
-    # opposes the tidal stream. Howe Sound runs ~N–S and opens south to the
-    # Strait, so the Pt Atkinson tide is the stream proxy:
-    #   Rising tide  = FLOOD, water setting IN/up-sound (northward, toward ~N)
-    #   Falling tide = EBB,   water setting OUT/down-sound (southward, toward ~S)
-    # Wind is taken at PAM ROCKS (entrance) when available, else the local
-    # OpenWeather reading. A current is opposed by wind blowing against its
-    # flow: flood (→N) is opposed by wind FROM the north; ebb (→S) by wind
-    # FROM the south. Always rendered as a card so the state is always visible.
+    # Wind vs Tide — 5-state readout for NOW (Pam Rocks wind vs the current
+    # flood/ebb + slack) plus a 3-HOUR FORECAST (OpenWeather 3h wind vs the
+    # interpolated tide in 3 h). See _classify_wind_tide for the states.
     try:
-        entrance_deg = pam_deg_now if pam_deg_now is not None else wind_deg_now
-        entrance_kts = pam_kts_now if pam_kts_now is not None else \
-            (weather.wind_speed_now * 1.94384 if weather else None)
-        wind_src = "Pam Rocks" if pam_deg_now is not None else "local wind"
+        _tdf, x_ts, y_h = _get_tide_data()
+        van_now = datetime.now(pytz.timezone('America/Vancouver'))
 
-        if entrance_deg is None or not tide_dir_now or entrance_kts is None:
-            factors['wind_vs_tide'] = {
-                'status': 'go',
-                'label': "Wind vs Tide: data unavailable",
-                'page': 'Tides',
-            }
-        elif entrance_kts < WIND_GO:
-            factors['wind_vs_tide'] = {
-                'status': 'go',
-                'label': "Wind vs Tide: light wind",
-                'help': f"{wind_src} {entrance_kts:.0f}kts — too light to build wind-against-tide chop",
-                'page': 'Tides',
-            }
-        else:
-            flood = (tide_dir_now == "Rising")   # tide setting into the sound
-            stream = "flood (into sound)" if flood else "ebb (out of sound)"
-            # Wind FROM the southerly half (E→S→W, 90–270°) blows up-sound.
-            from_south = 90 <= entrance_deg <= 270
-            # Against flood = wind from the north; against ebb = wind from the south.
-            against = (not from_south) if flood else from_south
-            help_txt = f"{wind_src} wind vs {stream}"
-            if against:
-                factors['wind_vs_tide'] = {
-                    'status': 'caution',
-                    'label': f"Wind vs Tide: against {stream} — steep chop",
-                    'help': help_txt,
-                    'page': 'Tides',
-                }
+        def _wvt_card(is_flood, w_deg, w_kts, near_slack, title, informational, help_txt):
+            label, status = _classify_wind_tide(is_flood, w_deg, w_kts, near_slack)
+            if label is None:
+                label, status = "data unavailable", 'go'
+                arrow = ''
             else:
-                factors['wind_vs_tide'] = {
-                    'status': 'go',
-                    'label': f"Wind vs Tide: with {stream}",
-                    'help': help_txt,
-                    'page': 'Tides',
-                }
+                arrow = direction_arrow(get_wind_direction(w_deg)) if w_deg is not None else ''
+            value = f"{arrow} {label}".strip()
+            card = {'status': status, 'label': value, 'help': help_txt, 'page': 'Tides'}
+            if informational:
+                card['informational'] = True
+                card['card_title'] = f"{_ICON[status]} {title}"
+            else:
+                card['card_title'] = title
+            return card
+
+        # NOW — Pam Rocks wind (fallback to the local OpenWeather reading).
+        is_flood_now = (tide_dir_now == "Rising") if tide_dir_now else None
+        deg_now = pam_deg_now if pam_deg_now is not None else wind_deg_now
+        kts_now = pam_kts_now if pam_kts_now is not None else \
+            (weather.wind_speed_now * 1.94384 if weather else None)
+        src_now = "Pam Rocks" if pam_deg_now is not None else "local"
+        factors['wind_vs_tide'] = _wvt_card(
+            is_flood_now, deg_now, kts_now, _near_slack(x_ts, van_now),
+            "Wind vs Tide (Now)", False,
+            f"{src_now} wind vs current Howe Sound tide (flood/ebb + slack)",
+        )
+
+        # 3-HOUR FORECAST — OpenWeather 3 h wind vs the interpolated tide in 3 h.
+        if weather is not None:
+            t3 = van_now + timedelta(hours=3)
+            factors['wind_vs_tide_3h'] = _wvt_card(
+                _flood_at(x_ts, y_h, t3),
+                weather.wind_direction_3h, weather.wind_speed_3h * 1.94384,
+                _near_slack(x_ts, t3),
+                "Wind vs Tide (3h)", True,
+                "OpenWeather 3 h wind vs the interpolated tide in 3 hours",
+            )
     except Exception as e:
         print(f"Go/NoGo wind-vs-tide error: {e}")
 
