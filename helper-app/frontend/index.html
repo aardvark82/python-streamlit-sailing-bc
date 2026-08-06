@@ -54,6 +54,16 @@
     .location-tabs button { padding: 0.4rem 0.8rem; border: 1px solid #cbd5e1; border-radius: 6px;
                              background: #fff; cursor: pointer; font-size: 0.85rem; }
     .location-tabs button.active { background: #3b82f6; color: #fff; border-color: #3b82f6; }
+    /* Latest-reading boxes above the location selector */
+    .readings-row { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.9rem; }
+    .reading-box { flex: 1 1 118px; min-width: 108px; border: 1px solid #cbd5e1; border-radius: 8px;
+                   padding: 0.5rem 0.6rem; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+    .reading-box.wave { border-color: #10b981; }
+    .reading-box.stale { opacity: 0.5; }
+    .reading-title { font-size: 0.72rem; color: #64748b; font-weight: 600; margin-bottom: 0.2rem;
+                     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .reading-value { font-size: 1.15rem; font-weight: 700; color: #0f172a; line-height: 1.15; }
+    .reading-sub { font-size: 0.7rem; color: #94a3b8; margin-top: 0.1rem; }
     table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 6px; overflow: hidden;
             box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
     th, td { padding: 0.55rem 0.8rem; text-align: left; font-size: 0.88rem; border-bottom: 1px solid #e2e8f0; }
@@ -156,6 +166,47 @@
                                           hour: '2-digit', minute: '2-digit' });
     }
 
+    // Latest reading per station — 5 wind boxes + 2 wave boxes, above the selector.
+    function CurrentReadings() {
+      const [data, setData] = useState(null);
+      useEffect(() => {
+        const load = () => fetch('/api/v1/current').then(r => r.json()).then(setData).catch(() => {});
+        load();
+        const t = setInterval(load, 60000);   // refresh each minute
+        return () => clearInterval(t);
+      }, []);
+      if (!data || !data.locations) return null;
+      const locs = data.locations;
+      const windOrder = ['WAS', '46146', '46304', 'WSB', 'JERICHO'];
+      const waveOrder = ['46146', '46304'];
+
+      const box = (l, metric) => {
+        const isWave = metric === 'Wave';
+        const val = isWave
+          ? (l.wave_height_cm != null ? `${l.wave_height_cm} cm` : '—')
+          : (l.wind_kts != null ? `${l.wind_kts} kn` : '—');
+        const sub = isWave
+          ? (l.age_minutes != null ? `${l.age_minutes} min ago` : '')
+          : [l.wind_direction, l.age_minutes != null ? `${l.age_minutes} min ago` : '']
+              .filter(Boolean).join(' · ');
+        const cls = 'reading-box' + (isWave ? ' wave' : '') + (l.stale ? ' stale' : '');
+        return (
+          <div className={cls} key={l.id + metric}>
+            <div className="reading-title">{l.name} — {metric}</div>
+            <div className="reading-value">{val}</div>
+            {sub && <div className="reading-sub">{sub}</div>}
+          </div>
+        );
+      };
+
+      return (
+        <div className="readings-row">
+          {windOrder.map(id => locs[id] && box(locs[id], 'Wind'))}
+          {waveOrder.map(id => locs[id] && box(locs[id], 'Wave'))}
+        </div>
+      );
+    }
+
     function App() {
       const [locations, setLocations] = useState([]);
       const [view, setView] = useState('graph');   // graph | log | trends | reconcile | settings
@@ -202,12 +253,15 @@
           </div>
           <div className="main">
             {view !== 'settings' && view !== 'trends' && view !== 'reconcile' && view !== 'wave' && view !== 'alexa' && view !== 'forecast' && view !== 'api' && view !== 'annualtides' && (
-              <div className="location-tabs">
-                {locations.map(l => (
-                  <button key={l.id} className={activeLoc === l.id ? 'active' : ''}
-                          onClick={() => setActiveLoc(l.id)}>{l.name}</button>
-                ))}
-              </div>
+              <React.Fragment>
+                <CurrentReadings />
+                <div className="location-tabs">
+                  {locations.map(l => (
+                    <button key={l.id} className={activeLoc === l.id ? 'active' : ''}
+                            onClick={() => setActiveLoc(l.id)}>{l.name}</button>
+                  ))}
+                </div>
+              </React.Fragment>
             )}
             <ErrorBoundary key={view + ':' + (activeLoc || '')}>
               {view === 'log' && activeLoc && <LogView locationId={activeLoc} />}
