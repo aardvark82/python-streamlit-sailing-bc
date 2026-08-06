@@ -65,15 +65,17 @@ _ICON = {'go': '✅', 'caution': '⚠️', 'nogo': '🔴'}
 # Short card titles for the Current Conditions metric cards (keyed by factor id)
 _CARD_TITLES = {
     'tide': 'Tide',
+    'waves': 'Waves (English Bay)',
     'howe_current': 'Howe Sound Forecast',
     'warnings': 'Marine Warnings',
 }
 
-# Fixed display order for the Current Conditions cards. Row 1 = tide /
-# wind-vs-tide / temperature; row 2 = the two marine forecasts + rain;
-# the "Next" forecast period trails at the end. Keys not listed sort last.
+# Fixed 3x3 display grid for the Current Conditions cards. Rendered strictly
+# by position so a missing factor leaves its cell blank rather than shifting
+# the others. Row 1 = tide / rain+temp / waves; row 2 = now readings;
+# row 3 = the "next" period + 3-hour wind-vs-tide.
 _CARD_ORDER = [
-    'tide', 'rain', 'temp',
+    'tide', 'rain', 'waves',
     'howe_current', 'south_nanaimo', 'wind_vs_tide',
     'howe_next', 'south_nanaimo_next', 'wind_vs_tide_3h',
 ]
@@ -380,13 +382,6 @@ def _gather_current_factors():
             # the West-Van OpenWeather wind is no longer shown as its own card.
             wind_deg_now = weather.wind_direction_now
 
-            # Temperature — context only; informational card (no verdict impact)
-            factors['temp'] = {
-                'status': 'go',
-                'informational': True,
-                'card_title': '🌡️ Temperature',
-                'label': f"{weather.temperature:.0f}°C",
-            }
             # Rain over the next 6 hours (OpenWeather is 3-hourly → first 2 slots)
             rain_6h = sum(
                 item.get('rain', {}).get('3h', 0)
@@ -399,12 +394,13 @@ def _gather_current_factors():
                 rain_status = 'caution'
             else:
                 rain_status = 'nogo'
+            # Temperature is folded into this card.
             factors['rain'] = {
                 'status': rain_status,
                 'informational': True,
-                'card_title': f"{_ICON[rain_status]} Rain (6 hours)",
-                'label': f"{rain_6h:.1f}mm",
-                'help': "Next 6 hours — OpenWeather (West Vancouver)",
+                'card_title': f"{_ICON[rain_status]} Rain (6 hours) & Temp",
+                'label': f"{rain_6h:.1f}mm · {weather.temperature:.0f}°C",
+                'help': "Rain next 6 h + current temp — OpenWeather (West Vancouver)",
             }
     except Exception as e:
         print(f"Go/NoGo weather error: {e}")
@@ -443,17 +439,17 @@ def _gather_current_factors():
                 'help': _forecast_wind_help(r, "Howe Sound (morning & afternoon)"),
                 'page': 'Marine_Forecast',
             }
-            if len(rows) > 1:
-                r2 = rows[1]
-                gust2 = r2.get('max_wind_speed')
-                factors['howe_next'] = {
-                    'status': _fcst_status(gust2),
-                    'informational': True,
-                    'card_title': f"{_fcst_icon(gust2)} Next · Howe Sound ({r2.get('time', '')})",
-                    'label': _fmt_forecast_range(r2),
-                    'help': _forecast_wind_help(r2, "Howe Sound"),
-                    'page': 'Marine_Forecast',
-                }
+            r2 = rows[1] if len(rows) > 1 else None
+            gust2 = r2.get('max_wind_speed') if r2 else None
+            factors['howe_next'] = {
+                'status': _fcst_status(gust2),
+                'informational': True,
+                'card_title': (f"{_fcst_icon(gust2)} Next · Howe Sound "
+                               f"({r2.get('time', '')})") if r2 else "💨 Next · Howe Sound",
+                'label': _fmt_forecast_range(r2) if r2 else "n/a",
+                'help': _forecast_wind_help(r2, "Howe Sound") if r2 else None,
+                'page': 'Marine_Forecast',
+            }
     except Exception as e:
         print(f"Go/NoGo Howe Sound forecast error: {e}")
 
@@ -471,16 +467,16 @@ def _gather_current_factors():
                 'help': _forecast_wind_help(sr, "Strait of Georgia, south of Nanaimo"),
                 'page': 'Marine_Forecast',
             }
-            if len(srows) > 1:
-                sr2 = srows[1]
-                factors['south_nanaimo_next'] = {
-                    'status': _fcst_status(sr2.get('max_wind_speed')),
-                    'informational': True,
-                    'card_title': f"{_fcst_icon(sr2.get('max_wind_speed'))} S. of Nanaimo ({sr2.get('time', 'next')})",
-                    'label': _fmt_forecast_range(sr2),
-                    'help': _forecast_wind_help(sr2, "Strait of Georgia, south of Nanaimo"),
-                    'page': 'Marine_Forecast',
-                }
+            sr2 = srows[1] if len(srows) > 1 else None
+            factors['south_nanaimo_next'] = {
+                'status': _fcst_status(sr2.get('max_wind_speed')) if sr2 else 'go',
+                'informational': True,
+                'card_title': (f"{_fcst_icon(sr2.get('max_wind_speed'))} S. of Nanaimo "
+                               f"({sr2.get('time', 'next')})") if sr2 else "💨 S. of Nanaimo (next)",
+                'label': _fmt_forecast_range(sr2) if sr2 else "n/a",
+                'help': _forecast_wind_help(sr2, "Strait of Georgia, south of Nanaimo") if sr2 else None,
+                'page': 'Marine_Forecast',
+            }
     except Exception as e:
         print(f"Go/NoGo South of Nanaimo forecast error: {e}")
 
@@ -522,7 +518,6 @@ def _gather_current_factors():
                 'label': f"Waves: {wave_cm:.0f}cm",
                 'value': buoy_wave,
                 'page': 'English_Bay',
-                'hide_card': True,
             }
     except Exception as e:
         print(f"Go/NoGo buoy error: {e}")
@@ -776,18 +771,19 @@ def display_gonogo_page(container=None, page_links=None):
 
     draw.markdown("---")
 
-    # Current conditions — one unified metric-card grid. Decision factors sort
-    # by severity (no-go / caution first); informational context cards
-    # (temperature, next forecast period) sort to the end. Hidden factors
-    # (marine warnings) drive the verdict/pills but aren't shown as cards.
+    # Current conditions — a fixed 3-column grid rendered strictly by
+    # _CARD_ORDER position, so a missing factor leaves its cell blank instead
+    # of shifting the others. Hidden factors (Pam Rocks/English Bay wind,
+    # waves-as-verdict, marine warnings) drive the verdict/pills, not cards.
     draw.markdown("**Current Conditions**")
-    cards = [(k, f) for k, f in factors.items() if not f.get('hide_card')]
-    cards.sort(key=lambda kv: _CARD_ORDER.index(kv[0])
-               if kv[0] in _CARD_ORDER else len(_CARD_ORDER))
     n_cols = 3
-    for i in range(0, len(cards), n_cols):
+    for i in range(0, len(_CARD_ORDER), n_cols):
         cols = draw.columns(n_cols)
-        for col, (key, f) in zip(cols, cards[i:i + n_cols]):
+        for col, key in zip(cols, _CARD_ORDER[i:i + n_cols]):
+            f = factors.get(key)
+            if not f or f.get('hide_card'):
+                continue  # keep the cell (and grid) even when data is missing
+
             label = f['label']
             # Card value = text after the first colon, with any trailing
             # " — detail" clause trimmed for a compact metric value.
