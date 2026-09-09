@@ -1079,11 +1079,15 @@ _WVT_STRIPE_SIZE = {0: 8, 1: 5, 2: 9, 3: 14}          # hatch period (px): bigge
 _WVT_STRIPE_SOLIDITY = {0: 0, 1: 0.3, 2: 0.4, 3: 0.5}  # hatch line thickness (fraction of period)
 
 
+_TIDE_BAND_PX = 20   # tide-level band on the left edge of every cell
+
+
 def _outlook_figure(windows, periods, dark=False):
     """Shared Weekly-Outlook grid: days × `periods`, drawn as ONE Bar trace
     with a bar per cell (heatmap cells can't carry patterns). Cell colour =
     status; diagonal stripes = wind against tide (`wvt_pattern`: ╱ Howe,
-    ╲ Strait, ✕ both) sized by `wvt_level`; the current hour is outlined.
+    ╲ Strait, ✕ both) sized by `wvt_level`; a _TIDE_BAND_PX-wide band on the
+    left edge carries the tide-level colour; the current hour is outlined.
     Returns (fig, grid, days) — callers add their own cell annotations."""
     days = []
     seen = set()
@@ -1093,7 +1097,7 @@ def _outlook_figure(windows, periods, dark=False):
             seen.add(w['day'])
     grid = {(w['day'], w['period']): w for w in windows}
 
-    xs, ys, bases, colors, shapes, sizes, solidity, outline, custom = ([] for _ in range(9))
+    xs, ys, bases, colors, shapes, sizes, solidity, custom = ([] for _ in range(8))
     for i, period in enumerate(periods):
         for day in days:
             m = grid.get((day, period))
@@ -1107,14 +1111,13 @@ def _outlook_figure(windows, periods, dark=False):
             shapes.append(m.get('wvt_pattern') or '')
             sizes.append(_WVT_STRIPE_SIZE.get(lvl, 8))
             solidity.append(_WVT_STRIPE_SOLIDITY.get(lvl, 0))
-            outline.append(3 if m.get('is_now') else 0)
             custom.append(_hover_text(m))
 
     fig = go.Figure(go.Bar(
         x=xs, y=ys, base=bases, orientation='v',
         marker=dict(
             color=colors,
-            line=dict(color='#6cb3ff' if dark else '#2c7be5', width=outline),
+            line=dict(width=0),
             # 'overlay' keeps the cell colour underneath and draws the hatch
             # in an auto-contrasting tone (plotly ignores fgcolor in this mode)
             pattern=dict(shape=shapes, size=sizes, solidity=solidity, fillmode='overlay'),
@@ -1134,6 +1137,29 @@ def _outlook_figure(windows, periods, dark=False):
         plot_bgcolor=bg, paper_bgcolor=bg,
         hoverlabel=dict(align='left'),
     )
+
+    # Tide-level band: a fixed-pixel-width rectangle anchored on each bar's
+    # left edge (category j spans j-0.47 … j+0.47 with bargap 0.06). The
+    # current hour's outline is a shape too, so it sits above the band.
+    half = 0.5 * (1 - 0.06)
+    for i, period in enumerate(periods):
+        for j, day in enumerate(days):
+            m = grid.get((day, period))
+            if not m:
+                continue
+            if m.get('tide_dot'):
+                fig.add_shape(
+                    type='rect', xref='x', yref='y', layer='above',
+                    xsizemode='pixel', xanchor=j - half, x0=0, x1=_TIDE_BAND_PX,
+                    y0=i + 0.04, y1=i + 0.96,
+                    fillcolor=m['tide_dot'], line=dict(width=0),
+                )
+            if m.get('is_now'):
+                fig.add_shape(
+                    type='rect', xref='x', yref='y', layer='above',
+                    x0=j - half, x1=j + half, y0=i + 0.04, y1=i + 0.96,
+                    line=dict(color='#6cb3ff' if dark else '#2c7be5', width=3),
+                )
     return fig, grid, days
 
 
@@ -1155,16 +1181,16 @@ def _draw_weekly_chart(draw, windows):
             backing = dict(bgcolor='rgba(0,0,0,0.35)', borderpad=1) if m.get('wvt_level') else {}
             th = m.get('tide_h')
             if th is not None:
-                dot = m.get('tide_dot') or '#ffffff'
-                top = (f'<span style="color:{dot}">●</span> '
-                       f'{th:.1f}{_tide_arrow(m.get("is_flood"))}')
+                top = f'{th:.1f}{_tide_arrow(m.get("is_flood"))}'
                 fig.add_annotation(x=day, y=y, text=top, showarrow=False,
-                                   font=dict(color='white', size=10), yshift=10, **backing)
+                                   font=dict(color='white', size=10),
+                                   xshift=_TIDE_BAND_PX // 2, yshift=10, **backing)
             bottom = f"<b>{_wind_arrow_deg(m.get('wind_deg'))}{m['wind']:.0f}</b>"
             if m['rain'] > PRECIP_GO:
                 bottom += " 💧"
             fig.add_annotation(x=day, y=y, text=bottom, showarrow=False,
-                               font=dict(color='white', size=11), yshift=-8, **backing)
+                               font=dict(color='white', size=11),
+                               xshift=_TIDE_BAND_PX // 2, yshift=-8, **backing)
 
     draw.plotly_chart(fig, width='stretch')
     draw.caption(
@@ -1172,7 +1198,7 @@ def _draw_weekly_chart(draw, windows):
         "**Stripes = wind against tide** (bigger stripes = stronger wind): "
         "╱ Howe Sound (S wind on ebb / N wind on flood) · "
         "╲ Strait of Georgia S of Nanaimo (SE wind on ebb / NW wind on flood) · ✕ both · "
-        "tide dot 🟢 > 2.5 m · 🟠 1.5–2.5 m · 🔴 < 1.5 m · ↑ flood ↓ ebb · "
+        "left band = tide level 🟢 > 2.5 m · 🟠 1.5–2.5 m · 🔴 < 1.5 m · ↑ flood ↓ ebb · "
         "blue outline = this hour (observed wind) · hover a cell for the full picture"
     )
 
@@ -1422,8 +1448,7 @@ def _draw_kiosk_chart(windows):
             label = f"<b>{_wind_arrow_deg(m.get('wind_deg'))}{m['wind']:.0f}</b>kts"
             th = m.get('tide_h')
             if th is not None:
-                dot = m.get('tide_dot') or '#e0e0e0'
-                label += f'<br><span style="color:{dot}">●</span> {th:.1f}m{_tide_arrow(m.get("is_flood"))}'
+                label += f'<br>{th:.1f}m{_tide_arrow(m.get("is_flood"))}'
             backing = {}
             if m.get('wvt_level'):
                 label += '<br>⚠ wind vs tide'
@@ -1433,6 +1458,7 @@ def _draw_kiosk_chart(windows):
                 text=label,
                 showarrow=False,
                 font=dict(color='white', size=16),
+                xshift=_TIDE_BAND_PX // 2,
                 **backing,
             )
 
