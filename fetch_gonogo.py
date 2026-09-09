@@ -1,6 +1,7 @@
 import io
 import re
 
+import requests
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -126,7 +127,7 @@ def _fetch_buoy_wind_wave(buoy_id='46304'):
         soup = BeautifulSoup(res.content, 'html.parser')
         table = soup.find('table', class_='table')
         if not table or not table.tbody:
-            return None, None
+            return None, None, None
         rows = table.tbody.find_all('tr')
 
         wind_text = rows[0].find_all('td')[0].text.strip()
@@ -295,6 +296,57 @@ def _near_slack(x_ts, target_dt, within_min=60):
     return min(abs(ts - t) for t in x_ts) <= within_min * 60
 
 
+# ── Wind vs tide ──────────────────────────────────────────────────────────
+# Areas checked hour-by-hour in the Weekly Outlook. `flood_sets` is the
+# compass bearing the FLOOD stream sets toward (the ebb runs the opposite
+# way); `pattern` is the hatch drawn on a chart cell when the wind there
+# blows against the stream. Forecast wind comes from Open-Meteo at lat/lon.
+#   Howe Sound: flood sets N (into the sound) → S wind on ebb / N wind on
+#               flood stacks up short steep seas.
+#   Strait of Georgia, S of Nanaimo: flood sets NW up the strait → SE wind
+#               on ebb / NW wind on flood stacks up short steep seas.
+_WVT_AREAS = [
+    {'key': 'howe', 'name': 'Howe Sound', 'short': 'Howe',
+     'lat': 49.49, 'lon': -123.30,            # Pam Rocks, sound entrance
+     'flood_sets': 0, 'pattern': '/',
+     'rule': 'S wind on ebb / N wind on flood'},
+    {'key': 'sog', 'name': 'Strait of Georgia, S of Nanaimo', 'short': 'SoG',
+     'lat': 49.34, 'lon': -123.73,            # Halibut Bank buoy
+     'flood_sets': 315, 'pattern': '\\',
+     'rule': 'SE wind on ebb / NW wind on flood'},
+]
+WVT_MIN_KTS = 5       # an opposing wind below this raises no real chop
+WVT_HEAVY_KTS = 10    # above this, wind against tide = heavy chop (caution)
+WVT_SLACK_MIN = 30    # ± minutes around HW/LW treated as slack (no stream)
+_WVT_LEVEL_NAME = {1: 'light chop', 2: 'heavy chop', 3: 'severe'}
+
+
+def _wind_opposes_stream(is_flood, wind_deg, flood_sets_deg=0):
+    """True when the wind blows against the tidal stream. `wind_deg` is the
+    bearing the wind comes FROM; `flood_sets_deg` the bearing the flood
+    stream sets TOWARD (the ebb sets the opposite way). A wind at exactly
+    right angles counts as not opposing. None when either input is unknown."""
+    if is_flood is None or wind_deg is None:
+        return None
+    stream = flood_sets_deg if is_flood else (flood_sets_deg + 180) % 360
+    blows_to = (wind_deg + 180) % 360
+    diff = abs((blows_to - stream + 180) % 360 - 180)      # 0 … 180
+    return diff > 90
+
+
+def _wvt_level(kts):
+    """Stripe intensity for a wind blowing against the tide: 0 none
+    (< 5 kts), 1 light chop (5–10), 2 heavy chop (10–20), 3 severe (20+).
+    Same 10/20 buckets as the wind arrows elsewhere in the app."""
+    if kts is None or kts < WVT_MIN_KTS:
+        return 0
+    if kts <= WVT_HEAVY_KTS:
+        return 1
+    if kts < 20:
+        return 2
+    return 3
+
+
 def _classify_wind_tide(is_flood, wind_deg, wind_kts, near_slack):
     """Five-state wind-vs-tide readout for Howe Sound (N–S axis: flood sets
     ~N/into the sound, ebb sets ~S/out). Returns (label, status).
@@ -309,13 +361,10 @@ def _classify_wind_tide(is_flood, wind_deg, wind_kts, near_slack):
         return None, None
     if near_slack and wind_kts < 5:
         return "Calm", 'go'
-    from_south = 90 <= wind_deg <= 270      # wind FROM the southerly half → blows ~N
-    if is_flood and from_south:
-        return "Aligned N", 'go'
-    if (not is_flood) and (not from_south):
-        return "Aligned S", 'go'
+    if not _wind_opposes_stream(is_flood, wind_deg, 0):
+        return ("Aligned N" if is_flood else "Aligned S"), 'go'
     # wind opposes the tidal stream → chop
-    if wind_kts <= 10:
+    if wind_kts <= WVT_HEAVY_KTS:
         return "Light chop", 'go'
     return "Heavy chop", 'caution'
 
@@ -492,6 +541,7 @@ def _gather_current_factors():
                 'status': _status(pam_wind, WIND_GO, WIND_CAUTION),
                 'label': f"Pam Rocks: {dtxt}{pam_wind}kts",
                 'value': pam_wind,
+                'deg': pam_deg_now,
                 'page': 'Marine_Forecast',
                 'hide_card': True,
             }
@@ -587,10 +637,82 @@ def _tide_dot_color(height):
     return '#e74c3c'       # red
 
 
-def _analyze_5day_windows(weather_data):
-    """Hourly boating windows (08:00–19:00) for the next 6 days. Box status
-    from wind+rain (OpenWeather is 3-hourly, so nearby hours may match);
-    a per-hour tide dot from the interpolated tide height."""
+@st.cache_data(ttl=1800, show_spinner=False)
+def _fetch_open_meteo_hourly_wind(lats, lons):
+    """Open-Meteo hourly 10 m wind for several points in ONE request.
+    Returns one dict per point: 'YYYY-MM-DDTHH:00' (Vancouver local) →
+    (speed_kts, from_deg, gust_kts). Cached 30 min: Open-Meteo throttles
+    hammering and the app auto-refreshes every 5 min."""
+    r = requests.get(
+        'https://api.open-meteo.com/v1/forecast',
+        params={
+            'latitude': ','.join(str(v) for v in lats),
+            'longitude': ','.join(str(v) for v in lons),
+            'hourly': 'wind_speed_10m,wind_direction_10m,wind_gusts_10m',
+            'wind_speed_unit': 'kn',
+            'timezone': 'America/Vancouver',
+            'forecast_days': 7,
+        },
+        timeout=20,
+    )
+    r.raise_for_status()
+    data = r.json()
+    if isinstance(data, dict):
+        data = [data]
+    out = []
+    for point in data:
+        h = point.get('hourly') or {}
+        series = {}
+        for t, s, d, g in zip(h.get('time', []), h.get('wind_speed_10m', []),
+                              h.get('wind_direction_10m', []), h.get('wind_gusts_10m', [])):
+            if s is None or d is None:
+                continue
+            series[t] = (float(s), float(d), float(g) if g is not None else float(s))
+        out.append(series)
+    return out
+
+
+def _get_area_winds():
+    """Hourly forecast wind per _WVT_AREAS entry (list aligned with it);
+    empty dicts when Open-Meteo is unavailable so the chart still draws."""
+    try:
+        series = _fetch_open_meteo_hourly_wind(
+            tuple(a['lat'] for a in _WVT_AREAS), tuple(a['lon'] for a in _WVT_AREAS))
+        if len(series) == len(_WVT_AREAS):
+            return series
+    except Exception as e:
+        print(f"Go/NoGo Open-Meteo wind error: {e}")
+    return [{} for _ in _WVT_AREAS]
+
+
+def _observed_now_winds(factors):
+    """{area_key: (from_deg, kts)} from the live stations — Pam Rocks for
+    Howe Sound (already gathered), Halibut Bank for the Strait — so the
+    current hour's wind-vs-tide uses what's actually blowing."""
+    out = {}
+    pam = factors.get('pam_wind') or {}
+    if pam.get('deg') is not None and pam.get('value') is not None:
+        out['howe'] = (pam['deg'], pam['value'])
+    try:
+        hb_kts, _, hb_dir = _fetch_buoy_wind_wave('46146')
+        hb_deg = direction_degrees(hb_dir) if hb_dir else None
+        if hb_kts is not None and hb_deg is not None:
+            out['sog'] = (hb_deg, hb_kts)
+    except Exception as e:
+        print(f"Go/NoGo Halibut Bank error: {e}")
+    return out
+
+
+def _analyze_5day_windows(weather_data, now_wind=None):
+    """Hourly boating windows (08:00–19:00) for the next 6 days.
+
+    Per slot: status from wind+rain (OpenWeather West Van, 3-hourly so
+    nearby hours may match), the interpolated Pt Atkinson tide (height +
+    flood/ebb + slack), and a wind-vs-tide check per _WVT_AREAS entry from
+    the Open-Meteo hourly wind there — or the observed wind in `now_wind`
+    ({area_key: (from_deg, kts)}) for the current hour. A Howe Sound wind
+    against the tide above WVT_HEAVY_KTS lifts the slot to at least caution,
+    the same rule as the Wind vs Tide card; the Strait is informational."""
     if not weather_data or not weather_data.hourly_forecast:
         return []
 
@@ -600,6 +722,8 @@ def _analyze_5day_windows(weather_data):
 
     # Tide extremes + interpolation arrays (interp gives per-hour height)
     tide_df, x_ts, y_h = _get_tide_data()
+    area_winds = _get_area_winds()
+    now_wind = now_wind or {}
 
     windows = []
     for day_offset in range(0, 6):
@@ -608,6 +732,7 @@ def _analyze_5day_windows(weather_data):
             target = day.replace(hour=hour)
             if target < now - timedelta(hours=1):
                 continue
+            is_now = day_offset == 0 and hour == now.hour
 
             # Nearest forecast points (3-hourly source → within 2h)
             items = [
@@ -617,10 +742,9 @@ def _analyze_5day_windows(weather_data):
             if not items:
                 continue
 
-            max_wind = max(
-                item['wind'].get('gust', item['wind']['speed']) * 1.94384
-                for item in items
-            )
+            peak = max(items, key=lambda it: it['wind'].get('gust', it['wind']['speed']))
+            max_wind = peak['wind'].get('gust', peak['wind']['speed']) * 1.94384
+            wind_deg = peak['wind'].get('deg')
             total_rain = sum(item.get('rain', {}).get('3h', 0) for item in items)
 
             if max_wind > WIND_CAUTION or total_rain > PRECIP_CAUTION:
@@ -631,19 +755,122 @@ def _analyze_5day_windows(weather_data):
                 status = 'go'
 
             tide_h = _tide_at(x_ts, y_h, target) if x_ts is not None else None
+            is_flood = _flood_at(x_ts, y_h, target) if x_ts is not None else None
+            slack = _near_slack(x_ts, target, WVT_SLACK_MIN) if x_ts is not None else False
+
+            # Wind vs tide per area (observed wind for this hour when we have it)
+            wvt = []
+            key = target.strftime('%Y-%m-%dT%H:00')
+            for area, series in zip(_WVT_AREAS, area_winds):
+                entry = {'key': area['key'], 'short': area['short'], 'name': area['name'],
+                         'pattern': area['pattern'], 'kts': None, 'deg': None,
+                         'gust': None, 'src': None, 'opposes': None, 'level': 0}
+                obs = now_wind.get(area['key']) if is_now else None
+                if obs and obs[0] is not None and obs[1] is not None:
+                    entry.update(deg=float(obs[0]), kts=float(obs[1]), src='observed')
+                elif key in series:
+                    kts, deg, gust = series[key]
+                    entry.update(deg=deg, kts=kts, gust=gust, src='forecast')
+                if entry['deg'] is not None:
+                    entry['opposes'] = _wind_opposes_stream(is_flood, entry['deg'], area['flood_sets'])
+                    if entry['opposes'] and not slack:
+                        entry['level'] = _wvt_level(entry['kts'])
+                wvt.append(entry)
+
+            active = [e for e in wvt if e['level']]
+            if len(active) == 1:
+                pattern = active[0]['pattern']
+            elif active:
+                pattern = 'x'
+            else:
+                pattern = ''
+            # Howe Sound heavy chop is a verdict factor (as on the card)
+            if status == 'go' and any(e['key'] == 'howe' and e['level'] >= 2 for e in wvt):
+                status = 'caution'
 
             windows.append({
                 'day': day.strftime('%a %b %d'),
                 'period': f"{hour:02d}:00",
                 'datetime': target,
+                'is_now': is_now,
                 'status': status,
                 'wind': max_wind,
+                'wind_deg': wind_deg,
                 'rain': total_rain,
                 'tide_h': tide_h,
                 'tide_dot': _tide_dot_color(tide_h),
+                'is_flood': is_flood,
+                'slack': slack,
+                'wvt': wvt,
+                'wvt_level': max((e['level'] for e in wvt), default=0),
+                'wvt_pattern': pattern,
             })
 
     return windows
+
+
+def _tide_arrow(is_flood):
+    """↑ flooding / ↓ ebbing / '' unknown."""
+    if is_flood is None:
+        return ''
+    return '↑' if is_flood else '↓'
+
+
+def _wind_arrow_deg(deg):
+    """Downwind arrow glyph for a FROM bearing in degrees ('' if unknown)."""
+    if deg is None:
+        return ''
+    return direction_arrow(get_wind_direction(deg)) or ''
+
+
+def _wvt_line(e, is_flood, slack):
+    """One area's wind-vs-tide line for hover/details, e.g.
+    'Howe: ↗ SW 12 kts (g 16) — ⚠ against ebb (heavy chop)'."""
+    if e['kts'] is None:
+        return f"{e['short']}: wind n/a"
+    txt = f"{e['short']}: {_wind_arrow_deg(e['deg'])} {get_wind_direction(e['deg'])} {e['kts']:.0f} kts"
+    if e.get('gust') is not None and e['gust'] > e['kts'] + 0.5:
+        txt += f" (g {e['gust']:.0f})"
+    if e['src'] == 'observed':
+        txt += " · observed"
+    stream = 'flood' if is_flood else 'ebb'
+    if e['level']:
+        txt += f" — ⚠ against {stream} ({_WVT_LEVEL_NAME[e['level']]})"
+    elif slack:
+        txt += " · slack"
+    elif e['opposes']:
+        txt += f" · against {stream}, too light to matter"
+    elif e['opposes'] is False:
+        txt += f" · with {stream}"
+    return txt
+
+
+def _wvt_summary(m):
+    """Short '⚠ wind vs tide: …' clause for a window, or '' when clear."""
+    parts = [f"{e['short']} {_WVT_LEVEL_NAME[e['level']]}" for e in m.get('wvt', []) if e['level']]
+    return ("⚠ wind vs tide: " + ", ".join(parts)) if parts else ''
+
+
+def _hover_text(m):
+    """Everything that matters for one hourly slot, as hover HTML."""
+    lines = [f"<b>{m['day']} {m['period']}</b>" + (" · this hour" if m.get('is_now') else "")]
+    lines.append(f"Wind (W Van): {_wind_arrow_deg(m.get('wind_deg'))} {m['wind']:.0f} kts gust")
+    th = m.get('tide_h')
+    if th is not None:
+        if m.get('slack'):
+            stream = 'slack'
+        elif m.get('is_flood') is None:
+            stream = ''
+        else:
+            stream = 'flooding ↑' if m['is_flood'] else 'ebbing ↓'
+        lines.append(f"Tide: {th:.1f} m {stream}".rstrip())
+    else:
+        lines.append("Tide: n/a")
+    for e in m.get('wvt', []):
+        lines.append(_wvt_line(e, m.get('is_flood'), m.get('slack')))
+    if m['rain'] > 0:
+        lines.append(f"Rain: {m['rain']:.1f} mm")
+    return "<br>".join(lines)
 
 
 def _get_overall(factors):
@@ -829,7 +1056,7 @@ def display_gonogo_page(container=None, page_links=None):
 
     # 5-day heatmap chart
     if weather:
-        windows = _analyze_5day_windows(weather)
+        windows = _analyze_5day_windows(weather, now_wind=_observed_now_winds(factors))
         if windows:
             draw.markdown("---")
             draw.markdown("**Weekly Outlook**")
@@ -837,83 +1064,117 @@ def display_gonogo_page(container=None, page_links=None):
 
             with draw.expander("Details"):
                 for w in windows:
-                    detail = f"{w['wind']:.0f}kts"
+                    detail = f"{_wind_arrow_deg(w.get('wind_deg'))} {w['wind']:.0f}kts".strip()
                     if w['rain'] > 0:
                         detail += f", {w['rain']:.1f}mm rain"
                     if w.get('tide_h') is not None:
-                        detail += f", tide {w['tide_h']:.1f}m"
+                        detail += f", tide {w['tide_h']:.1f}m{_tide_arrow(w.get('is_flood'))}"
+                    wvt = _wvt_summary(w)
+                    if wvt:
+                        detail += f" — {wvt}"
                     draw.caption(f"{_ICON[w['status']]} {w['day']} {w['period']} — {detail}")
 
 
-def _draw_weekly_chart(draw, windows):
-    """Heatmap: days x HOURLY slots (08:00–19:00). Cell colour = wind/rain
-    status; a tide-level dot (green/orange/red) sits in each cell."""
+_WVT_STRIPE_SIZE = {0: 8, 1: 5, 2: 9, 3: 14}          # hatch period (px): bigger stripes, stronger wind
+_WVT_STRIPE_SOLIDITY = {0: 0, 1: 0.3, 2: 0.4, 3: 0.5}  # hatch line thickness (fraction of period)
+
+
+def _outlook_figure(windows, periods, dark=False):
+    """Shared Weekly-Outlook grid: days × `periods`, drawn as ONE Bar trace
+    with a bar per cell (heatmap cells can't carry patterns). Cell colour =
+    status; diagonal stripes = wind against tide (`wvt_pattern`: ╱ Howe,
+    ╲ Strait, ✕ both) sized by `wvt_level`; the current hour is outlined.
+    Returns (fig, grid, days) — callers add their own cell annotations."""
     days = []
     seen = set()
     for w in windows:
         if w['day'] not in seen:
             days.append(w['day'])
             seen.add(w['day'])
-
-    periods = [f"{h:02d}:00" for h in _HOURS]   # 12 hourly rows
-
-    # index windows for quick lookup
     grid = {(w['day'], w['period']): w for w in windows}
 
-    z, text = [], []
-    for period in periods:
-        row_z, row_text = [], []
-        for day in days:
-            m = grid.get((day, period))
-            if m:
-                row_z.append(_NUMERIC[m['status']])
-                th = m.get('tide_h')
-                parts = [f"{m['wind']:.0f} kts", f"tide {th:.1f} m" if th is not None else "tide —"]
-                if m['rain'] > 0:
-                    parts.append(f"{m['rain']:.1f} mm")
-                row_text.append("<br>".join(parts))
-            else:
-                row_z.append(None)
-                row_text.append("")
-        z.append(row_z)
-        text.append(row_text)
-
-    colorscale = [
-        [0, '#e74c3c'], [0.25, '#e74c3c'],
-        [0.25, '#f39c12'], [0.75, '#f39c12'],
-        [0.75, '#2ecc71'], [1, '#2ecc71'],
-    ]
-
-    fig = go.Figure(data=go.Heatmap(
-        z=z, x=days, y=periods, text=text,
-        colorscale=colorscale, zmin=0, zmax=1, showscale=False,
-        hovertemplate="<b>%{x} %{y}</b><br>%{text}<extra></extra>",
-        xgap=2, ygap=2,
-    ))
-    fig.update_layout(
-        height=560,
-        margin=dict(l=55, r=20, t=30, b=10),
-        yaxis=dict(autorange='reversed'),
-        xaxis=dict(side='top'),
-        plot_bgcolor='white',
-    )
-
-    # Per-cell: tide dot on top, wind number below.
-    for period in periods:
+    xs, ys, bases, colors, shapes, sizes, solidity, outline, custom = ([] for _ in range(9))
+    for i, period in enumerate(periods):
         for day in days:
             m = grid.get((day, period))
             if not m:
                 continue
-            dot = m.get('tide_dot')
-            if dot:
-                fig.add_annotation(x=day, y=period, text='●', showarrow=False,
-                                   font=dict(color=dot, size=15), yshift=11)
-            fig.add_annotation(x=day, y=period, text=f"<b>{m['wind']:.0f}</b>",
-                               showarrow=False, font=dict(color='white', size=11), yshift=-7)
+            lvl = m.get('wvt_level', 0)
+            xs.append(day)
+            ys.append(0.92)
+            bases.append(i + 0.04)
+            colors.append(_COLOR_MAP[m['status']])
+            shapes.append(m.get('wvt_pattern') or '')
+            sizes.append(_WVT_STRIPE_SIZE.get(lvl, 8))
+            solidity.append(_WVT_STRIPE_SOLIDITY.get(lvl, 0))
+            outline.append(3 if m.get('is_now') else 0)
+            custom.append(_hover_text(m))
 
-    fig.update_traces(texttemplate=None)
+    fig = go.Figure(go.Bar(
+        x=xs, y=ys, base=bases, orientation='v',
+        marker=dict(
+            color=colors,
+            line=dict(color='#6cb3ff' if dark else '#2c7be5', width=outline),
+            # 'overlay' keeps the cell colour underneath and draws the hatch
+            # in an auto-contrasting tone (plotly ignores fgcolor in this mode)
+            pattern=dict(shape=shapes, size=sizes, solidity=solidity, fillmode='overlay'),
+        ),
+        customdata=custom,
+        hovertemplate='%{customdata}<extra></extra>',
+        showlegend=False,
+    ))
+    bg = '#0a0a0a' if dark else 'white'
+    fig.update_layout(
+        barmode='overlay', bargap=0.06, showlegend=False,
+        xaxis=dict(type='category', categoryorder='array', categoryarray=days,
+                   tickvals=days, ticktext=[d.replace(' ', '<br>', 1) for d in days],
+                   tickangle=0, side='top', showgrid=False, fixedrange=True),
+        yaxis=dict(range=[len(periods), 0], tickvals=[i + 0.5 for i in range(len(periods))],
+                   ticktext=periods, showgrid=False, zeroline=False, fixedrange=True),
+        plot_bgcolor=bg, paper_bgcolor=bg,
+        hoverlabel=dict(align='left'),
+    )
+    return fig, grid, days
+
+
+def _draw_weekly_chart(draw, windows):
+    """Days × HOURLY slots (08:00–19:00). Per cell: colour = wind/rain (+ Howe
+    wind-against-tide) status, stripes = wind against tide, top line = tide
+    dot + height + flood/ebb arrow, bottom line = wind arrow + gust (+ 💧)."""
+    periods = [f"{h:02d}:00" for h in _HOURS]   # 12 hourly rows
+    fig, grid, days = _outlook_figure(windows, periods)
+    fig.update_layout(height=580, margin=dict(l=55, r=20, t=48, b=10))
+
+    for i, period in enumerate(periods):
+        for day in days:
+            m = grid.get((day, period))
+            if not m:
+                continue
+            y = i + 0.5
+            # Striped cells get a translucent backing so the text stays readable
+            backing = dict(bgcolor='rgba(0,0,0,0.35)', borderpad=1) if m.get('wvt_level') else {}
+            th = m.get('tide_h')
+            if th is not None:
+                dot = m.get('tide_dot') or '#ffffff'
+                top = (f'<span style="color:{dot}">●</span> '
+                       f'{th:.1f}{_tide_arrow(m.get("is_flood"))}')
+                fig.add_annotation(x=day, y=y, text=top, showarrow=False,
+                                   font=dict(color='white', size=10), yshift=10, **backing)
+            bottom = f"<b>{_wind_arrow_deg(m.get('wind_deg'))}{m['wind']:.0f}</b>"
+            if m['rain'] > PRECIP_GO:
+                bottom += " 💧"
+            fig.add_annotation(x=day, y=y, text=bottom, showarrow=False,
+                               font=dict(color='white', size=11), yshift=-8, **backing)
+
     draw.plotly_chart(fig, width='stretch')
-    draw.caption("Cell colour = wind/rain rule · tide dot: 🟢 > 2.5 m · 🟠 1.5–2.5 m · 🔴 < 1.5 m")
+    draw.caption(
+        "Colour = wind/rain rule; Howe Sound wind against tide > 10 kts → ⚠ caution · "
+        "**Stripes = wind against tide** (bigger stripes = stronger wind): "
+        "╱ Howe Sound (S wind on ebb / N wind on flood) · "
+        "╲ Strait of Georgia S of Nanaimo (SE wind on ebb / NW wind on flood) · ✕ both · "
+        "tide dot 🟢 > 2.5 m · 🟠 1.5–2.5 m · 🔴 < 1.5 m · ↑ flood ↓ ebb · "
+        "blue outline = this hour (observed wind) · hover a cell for the full picture"
+    )
 
 
 # ──────────────────────────────────────────────
@@ -1069,7 +1330,7 @@ def display_kiosk_page(home_page=None):
 
     # Weekly heatmap — dark themed
     if weather:
-        windows = _analyze_5day_windows(weather)
+        windows = _analyze_5day_windows(weather, now_wind=_observed_now_winds(factors))
         if windows:
             _draw_kiosk_chart(windows)
 
@@ -1142,70 +1403,37 @@ def _draw_kiosk_snapshot(weather):
 
 
 def _draw_kiosk_chart(windows):
-    """Dark-themed heatmap for kiosk display."""
-    days = []
-    seen = set()
-    for w in windows:
-        if w['day'] not in seen:
-            days.append(w['day'])
-            seen.add(w['day'])
-
+    """Dark-themed 3-slot grid for the kiosk; same stripes as the main chart."""
     periods = ['08:00', '12:00', '16:00']
-
-    z = []
-    for period in periods:
-        row_z = []
-        for day in days:
-            match = next((w for w in windows if w['day'] == day and w['period'] == period), None)
-            row_z.append(_NUMERIC[match['status']] if match else None)
-        z.append(row_z)
-
-    colorscale = [
-        [0, '#e74c3c'],
-        [0.25, '#e74c3c'],
-        [0.25, '#f39c12'],
-        [0.75, '#f39c12'],
-        [0.75, '#2ecc71'],
-        [1, '#2ecc71'],
-    ]
-
-    fig = go.Figure(data=go.Heatmap(
-        z=z,
-        x=days,
-        y=periods,
-        colorscale=colorscale,
-        zmin=0, zmax=1,
-        showscale=False,
-        xgap=4, ygap=4,
-        hoverinfo='skip',
-    ))
-
+    fig, grid, days = _outlook_figure(windows, periods, dark=True)
     fig.update_layout(
-        height=300,
-        margin=dict(l=70, r=20, t=10, b=10),
-        yaxis=dict(autorange='reversed'),
-        xaxis=dict(side='top'),
-        plot_bgcolor='#0a0a0a',
-        paper_bgcolor='#0a0a0a',
+        height=320,
+        margin=dict(l=70, r=20, t=44, b=10),
         font=dict(color='#e0e0e0', size=16),
     )
+    fig.update_traces(hovertemplate=None, hoverinfo='skip')
 
-    # Annotations — wind + tide times, large
+    # Annotations — wind + tide, large
     for i, period in enumerate(periods):
-        for j, day in enumerate(days):
-            match = next((w for w in windows if w['day'] == day and w['period'] == period), None)
-            if match:
-                label = f"<b>{match['wind']:.0f}</b>kts"
-                th = match.get('tide_h')
-                if th is not None:
-                    dot = match.get('tide_dot') or '#e0e0e0'
-                    label += f'<br><span style="color:{dot}">●</span> {th:.1f}m'
-                fig.add_annotation(
-                    x=day, y=period,
-                    text=label,
-                    showarrow=False,
-                    font=dict(color='white', size=16),
-                )
+        for day in days:
+            m = grid.get((day, period))
+            if not m:
+                continue
+            label = f"<b>{_wind_arrow_deg(m.get('wind_deg'))}{m['wind']:.0f}</b>kts"
+            th = m.get('tide_h')
+            if th is not None:
+                dot = m.get('tide_dot') or '#e0e0e0'
+                label += f'<br><span style="color:{dot}">●</span> {th:.1f}m{_tide_arrow(m.get("is_flood"))}'
+            backing = {}
+            if m.get('wvt_level'):
+                label += '<br>⚠ wind vs tide'
+                backing = dict(bgcolor='rgba(0,0,0,0.35)', borderpad=2)
+            fig.add_annotation(
+                x=day, y=i + 0.5,
+                text=label,
+                showarrow=False,
+                font=dict(color='white', size=16),
+                **backing,
+            )
 
-    fig.update_traces(texttemplate=None)
     st.plotly_chart(fig, width='stretch')

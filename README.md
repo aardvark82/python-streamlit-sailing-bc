@@ -16,6 +16,9 @@ https://python-app-sailing-bc-nckqtfynerhhf26ujtt5u6.streamlit.app/
 ## Live Buoy data from government of Canada at Halibut Bank (parsed with BeautifulSoup4)
 https://www.weather.gc.ca/marine/weatherConditions-currentConditions_e.html?mapID=02&siteID=14305&stationID=46146
 
+## hourly wind forecast from Open-Meteo (free, no key) — Go/No-Go wind-vs-tide per area
+https://api.open-meteo.com/v1/forecast?latitude=49.49,49.34&longitude=-123.30,-123.73&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m&wind_speed_unit=kn&timezone=America/Vancouver
+
 ## live weather API from openweathermap.org
 https://home.openweathermap.org/
 - 1000 calls/day for free

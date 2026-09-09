@@ -53,6 +53,7 @@ VERSION file is auto-bumped on each meaningful commit (currently 126).
 
 ## Recently fixed (last 20 commits)
 
+- v237 — Go/No-Go Weekly Outlook: wind-vs-tide predictor. Hourly Open-Meteo wind at Pam Rocks (Howe Sound, flood sets N) and Halibut Bank (Strait S of Nanaimo, flood sets NW) vs the interpolated Pt Atkinson flood/ebb; opposing wind ≥5 kts hatches the cell (╱ Howe, ╲ Strait, ✕ both; bigger hatch = stronger wind), Howe >10 kts lifts the slot to caution. Grid is now one `go.Bar` per cell (`_outlook_figure`, shared with kiosk) since heatmaps can't carry patterns; cells show tide dot+height+↑↓ and wind arrow+gust; hover has the full picture. Current hour uses observed Pam Rocks / Halibut Bank wind.
 - v126 — Tides Cloud bug: hardcoded IWLS station id was wrong (`5cebf1df…` → real id `5cebf1de3d0f4a073c4bb94c`). Verified against `/stations?code=07795`.
 - v125 — Stormglass + kvdb deleted entirely.
 - v124 — Jericho CSV: ragged-row tolerance (`engine='python'`, `on_bad_lines='skip'`, explicit `names=`).
