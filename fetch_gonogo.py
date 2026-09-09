@@ -12,7 +12,7 @@ from bs4 import BeautifulSoup
 
 from utils import cached_fetch_url, cached_fetch_url_live, cached_fetch_url_buoy
 from fetch_weather import fetch_from_open_weather, get_wind_direction
-from wind_utils import direction_arrow, direction_degrees
+from wind_utils import direction_arrow, direction_degrees, _color_for_speed
 from fetch_forecast import (
     fetch_beautifulsoup_marine_forecast_for_url,
     openAIFetchForecastForURL,
@@ -1079,16 +1079,30 @@ _WVT_STRIPE_SIZE = {0: 8, 1: 5, 2: 9, 3: 14}          # hatch period (px): bigge
 _WVT_STRIPE_SOLIDITY = {0: 0, 1: 0.3, 2: 0.4, 3: 0.5}  # hatch line thickness (fraction of period)
 
 
-_TIDE_BAND_PX = 20   # tide-level band on the left edge of every cell
+_BAND_PX = 20        # side bands: left = Howe / Halibut wind, right = rain
+_BAND_GREY = '#7f8c8d'
 
 
-def _outlook_figure(windows, periods, dark=False):
+def _rain_color(mm):
+    """Rain band: green 0 · orange 0–2 mm · red > 2 mm."""
+    if mm is None:
+        return _BAND_GREY
+    if mm < 0.05:
+        return '#27ae60'
+    if mm <= PRECIP_CAUTION:
+        return '#f39c12'
+    return '#e74c3c'
+
+
+def _outlook_figure(windows, periods, dark=False, band_font=11):
     """Shared Weekly-Outlook grid: days × `periods`, drawn as ONE Bar trace
     with a bar per cell (heatmap cells can't carry patterns). Cell colour =
     status; diagonal stripes = wind against tide (`wvt_pattern`: ╱ Howe,
-    ╲ Strait, ✕ both) sized by `wvt_level`; a _TIDE_BAND_PX-wide band on the
-    left edge carries the tide-level colour; the current hour is outlined.
-    Returns (fig, grid, days) — callers add their own cell annotations."""
+    ╲ Strait, ✕ both) sized by `wvt_level`. Fixed _BAND_PX-wide side bands:
+    left = Howe Sound wind (top half) and Halibut Bank wind (bottom half),
+    coloured by speed with the knots written on them; right = rain (green
+    0 · orange ≤ 2 mm · red > 2 mm). The current hour is outlined.
+    Returns (fig, grid, days) — callers add the centre annotation."""
     days = []
     seen = set()
     for w in windows:
@@ -1138,22 +1152,44 @@ def _outlook_figure(windows, periods, dark=False):
         hoverlabel=dict(align='left'),
     )
 
-    # Tide-level band: a fixed-pixel-width rectangle anchored on each bar's
-    # left edge (category j spans j-0.47 … j+0.47 with bargap 0.06). The
-    # current hour's outline is a shape too, so it sits above the band.
+    # Side bands are fixed-pixel-width rectangles anchored on each bar's
+    # edges (category j spans j-0.47 … j+0.47 with bargap 0.06); their values
+    # are annotations nudged into the band with xshift. The current hour's
+    # outline is a shape too, so it sits above the bands.
     half = 0.5 * (1 - 0.06)
+    y_top, y_bot = 0.04, 0.96
+    y_mid = (y_top + y_bot) / 2
+
+    def band(j, i, side, y0, y1, color):
+        anchor = j - half if side == 'left' else j + half
+        x0, x1 = (0, _BAND_PX) if side == 'left' else (-_BAND_PX, 0)
+        fig.add_shape(type='rect', xref='x', yref='y', layer='above',
+                      xsizemode='pixel', xanchor=anchor, x0=x0, x1=x1,
+                      y0=i + y0, y1=i + y1, fillcolor=color, line=dict(width=0))
+
+    def band_text(j, i, side, y, text, size):
+        fig.add_annotation(x=j - half if side == 'left' else j + half, y=i + y,
+                           xshift=_BAND_PX / 2 if side == 'left' else -_BAND_PX / 2,
+                           text=text, showarrow=False,
+                           font=dict(color='white', size=size))
+
     for i, period in enumerate(periods):
         for j, day in enumerate(days):
             m = grid.get((day, period))
             if not m:
                 continue
-            if m.get('tide_dot'):
-                fig.add_shape(
-                    type='rect', xref='x', yref='y', layer='above',
-                    xsizemode='pixel', xanchor=j - half, x0=0, x1=_TIDE_BAND_PX,
-                    y0=i + 0.04, y1=i + 0.96,
-                    fillcolor=m['tide_dot'], line=dict(width=0),
-                )
+            # Left band: Howe Sound wind (top), Halibut Bank wind (bottom)
+            wvt = {e['key']: e for e in m.get('wvt', [])}
+            for key, (y0, y1) in (('howe', (y_top, y_mid)), ('sog', (y_mid, y_bot))):
+                kts = (wvt.get(key) or {}).get('kts')
+                band(j, i, 'left', y0, y1, _color_for_speed(kts) if kts is not None else _BAND_GREY)
+                if kts is not None:
+                    band_text(j, i, 'left', (y0 + y1) / 2, f"<b>{kts:.0f}</b>", band_font)
+            # Right band: rain
+            rain = m.get('rain') or 0
+            band(j, i, 'right', y_top, y_bot, _rain_color(rain))
+            if rain >= 0.05:
+                band_text(j, i, 'right', y_mid, f"{rain:.0f}" if rain >= 10 else f"{rain:.1f}", band_font - 1)
             if m.get('is_now'):
                 fig.add_shape(
                     type='rect', xref='x', yref='y', layer='above',
@@ -1163,42 +1199,42 @@ def _outlook_figure(windows, periods, dark=False):
     return fig, grid, days
 
 
+def _tide_pill(fig, x, y, m, size):
+    """Centre label: tide height + flood/ebb arrow on one line, in a pill
+    filled with the tide-level colour (green > 2.5 m · orange · red < 1.5 m)
+    so it reads on any cell colour or stripe."""
+    th = m.get('tide_h')
+    text = f"<b>{th:.1f}{_tide_arrow(m.get('is_flood'))}</b>" if th is not None else "—"
+    fig.add_annotation(
+        x=x, y=y, text=text, showarrow=False,
+        font=dict(color='white', size=size),
+        bgcolor=m.get('tide_dot') or _BAND_GREY,
+        bordercolor='rgba(0,0,0,0.5)', borderwidth=1, borderpad=3,
+    )
+
+
 def _draw_weekly_chart(draw, windows):
     """Days × HOURLY slots (08:00–19:00). Per cell: colour = wind/rain (+ Howe
-    wind-against-tide) status, stripes = wind against tide, top line = tide
-    dot + height + flood/ebb arrow, bottom line = wind arrow + gust (+ 💧)."""
+    wind-against-tide) status, stripes = wind against tide, left bands =
+    Howe Sound / Halibut Bank wind (kts), centre = tide pill, right band = rain."""
     periods = [f"{h:02d}:00" for h in _HOURS]   # 12 hourly rows
     fig, grid, days = _outlook_figure(windows, periods)
     fig.update_layout(height=580, margin=dict(l=55, r=20, t=48, b=10))
-
     for i, period in enumerate(periods):
         for day in days:
             m = grid.get((day, period))
-            if not m:
-                continue
-            y = i + 0.5
-            # Striped cells get a translucent backing so the text stays readable
-            backing = dict(bgcolor='rgba(0,0,0,0.35)', borderpad=1) if m.get('wvt_level') else {}
-            th = m.get('tide_h')
-            if th is not None:
-                top = f'{th:.1f}{_tide_arrow(m.get("is_flood"))}'
-                fig.add_annotation(x=day, y=y, text=top, showarrow=False,
-                                   font=dict(color='white', size=10),
-                                   xshift=_TIDE_BAND_PX // 2, yshift=10, **backing)
-            bottom = f"<b>{_wind_arrow_deg(m.get('wind_deg'))}{m['wind']:.0f}</b>"
-            if m['rain'] > PRECIP_GO:
-                bottom += " 💧"
-            fig.add_annotation(x=day, y=y, text=bottom, showarrow=False,
-                               font=dict(color='white', size=11),
-                               xshift=_TIDE_BAND_PX // 2, yshift=-8, **backing)
+            if m:
+                _tide_pill(fig, day, i + 0.5, m, size=20)
 
     draw.plotly_chart(fig, width='stretch')
     draw.caption(
-        "Colour = wind/rain rule; Howe Sound wind against tide > 10 kts → ⚠ caution · "
+        "Cell colour = wind/rain rule; Howe Sound wind against tide > 10 kts → ⚠ caution · "
         "**Stripes = wind against tide** (bigger stripes = stronger wind): "
         "╱ Howe Sound (S wind on ebb / N wind on flood) · "
         "╲ Strait of Georgia S of Nanaimo (SE wind on ebb / NW wind on flood) · ✕ both · "
-        "left band = tide level 🟢 > 2.5 m · 🟠 1.5–2.5 m · 🔴 < 1.5 m · ↑ flood ↓ ebb · "
+        "left bands = wind kts, Howe Sound (top) / Halibut Bank (bottom): 🟢 < 10 · 🟠 10–20 · 🔴 20+ · "
+        "centre = tide 🟢 > 2.5 m · 🟠 1.5–2.5 m · 🔴 < 1.5 m · ↑ flood ↓ ebb · "
+        "right band = rain 🟢 0 · 🟠 ≤ 2 mm · 🔴 > 2 mm · "
         "blue outline = this hour (observed wind) · hover a cell for the full picture"
     )
 
@@ -1431,7 +1467,7 @@ def _draw_kiosk_snapshot(weather):
 def _draw_kiosk_chart(windows):
     """Dark-themed 3-slot grid for the kiosk; same stripes as the main chart."""
     periods = ['08:00', '12:00', '16:00']
-    fig, grid, days = _outlook_figure(windows, periods, dark=True)
+    fig, grid, days = _outlook_figure(windows, periods, dark=True, band_font=14)
     fig.update_layout(
         height=320,
         margin=dict(l=70, r=20, t=44, b=10),
@@ -1439,27 +1475,16 @@ def _draw_kiosk_chart(windows):
     )
     fig.update_traces(hovertemplate=None, hoverinfo='skip')
 
-    # Annotations — wind + tide, large
+    # Centre: big tide pill, with a wind-vs-tide flag under it when striped
     for i, period in enumerate(periods):
         for day in days:
             m = grid.get((day, period))
             if not m:
                 continue
-            label = f"<b>{_wind_arrow_deg(m.get('wind_deg'))}{m['wind']:.0f}</b>kts"
-            th = m.get('tide_h')
-            if th is not None:
-                label += f'<br>{th:.1f}m{_tide_arrow(m.get("is_flood"))}'
-            backing = {}
+            _tide_pill(fig, day, i + 0.5, m, size=26)
             if m.get('wvt_level'):
-                label += '<br>⚠ wind vs tide'
-                backing = dict(bgcolor='rgba(0,0,0,0.35)', borderpad=2)
-            fig.add_annotation(
-                x=day, y=i + 0.5,
-                text=label,
-                showarrow=False,
-                font=dict(color='white', size=16),
-                xshift=_TIDE_BAND_PX // 2,
-                **backing,
-            )
+                fig.add_annotation(x=day, y=i + 0.5, yshift=-34, text='⚠ wind vs tide',
+                                   showarrow=False, font=dict(color='white', size=14),
+                                   bgcolor='rgba(0,0,0,0.35)', borderpad=2)
 
     st.plotly_chart(fig, width='stretch')

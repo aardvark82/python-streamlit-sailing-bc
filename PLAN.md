@@ -53,6 +53,7 @@ VERSION file is auto-bumped on each meaningful commit (currently 126).
 
 ## Recently fixed (last 20 commits)
 
+- v239 — Weekly Outlook cells: one-line tide pill (20 px font, filled with the tide-level colour), left 20 px band split Howe Sound (top) / Halibut Bank (bottom) wind coloured by `_color_for_speed` with the knots on it, right 20 px band = rain (green 0 / orange ≤ 2 mm / red > 2 mm) with the mm on it. W-Van gust number left the cell (still in hover). Bands are pixel-sized so the grid is desktop-first; on a phone the 40 px of bands eat most of a ~50 px cell.
 - v238 — Weekly Outlook: tide-level dot replaced by a 20 px colour band on the left edge of every cell (pixel-sized `add_shape` anchored on the bar's left edge); the this-hour outline is a shape above it.
 - v237 — Go/No-Go Weekly Outlook: wind-vs-tide predictor. Hourly Open-Meteo wind at Pam Rocks (Howe Sound, flood sets N) and Halibut Bank (Strait S of Nanaimo, flood sets NW) vs the interpolated Pt Atkinson flood/ebb; opposing wind ≥5 kts hatches the cell (╱ Howe, ╲ Strait, ✕ both; bigger hatch = stronger wind), Howe >10 kts lifts the slot to caution. Grid is now one `go.Bar` per cell (`_outlook_figure`, shared with kiosk) since heatmaps can't carry patterns; cells show tide dot+height+↑↓ and wind arrow+gust; hover has the full picture. Current hour uses observed Pam Rocks / Halibut Bank wind.
 - v126 — Tides Cloud bug: hardcoded IWLS station id was wrong (`5cebf1df…` → real id `5cebf1de3d0f4a073c4bb94c`). Verified against `/stations?code=07795`.
