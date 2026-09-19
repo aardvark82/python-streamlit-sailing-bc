@@ -21,6 +21,10 @@ services:
       - .env
     environment:
       FETCH_INTERVAL_MIN: "60"
+      # healthspace.ca (Lions Bay / Bowen Island water quality) has served an
+      # EXPIRED TLS cert since 2026-08-24 — skip verification for that host
+      # only. Set to "0" once they renew. Public, read-only data.
+      WQ_HEALTHSPACE_INSECURE_TLS: "1"
     # NOTE: Ollama now runs as its OWN Coolify resource (Ollama + Open WebUI),
     # not as a service here. Reach it over Coolify's predefined network by
     # setting OLLAMA_URL in .env to the ollama container's network address,

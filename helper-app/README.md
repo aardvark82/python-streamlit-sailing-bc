@@ -36,6 +36,38 @@ the UI is instant regardless of CF state.
   - **Settings** — OpenAI key, CF credential test, KV rate-limit panel
     with projections, OpenAI usage log, 3-month cleanup
 
+## Beach water quality (VCH)
+
+`backend/water_quality.py` polls Vancouver Coastal Health every 6 h and
+accumulates every sample in SQLite (`wq_samples`). VCH publishes only the
+**latest** sample per station — there is no public history for the Metro
+Vancouver beaches — so the 2-year graphs fill in from the first
+collection. Sampling is weekly, May–September, plus next-day resamples
+after any result ≥ 235 MPN/100 mL.
+
+- **Sources**: Route 1/2/3 PDFs (E. coli + salinity + temperature, ~85
+  stations), Trout Lake PDF (E. coli only), the geometric-means PDF
+  (VCH's official 30-day geomean), and HealthSpace for Lions Bay / Bowen
+  Island (E. coli only, but with full history back to 2014). Every
+  distinct PDF is archived to `/data/wq_pdfs/` for re-parsing.
+- **HealthSpace TLS**: healthspace.ca has served an *expired* certificate
+  since 2026-08-24. That source is skipped (with a warning on the page)
+  unless `WQ_HEALTHSPACE_INSECURE_TLS=1`.
+- **Enrichment** per sample: rain in the prior 24/48/72 h (Open-Meteo),
+  Pt Atkinson tide height + direction at sample time (DFO IWLS).
+- **Cruise ships**: portvancouver.com sits behind a bot challenge, so
+  calls are imported as CSV (`date,ship,arrival,departure,berth`) from
+  Water Quality → Sources. `backend/seed/cruise_calls.csv` seeds the
+  remainder of the 2026 season.
+- **Spike flag**: latest reading ≥ 235, or ≥ 3× the station's trailing
+  median (last 8 samples) and ≥ 50.
+- **UI**: Water Quality sidebar item — one row per beach (worst station),
+  ★ to pin to the top (stored server-side), click to expand for the
+  per-station table, 2-year chart with overlays, and CSV export.
+- **API** (CORS-open): `/api/v1/water-quality/latest`,
+  `/api/v1/water-quality/history?beach=<key>&days=730`,
+  `/api/v1/water-quality/export.csv[?beach=<key>&days=730]`.
+
 ## Run with Docker
 
 ```bash

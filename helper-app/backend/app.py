@@ -15,13 +15,15 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory
 from apscheduler.schedulers.background import BackgroundScheduler
 
+from . import water_quality
 from . import (ai_log, ai_provider, alexa, cleanup, db, forecast,
                   healthcheck, openai_log, reconcile, settings, tides, usage, wave_model)
 from .buoy_fetcher import BUOYS, BUOY_BY_ID, fetch_buoy
@@ -579,6 +581,63 @@ def api_cleanup_old():
     return jsonify(result)
 
 
+# ── Beach water quality (VCH) ──────────────────────────────────────────
+
+@app.route("/api/v1/water-quality/latest")
+def api_wq_latest():
+    return jsonify(water_quality.latest())
+
+
+@app.route("/api/v1/water-quality/history")
+def api_wq_history():
+    beach = request.args.get("beach", "")
+    if not beach:
+        return jsonify(error="beach is required (a beach key from /latest)"), 400
+    days = min(int(request.args.get("days", 730)), 5000)
+    return jsonify(water_quality.history(beach, days))
+
+
+@app.route("/api/v1/water-quality/export.csv")
+def api_wq_export():
+    beach = request.args.get("beach") or None
+    days = min(int(request.args.get("days", 730)), 5000)
+    name = re.sub(r"[^a-z0-9]+", "-", (beach or "all-beaches").lower()).strip("-")
+    return Response(water_quality.export_csv(beach, days), mimetype="text/csv", headers={
+        "Content-Disposition": f'attachment; filename="water-quality-{name}.csv"'})
+
+
+@app.route("/api/wq/star", methods=["POST"])
+def api_wq_star():
+    body = request.get_json(silent=True) or {}
+    if not body.get("beach"):
+        return jsonify(error="beach is required"), 400
+    water_quality.set_star(body["beach"], bool(body.get("starred")))
+    return jsonify(ok=True)
+
+
+@app.route("/api/wq/status")
+def api_wq_status():
+    return jsonify(water_quality.status())
+
+
+@app.route("/api/wq/fetch_now", methods=["POST"])
+def api_wq_fetch_now():
+    threading.Thread(target=water_quality.run_cycle, kwargs={"force_healthspace": True},
+                     daemon=True).start()
+    return jsonify(started=True)
+
+
+@app.route("/api/wq/cruise", methods=["GET", "POST"])
+def api_wq_cruise():
+    if request.method == "POST":
+        body = request.get_json(silent=True) or {}
+        text = body.get("csv") or request.get_data(as_text=True)
+        return jsonify(water_quality.import_cruise_csv(text, body.get("source", "import")))
+    today = datetime.now(VAN_TZ).date()
+    start = request.args.get("from", today.replace(month=1, day=1).isoformat())
+    return jsonify(water_quality.cruise_calls(start, request.args.get("to", "9999-12-31")))
+
+
 @app.route("/api/health")
 def api_health():
     with _cycle_lock:
@@ -599,6 +658,11 @@ def start_scheduler():
     _scheduler.add_job(run_fetch_cycle, "interval", minutes=interval_min,
                        next_run_time=datetime.now(VAN_TZ), id="hourly_fetch",
                        max_instances=1, coalesce=True)
+    # VCH posts weekly (Thu/Fri afternoons) plus next-day resamples; every
+    # 6 h catches both. Unchanged PDFs are skipped by content hash.
+    _scheduler.add_job(water_quality.run_cycle, "interval", hours=6,
+                       next_run_time=datetime.now(VAN_TZ) + timedelta(seconds=45),
+                       id="water_quality", max_instances=1, coalesce=True)
     _scheduler.start()
     log.info("Scheduler started — every %d min", interval_min)
 

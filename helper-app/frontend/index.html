@@ -102,6 +102,18 @@
       100% { left: 100%; }
     }
     .muted { color: #64748b; font-size: 0.85rem; }
+    /* Water quality */
+    .wq-row { cursor: pointer; }
+    .wq-row:hover td, .wq-row.open td { background: #f1f5f9; }
+    .wq-star { background: none; border: none; cursor: pointer; font-size: 1.15rem; color: #94a3b8; padding: 0 0.2rem; }
+    .wq-star.on { color: #f59e0b; }
+    .wq-btn { display: inline-block; padding: 0.4rem 0.8rem; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff;
+              color: #0f172a; font-size: 0.85rem; cursor: pointer; text-decoration: none; }
+    .wq-btn:hover { background: #f1f5f9; }
+    .wq-btn:disabled { opacity: 0.5; cursor: default; }
+    .wq-warn { border: 1px solid #fed7aa; background: #fff7ed; padding: 0.7rem 1rem; font-size: 0.85rem; }
+    .wq-detail { padding: 0.4rem 0.2rem; }
+    @media (max-width: 768px) { .wq-table { display: block; overflow-x: auto; white-space: nowrap; } }
     .row-flex { display: flex; gap: 0.5rem; align-items: center; }
   </style>
 </head>
@@ -243,6 +255,7 @@
             <button className={`nav-btn ${view === 'trends' ? 'active' : ''}`} onClick={() => setView('trends')}>Trends</button>
             <button className={`nav-btn ${view === 'annualtides' ? 'active' : ''}`} onClick={() => setView('annualtides')}>Annual Tides</button>
             <button className={`nav-btn ${view === 'forecast' ? 'active' : ''}`} onClick={() => setView('forecast')}>Marine Forecast</button>
+            <button className={`nav-btn ${view === 'waterquality' ? 'active' : ''}`} onClick={() => setView('waterquality')}>Water Quality</button>
             <button className={`nav-btn ${view === 'wave' ? 'active' : ''}`} onClick={() => setView('wave')}>Wave Model</button>
             <button className={`nav-btn ${view === 'alexa' ? 'active' : ''}`} onClick={() => setView('alexa')}>Alexa</button>
             <button className={`nav-btn ${view === 'api' ? 'active' : ''}`} onClick={() => setView('api')}>API</button>
@@ -252,7 +265,7 @@
             <button className={`nav-btn ${view === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')}>Settings</button>
           </div>
           <div className="main">
-            {view !== 'settings' && view !== 'trends' && view !== 'reconcile' && view !== 'wave' && view !== 'alexa' && view !== 'forecast' && view !== 'api' && view !== 'annualtides' && (
+            {view !== 'settings' && view !== 'trends' && view !== 'reconcile' && view !== 'wave' && view !== 'alexa' && view !== 'forecast' && view !== 'api' && view !== 'annualtides' && view !== 'waterquality' && (
               <React.Fragment>
                 <CurrentReadings />
                 <div className="location-tabs">
@@ -269,6 +282,7 @@
               {view === 'trends' && <TrendsView locations={locations} />}
               {view === 'annualtides' && <AnnualTidesView />}
               {view === 'forecast' && <ForecastView />}
+              {view === 'waterquality' && <WaterQualityView />}
               {view === 'wave' && <WaveModelView />}
               {view === 'alexa' && <AlexaView />}
               {view === 'api' && <APIView locations={locations} />}
@@ -548,6 +562,246 @@
             Averaged over all readings in the {days}-day window. 🟢 = calmest period.
             Colour: green &lt;10, amber 10-15, red ≥15 kts.
           </p>
+        </div>
+      );
+    }
+
+    // ── Beach water quality (VCH) ─────────────────────────────────────
+    function ecoliBadge(raw, num, limits) {
+      if (num == null) return <span className="muted">—</span>;
+      const cls = num >= limits.single ? 'badge-red' : num >= limits.gmean ? 'badge-orange' : 'badge-green';
+      return <span className={`badge ${cls}`}>{String(raw).replace(/^LT?/, '<').replace(/^GT?/, '>')}</span>;
+    }
+
+    const WQ_OVERLAYS = [
+      ['saltemp', 'Salinity + temp'], ['rain', 'Rain before sample'],
+      ['cruise', 'Cruise ships / day'], ['tide', 'Tide at sample'],
+    ];
+
+    function WaterQualityDetail({ beach, limits }) {
+      const [hist, setHist] = useState(null);
+      const [days, setDays] = useState(730);
+      const [overlay, setOverlay] = useState(beach.salinity_ppt != null ? 'saltemp' : 'rain');
+      const ref = useRef(null);
+
+      useEffect(() => {
+        setHist(null);
+        fetch(`/api/v1/water-quality/history?beach=${encodeURIComponent(beach.key)}&days=${days}`)
+          .then(r => r.json()).then(setHist);
+      }, [beach.key, days]);
+
+      useEffect(() => {
+        if (!hist || !ref.current) return;
+        const byStation = {};
+        hist.samples.forEach(s => { (byStation[s.station_id] = byStation[s.station_id] || []).push(s); });
+        // Sampling stops October–April: break the line instead of bridging the winter
+        const withGaps = (rows) => rows.flatMap((r, i) =>
+          i && (new Date(r.sampled_at) - new Date(rows[i - 1].sampled_at)) > 45 * 86400000
+            ? [{ sampled_at: rows[i - 1].sampled_at, ecoli_num: null, ecoli_raw: '' }, r] : [r]);
+        const traces = Object.entries(byStation).map(([sid, raw]) => [sid, withGaps(raw)]).map(([sid, rows]) => ({
+          x: rows.map(r => r.sampled_at), y: rows.map(r => r.ecoli_num), connectgaps: false,
+          text: rows.map(r => `${r.ecoli_raw} MPN` + (r.rain_72h != null ? ` · rain 72h ${r.rain_72h} mm` : '')
+                              + (r.tide_m != null ? ` · tide ${r.tide_m} m ${r.tide_dir}` : '')),
+          hovertemplate: '%{x|%b %d %Y %H:%M}<br>%{text}<extra>' + rows[0].station_label + '</extra>',
+          type: 'scatter', mode: 'lines+markers', name: rows[0].station_label + (rows[0].is_reference ? ' (ref)' : ''),
+          line: { width: 1, dash: rows[0].is_reference ? 'dot' : 'solid' }, marker: { size: 5 },
+        }));
+        if (hist.vch_gmean.length) {
+          traces.push({ x: hist.vch_gmean.map(g => g.calculated_on), y: hist.vch_gmean.map(g => g.value),
+                        type: 'scatter', mode: 'lines+markers', name: 'VCH 30-day geomean',
+                        line: { color: '#0f172a', width: 2.5 }, marker: { size: 5 } });
+        }
+
+        // Lower panel — one point per sampling day (beach mean) keeps it readable
+        const daily = {};
+        hist.samples.forEach(s => { (daily[s.sampled_at.slice(0, 10)] = daily[s.sampled_at.slice(0, 10)] || []).push(s); });
+        const dx = Object.keys(daily).sort();
+        const avg = (k) => dx.map(d => {
+          const v = daily[d].map(s => s[k]).filter(x => x != null);
+          return v.length ? +(v.reduce((a, b) => a + b, 0) / v.length).toFixed(2) : null;
+        });
+        let y2title = '';
+        if (overlay === 'saltemp') {
+          y2title = 'PPT / °C';
+          traces.push({ x: dx, y: avg('salinity_ppt'), yaxis: 'y2', type: 'scatter', mode: 'lines+markers',
+                        name: 'Salinity (PPT)', line: { color: '#0ea5e9' }, marker: { size: 4 } });
+          traces.push({ x: dx, y: avg('temp_c'), yaxis: 'y2', type: 'scatter', mode: 'lines+markers',
+                        name: 'Water temp (°C)', line: { color: '#f97316' }, marker: { size: 4 } });
+        } else if (overlay === 'rain') {
+          y2title = 'mm';
+          [['rain_72h', 'Rain 72 h', '#bfdbfe'], ['rain_48h', 'Rain 48 h', '#60a5fa'], ['rain_24h', 'Rain 24 h', '#1d4ed8']]
+            .forEach(([k, name, color]) => traces.push({ x: dx, y: avg(k), yaxis: 'y2', type: 'bar', name,
+                                                         marker: { color }, width: 86400000 * 2 }));
+        } else if (overlay === 'cruise') {
+          y2title = 'ships at Canada Place';
+          const n = {};
+          hist.cruise_calls.forEach(c => { n[c.date] = (n[c.date] || 0) + 1; });
+          const cx = Object.keys(n).sort();
+          traces.push({ x: cx, y: cx.map(d => n[d]), yaxis: 'y2', type: 'bar', name: 'Cruise ships',
+                        marker: { color: '#a78bfa' },
+                        text: cx.map(d => hist.cruise_calls.filter(c => c.date === d).map(c => c.ship).join(', ')),
+                        hovertemplate: '%{x|%b %d}: %{y} — %{text}<extra></extra>', textposition: 'none' });
+        } else {
+          y2title = 'm (Pt Atkinson)';
+          traces.push({ x: dx, y: avg('tide_m'), yaxis: 'y2', type: 'scatter', mode: 'markers',
+                        name: 'Tide at sample time', marker: { color: '#0d9488', size: 7 } });
+        }
+
+        const line = (y, color, label, pos) => ({ type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: y, y1: y,
+                                                  line: { color, width: 1, dash: 'dash' },
+                                                  label: { text: label, textposition: pos, font: { size: 10, color } } });
+        Plotly.newPlot(ref.current, traces, {
+          height: 520, margin: { l: 60, r: 20, t: 10, b: 40 }, barmode: 'overlay',
+          yaxis: { type: 'log', title: 'E. coli MPN/100 mL', domain: [0.38, 1], range: [0.6, 4.6],
+                   tickvals: [5, 10, 100, 1000, 10000], ticktext: ['5', '10', '100', '1k', '10k'] },
+          yaxis2: { title: y2title, domain: [0, 0.28], rangemode: 'tozero' },
+          xaxis: { anchor: 'y2' },
+          legend: { orientation: 'h', y: -0.12, font: { size: 10 } },
+          shapes: [line(limits.single, '#dc2626', `single sample ${limits.single}`, 'end'),
+                   line(limits.gmean, '#b45309', `geomean ${limits.gmean}`, 'start')],
+        }, { responsive: true, displayModeBar: false });
+      }, [hist, overlay]);
+
+      const csv = `/api/v1/water-quality/export.csv?beach=${encodeURIComponent(beach.key)}&days=${days}`;
+      const current = beach.stations.filter(s => beach.current_station_ids.includes(s.station_id));
+      return (
+        <div className="wq-detail">
+          <div className="row-flex" style={{ flexWrap: 'wrap', marginBottom: 8 }}>
+            <div className="location-tabs" style={{ margin: 0 }}>
+              {[[90, '3 mo'], [365, '1 yr'], [730, '2 yr'], [5000, 'All']].map(([d, l]) =>
+                <button key={d} className={days === d ? 'active' : ''} onClick={() => setDays(d)}>{l}</button>)}
+            </div>
+            <div className="location-tabs" style={{ margin: 0 }}>
+              {WQ_OVERLAYS.map(([k, l]) =>
+                <button key={k} className={overlay === k ? 'active' : ''} onClick={() => setOverlay(k)}>{l}</button>)}
+            </div>
+            <a className="wq-btn" href={csv} style={{ marginLeft: 'auto' }}>⬇ Export CSV</a>
+          </div>
+          {!hist && <p className="muted">Loading history…</p>}
+          {hist && hist.samples.length < 2 &&
+            <p className="muted">Only {hist.samples.length} sample so far — VCH publishes no history for this
+              beach, so the graph fills in as weekly reports are collected (May–September).</p>}
+          <div ref={ref} />
+          <table style={{ marginTop: 10 }}>
+            <thead><tr><th>Station</th><th>Sampled</th><th>E. coli</th><th>Salinity</th><th>Temp</th>
+              <th>Rain 24/48/72 h</th><th>Tide</th></tr></thead>
+            <tbody>{current.map(s => (
+              <tr key={s.station_id}>
+                <td>{s.station_label} <span className="muted">{s.station_id}{s.is_reference ? ' · reference' : ''}</span></td>
+                <td>{s.has_time ? s.sampled_at.replace('T', ' ') : s.sampled_at.slice(0, 10)}</td>
+                <td>{ecoliBadge(s.ecoli_raw, s.ecoli_num, limits)}{s.spike === 'jump' && <span title="≥3× this station's trailing median"> ⚡</span>}</td>
+                <td>{s.salinity_ppt != null ? `${s.salinity_ppt} PPT` : '—'}</td>
+                <td>{s.temp_c != null ? `${s.temp_c} °C` : '—'}</td>
+                <td>{s.rain_72h != null ? `${s.rain_24h} / ${s.rain_48h} / ${s.rain_72h} mm` : '—'}</td>
+                <td>{s.tide_m != null ? `${s.tide_m} m ${s.tide_dir === 'rising' ? '↑' : '↓'}` : '—'}</td>
+              </tr>))}</tbody>
+          </table>
+        </div>
+      );
+    }
+
+    function WaterQualityView() {
+      const [data, setData] = useState(null);
+      const [status, setStatus] = useState(null);
+      const [open, setOpen] = useState(null);
+      const [showRef, setShowRef] = useState(true);
+      const [showStatus, setShowStatus] = useState(false);
+      const [cruiseCsv, setCruiseCsv] = useState('');
+      const [msg, setMsg] = useState(null);
+
+      const load = () => {
+        fetch('/api/v1/water-quality/latest').then(r => r.json()).then(setData);
+        fetch('/api/wq/status').then(r => r.json()).then(setStatus);
+      };
+      useEffect(load, []);
+
+      const toggleStar = async (b, e) => {
+        e.stopPropagation();
+        await fetch('/api/wq/star', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ beach: b.key, starred: !b.starred }) });
+        load();
+      };
+      const fetchNow = async () => {
+        await fetch('/api/wq/fetch_now', { method: 'POST' });
+        setMsg('Collecting — reports, HealthSpace, rain + tide…');
+        setTimeout(() => { load(); setMsg(null); }, 25000);
+      };
+      const importCruise = async () => {
+        const r = await fetch('/api/wq/cruise', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                  body: JSON.stringify({ csv: cruiseCsv }) }).then(r => r.json());
+        setMsg(`Cruise calls: ${r.imported} imported, ${r.skipped} skipped`);
+        setCruiseCsv(''); load();
+      };
+
+      if (!data) return <div className="card"><p className="muted">Loading water quality…</p></div>;
+      const limits = data.limits;
+      const beaches = data.beaches.filter(b => showRef || !b.is_reference);
+      const failing = status ? status.runs.filter(r => !r.ok) : [];
+
+      return (
+        <div>
+          <h2>Beach Water Quality</h2>
+          <p className="muted">Vancouver Coastal Health samples weekly, May–September (plus next-day resamples after
+            any result ≥ {limits.single}). VCH only publishes the latest sample, so history accumulates here from the
+            first collection; Lions Bay and Bowen Island go back to 2014. E. coli in MPN/100 mL — the badge shows each
+            beach's worst station: <span className="badge badge-green">&lt; {limits.gmean}</span>{' '}
+            <span className="badge badge-orange">{limits.gmean}–{limits.single - 1}</span>{' '}
+            <span className="badge badge-red">≥ {limits.single}</span></p>
+
+          {failing.map(r => <div key={r.source} className="card wq-warn"><strong>{r.source}</strong>: {r.message}</div>)}
+
+          <div className="row-flex" style={{ marginBottom: 10, flexWrap: 'wrap' }}>
+            <label className="muted"><input type="checkbox" checked={showRef} onChange={e => setShowRef(e.target.checked)} /> show
+              reference sites (False Creek, Garry Point)</label>
+            <a className="wq-btn" href="/api/v1/water-quality/export.csv" style={{ marginLeft: 'auto' }}>⬇ All beaches CSV</a>
+            <button className="wq-btn" onClick={fetchNow}>Collect now</button>
+            <button className="wq-btn" onClick={() => setShowStatus(s => !s)}>Sources</button>
+          </div>
+          {msg && <p className="muted">{msg}</p>}
+
+          {showStatus && status && (
+            <div className="card">
+              <p className="muted" style={{ marginTop: 0 }}>{status.samples.n} samples · {status.samples.stations} stations ·
+                {' '}{status.samples.beaches} beaches · polled every 6 h · cruise calls: {status.cruise_calls.n}
+                {status.cruise_calls.n ? ` (${status.cruise_calls.first} → ${status.cruise_calls.last})` : ''}</p>
+              <table><thead><tr><th>Source</th><th>Last poll</th><th>Result</th></tr></thead>
+                <tbody>{status.runs.map(r => (
+                  <tr key={r.source}><td>{r.source}</td><td>{fmtTs(r.ran_at)}</td>
+                    <td><span className={`badge ${r.ok ? 'badge-green' : 'badge-red'}`}>{r.ok ? 'ok' : 'failed'}</span> {r.message}</td></tr>))}
+                </tbody></table>
+              <h4>Import cruise ship calls</h4>
+              <p className="muted">portvancouver.com blocks automated access, so paste the schedule as CSV:
+                <code> date,ship,arrival,departure,berth</code> (dates as 2027-05-01 or "May 1, 2027").</p>
+              <textarea value={cruiseCsv} onChange={e => setCruiseCsv(e.target.value)} rows={4}
+                        style={{ width: '100%', fontFamily: 'monospace', fontSize: '0.8rem' }}
+                        placeholder={'date,ship,arrival,departure,berth\n2027-05-01,Koningsdam,07:00,16:00,East'} />
+              <button className="wq-btn" disabled={!cruiseCsv.trim()} onClick={importCruise}>Import</button>
+            </div>
+          )}
+
+          <table className="wq-table">
+            <thead><tr><th></th><th>Beach</th><th>E. coli (worst)</th><th>Salinity</th><th>Temp</th>
+              <th>30-day geomean</th><th>Rain 72 h</th><th>Sampled</th></tr></thead>
+            <tbody>
+              {beaches.map(b => (
+                <React.Fragment key={b.key}>
+                  <tr className={`wq-row${open === b.key ? ' open' : ''}`} onClick={() => setOpen(open === b.key ? null : b.key)}>
+                    <td><button className={`wq-star${b.starred ? ' on' : ''}`} title={b.starred ? 'Unstar' : 'Star — pin to top'}
+                                onClick={(e) => toggleStar(b, e)}>{b.starred ? '★' : '☆'}</button></td>
+                    <td><strong>{b.beach}</strong> <span className="muted">{b.area}{b.is_reference ? ' · reference site' : ''} · {b.current_station_ids.length} stn</span></td>
+                    <td>{ecoliBadge(b.ecoli_worst_raw, b.ecoli_worst_num, limits)}
+                      {b.spike === 'jump' && <span title="≥3× the station's trailing median"> ⚡ spike</span>}</td>
+                    <td>{b.salinity_ppt != null ? `${b.salinity_ppt} PPT` : '—'}</td>
+                    <td>{b.temp_c != null ? `${b.temp_c} °C` : '—'}</td>
+                    <td>{b.vch_gmean != null ? ecoliBadge(b.vch_gmean, b.vch_gmean >= limits.gmean ? limits.single : 0, limits) : '—'}</td>
+                    <td>{b.rain_72h != null ? `${b.rain_72h} mm` : '—'}</td>
+                    <td>{b.sampled_at.slice(0, 10)} <span className="muted">{b.age_days === 0 ? 'today' : `${b.age_days} d ago`}</span></td>
+                  </tr>
+                  {open === b.key && <tr><td colSpan={8} style={{ background: '#f8fafc' }}><WaterQualityDetail beach={b} limits={limits} /></td></tr>}
+                </React.Fragment>
+              ))}
+            </tbody>
+          </table>
         </div>
       );
     }
