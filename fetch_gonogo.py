@@ -977,6 +977,96 @@ def _get_howe_sound_forecast_rows():
     return _get_marine_forecast_rows(URL_HOWE_SOUND)
 
 
+_DRY_PROB_MAX = 30     # % — a daytime max precip chance at/below this counts as dry
+_DRY_MM_MAX = 0.5      # mm — and daytime rain total below this
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _fetch_daytime_rain_10day(lat=49.3734, lon=-123.2718):
+    """Next 10 days of daytime (07:00–19:59) rain chance at Horseshoe Bay from
+    Open-Meteo: list of {date, prob (max %), mm (total)}. Cached 30 min."""
+    r = requests.get(
+        'https://api.open-meteo.com/v1/forecast',
+        params={
+            'latitude': lat, 'longitude': lon,
+            'hourly': 'precipitation_probability,precipitation',
+            'timezone': 'America/Vancouver',
+            'forecast_days': 10,
+        },
+        timeout=20,
+    )
+    r.raise_for_status()
+    h = r.json().get('hourly') or {}
+    days = {}
+    for t, p, mm in zip(h.get('time', []), h.get('precipitation_probability', []),
+                        h.get('precipitation', [])):
+        if not (7 <= int(t[11:13]) < 20):
+            continue
+        d = days.setdefault(t[:10], {'date': t[:10], 'prob': 0, 'mm': 0.0})
+        d['prob'] = max(d['prob'], p or 0)
+        d['mm'] += mm or 0.0
+    return list(days.values())[:10]
+
+
+def _draw_dry_spell_outlook(draw):
+    """10-day strip of daytime (07:00–20:00) rain chance; runs of 2+ dry days
+    are highlighted green and called out underneath."""
+    try:
+        days = _fetch_daytime_rain_10day()
+    except Exception as e:
+        print(f"Go/NoGo 10-day rain error: {e}")
+        draw.caption(f"10-day rain outlook unavailable: {e}")
+        return
+    if not days:
+        return
+    for d in days:
+        d['dry'] = d['prob'] <= _DRY_PROB_MAX and d['mm'] < _DRY_MM_MAX
+        d['dt'] = datetime.strptime(d['date'], '%Y-%m-%d')
+
+    # Runs of consecutive dry days; keep those of length >= 2
+    spans, run = [], []
+    for d in days + [{'dry': False}]:
+        if d['dry']:
+            run.append(d)
+        else:
+            if len(run) >= 2:
+                spans.append(run)
+            run = []
+    in_span = {id(d) for run in spans for d in run}
+
+    cells = []
+    for d in days:
+        if d['dry']:
+            bg, fg = ('#2ecc71', '#fff') if id(d) in in_span else ('#d5f5e3', '#1e8449')
+        elif d['prob'] <= 60 and d['mm'] < 2:
+            bg, fg = '#fdebd0', '#af601a'
+        else:
+            bg, fg = '#fadbd8', '#a93226'
+        cells.append(
+            f'<div style="flex:1 1 0;min-width:58px;background:{bg};color:{fg};'
+            f'border-radius:8px;padding:6px 2px;text-align:center;line-height:1.25">'
+            f'<div style="font-size:12px;font-weight:600">{d["dt"].strftime("%a")}</div>'
+            f'<div style="font-size:11px;opacity:.8">{d["dt"].strftime("%b %-d")}</div>'
+            f'<div style="font-size:18px;font-weight:700">{d["prob"]:.0f}%</div>'
+            f'<div style="font-size:11px">{d["mm"]:.1f} mm</div></div>')
+
+    draw.markdown("**Next 10 Days — Rain Chance 07:00–20:00**")
+    draw.markdown(
+        '<div style="display:flex;gap:6px;flex-wrap:wrap">' + ''.join(cells) + '</div>',
+        unsafe_allow_html=True)
+    if spans:
+        for run in spans:
+            a, b = run[0]['dt'], run[-1]['dt']
+            draw.markdown(
+                f"\u2600\ufe0f **Dry spell: {a.strftime('%a %b %-d')} – "
+                f"{b.strftime('%a %b %-d')} ({len(run)} days without rain)**")
+    else:
+        draw.caption("No stretch of 2+ dry days in the next 10 days.")
+    draw.caption(
+        f"Dry day = daytime rain chance ≤ {_DRY_PROB_MAX}% and < {_DRY_MM_MAX} mm. "
+        "Bright green = part of a 2+ day dry spell. Source: Open-Meteo, Horseshoe Bay.")
+
+
 def display_gonogo_page(container=None, page_links=None):
     """Full Go/No-Go page with heatmap chart and current conditions."""
     draw = container or st
@@ -996,6 +1086,9 @@ def display_gonogo_page(container=None, page_links=None):
     if pills:
         draw.markdown(pills, unsafe_allow_html=True)
 
+    draw.markdown("---")
+
+    _draw_dry_spell_outlook(draw)
     draw.markdown("---")
 
     # Current conditions — a fixed 3-column grid rendered strictly by

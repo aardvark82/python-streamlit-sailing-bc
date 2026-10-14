@@ -5,7 +5,7 @@ Repo: https://github.com/aardvark82/python-streamlit-sailing-bc
 Working dir: `C:\Users\acker\Dev\20250430 python-streamlit-sailing-bc`
 Run: `python -m streamlit run st.py` → http://localhost:8501
 Deploy: Streamlit Cloud, auto-deploys on push to `main`. Python 3.13.
-VERSION file is auto-bumped on each meaningful commit (currently 126).
+VERSION file is auto-bumped on each meaningful commit (currently 240).
 
 ## File map (active modules)
 
@@ -53,6 +53,7 @@ VERSION file is auto-bumped on each meaningful commit (currently 126).
 
 ## Recently fixed (last 20 commits)
 
+- v240 — Go/No-Go: "Next 10 Days — Rain Chance 07:00–20:00" strip at the top (Open-Meteo hourly precip probability + mm at Horseshoe Bay, daytime hours only). Dry day = max chance ≤30% and <0.5 mm; runs of 2+ dry days are bright green and listed as "Dry spell" lines (`_draw_dry_spell_outlook`).
 - v239 — Weekly Outlook cells: one-line tide pill (20 px font, filled with the tide-level colour), left 20 px band split Howe Sound (top) / Halibut Bank (bottom) wind coloured by `_color_for_speed` with the knots on it, right 20 px band = rain (green 0 / orange ≤ 2 mm / red > 2 mm) with the mm on it. W-Van gust number left the cell (still in hover). Bands are pixel-sized so the grid is desktop-first; on a phone the 40 px of bands eat most of a ~50 px cell.
 - v238 — Weekly Outlook: tide-level dot replaced by a 20 px colour band on the left edge of every cell (pixel-sized `add_shape` anchored on the bar's left edge); the this-hour outline is a shape above it.
 - v237 — Go/No-Go Weekly Outlook: wind-vs-tide predictor. Hourly Open-Meteo wind at Pam Rocks (Howe Sound, flood sets N) and Halibut Bank (Strait S of Nanaimo, flood sets NW) vs the interpolated Pt Atkinson flood/ebb; opposing wind ≥5 kts hatches the cell (╱ Howe, ╲ Strait, ✕ both; bigger hatch = stronger wind), Howe >10 kts lifts the slot to caution. Grid is now one `go.Bar` per cell (`_outlook_figure`, shared with kiosk) since heatmaps can't carry patterns; cells show tide dot+height+↑↓ and wind arrow+gust; hover has the full picture. Current hour uses observed Pam Rocks / Halibut Bank wind.
